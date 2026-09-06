@@ -42,6 +42,14 @@ interface HistoryDateGroup {
   key: string;
   label: string;
   threads: HistoryThread[];
+  preview?: ActiveChatPreview;
+}
+
+interface ActiveChatPreview {
+  title: string;
+  latestTimestamp: string;
+  mode: ChatMode | "mixed";
+  preferredMode: ChatMode;
 }
 
 const MAX_VISIBLE_HISTORY_THREADS = 100;
@@ -78,18 +86,25 @@ export function Sidebar({
   const historySearch = useChatStore((s) => s.historySearch);
   const setHistorySearch = useChatStore((s) => s.setHistorySearch);
   const sessionId = useChatStore((s) => s.sessionId);
+  const turns = useChatStore((s) => s.turns);
   const mode = useChatStore((s) => s.mode);
   const setMode = useChatStore((s) => s.setMode);
   const startNewChat = useChatStore((s) => s.startNewChat);
   const { removeThread, renameThread } = useHistory();
 
-  const filteredThreads = useMemo(() => {
-    return filterHistoryThreads(buildHistoryThreads(history), historySearch).slice(
-      0,
-      MAX_VISIBLE_HISTORY_THREADS,
-    );
-  }, [history, historySearch]);
-  const historyGroups = useMemo(() => groupHistoryThreads(filteredThreads), [filteredThreads]);
+  const historyThreads = useMemo(() => buildHistoryThreads(history), [history]);
+  const filteredThreads = useMemo(
+    () => filterHistoryThreads(historyThreads, historySearch).slice(0, MAX_VISIBLE_HISTORY_THREADS),
+    [historySearch, historyThreads],
+  );
+  const activeChatPreview = useMemo(
+    () => buildActiveChatPreview(turns, sessionId, historyThreads, historySearch),
+    [historySearch, historyThreads, sessionId, turns],
+  );
+  const historyGroups = useMemo(
+    () => groupHistoryThreads(filteredThreads, activeChatPreview),
+    [activeChatPreview, filteredThreads],
+  );
 
   const userLabel = signedOut ? "Sign in" : (whoAmI?.user_id ?? (loggedIn ? "Signed in" : "Guest"));
   const planLabel = signedOut
@@ -260,6 +275,7 @@ export function Sidebar({
       className={sidebarClassName}
       aria-label="Primary navigation"
       data-collapsed={isCollapsed ? "true" : "false"}
+      data-active-view={activeView}
     >
       <div className={styles.brand}>
         <div className={styles.brandHeader}>
@@ -412,7 +428,7 @@ export function Sidebar({
             </div>
             <ul className={styles.historyList}>
               {visibleWorkSessions.length > 0 && (
-                <li className={styles.historyGroup}>
+                <li className={`${styles.historyGroup} ${styles.historyGroupWork}`}>
                   <div className={styles.historyGroupLabel}>Work</div>
                   <ul className={styles.historyGroupItems}>
                     {visibleWorkSessions.map((item) => {
@@ -449,9 +465,40 @@ export function Sidebar({
                 </li>
               )}
               {historyGroups.map((group) => (
-                <li key={group.key} className={styles.historyGroup}>
+                <li key={group.key} className={`${styles.historyGroup} ${styles.historyGroupChat}`}>
                   <div className={styles.historyGroupLabel}>{group.label}</div>
                   <ul className={styles.historyGroupItems}>
+                    {group.preview && (
+                      <li className={styles.historyItemRow} data-current-chat-preview>
+                        <div
+                          className={`${styles.historyThreadSurface} ${
+                            activeView === "chat" ? styles.historyItemActive : ""
+                          }`}
+                          data-mode={group.preview.mode}
+                          title={group.preview.title}
+                        >
+                          <button
+                            type="button"
+                            className={styles.historySelectButton}
+                            aria-label={`${group.preview.title}. ${formatModeLabel(
+                              group.preview.mode,
+                            )}, ${formatHistoryDateTime(group.preview.latestTimestamp)}`}
+                            aria-current={activeView === "chat" ? "page" : undefined}
+                            onClick={() => onNavigateChat?.(group.preview!.preferredMode)}
+                          >
+                            <span className={styles.historyTitle} data-history-title>
+                              {group.preview.title}
+                            </span>
+                            <span className={styles.historyRight}>
+                              <span className={styles.historyMeta}>
+                                {formatModeLabel(group.preview.mode).toUpperCase()} ·{" "}
+                                {formatHistoryTime(group.preview.latestTimestamp)}
+                              </span>
+                            </span>
+                          </button>
+                        </div>
+                      </li>
+                    )}
                     {group.threads.map((thread) => {
                       const isCompare = thread.preferredMode === "compare";
                       const modeLabel = isCompare ? "Compare" : "Ask";
@@ -625,7 +672,7 @@ export function Sidebar({
                   </ul>
                 </li>
               ))}
-              {filteredThreads.length === 0 && (
+              {filteredThreads.length === 0 && !activeChatPreview && (
                 <li className={styles.historyEmpty}>
                   {historySearch.trim() ? "No chats match" : "No recent chats"}
                 </li>
@@ -678,8 +725,22 @@ function SessionProfileContent({
   );
 }
 
-function groupHistoryThreads(threads: HistoryThread[]): HistoryDateGroup[] {
+function groupHistoryThreads(
+  threads: HistoryThread[],
+  preview: ActiveChatPreview | null,
+): HistoryDateGroup[] {
   const groups = new Map<string, HistoryDateGroup>();
+
+  if (preview) {
+    const label = formatHistoryGroupLabel(preview.latestTimestamp);
+    const key = label || "unknown";
+    groups.set(key, {
+      key,
+      label: label || "Date unavailable",
+      threads: [],
+      preview,
+    });
+  }
 
   for (const thread of threads) {
     const label = formatHistoryGroupLabel(thread.latestTimestamp);
@@ -690,6 +751,46 @@ function groupHistoryThreads(threads: HistoryThread[]): HistoryDateGroup[] {
   }
 
   return [...groups.values()];
+}
+
+function buildActiveChatPreview(
+  turns: ReturnType<typeof useChatStore.getState>["turns"],
+  sessionId: string | null,
+  historyThreads: HistoryThread[],
+  historySearch: string,
+): ActiveChatPreview | null {
+  const firstTurn = turns[0];
+  const latestTurn = turns[turns.length - 1];
+  if (!firstTurn || !latestTurn) return null;
+
+  const normalizedSessionId = normalizeSessionId(sessionId);
+  if (
+    normalizedSessionId &&
+    historyThreads.some((thread) => normalizeSessionId(thread.sessionId) === normalizedSessionId)
+  ) {
+    return null;
+  }
+
+  const title = (firstTurn.submittedPrompt || firstTurn.prompt).trim() || "New chat";
+  const normalizedSearch = historySearch.trim().toLowerCase();
+  const searchableText = turns
+    .map((turn) => `${turn.submittedPrompt || turn.prompt} ${turn.prompt}`)
+    .join(" ")
+    .toLowerCase();
+  if (normalizedSearch && !searchableText.includes(normalizedSearch)) return null;
+
+  const modes = new Set(turns.map((turn) => turn.mode));
+  return {
+    title,
+    latestTimestamp: latestTurn.createdAt,
+    mode: modes.size > 1 ? "mixed" : latestTurn.mode,
+    preferredMode: latestTurn.mode,
+  };
+}
+
+function formatModeLabel(mode: ChatMode | "mixed"): string {
+  if (mode === "mixed") return "Mixed";
+  return mode === "compare" ? "Compare" : "Ask";
 }
 
 function formatHistoryGroupLabel(value: string, now = new Date()): string {

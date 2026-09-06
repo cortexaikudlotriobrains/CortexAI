@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Sidebar } from "../components/layout/Sidebar";
@@ -76,6 +76,76 @@ describe("Sidebar", () => {
     expect(useChatStore.getState().pendingNewSession).toBe(true);
     expect(useChatStore.getState().mode).toBe("compare");
     expect(screen.getByText("Quarterly planning")).toBeInTheDocument();
+  });
+
+  it("shows a newly submitted chat immediately and replaces the preview after persistence", () => {
+    const prompt = "how should a proper chicken biryani be cooked";
+    const timestamp = new Date().toISOString();
+    const existingTodayEntry = historyEntry({
+      id: 5,
+      sessionId: "existing-today-session",
+      prompt: "How much would an annuity pay",
+      response: "Existing response",
+      mode: "single",
+      provider: "openai",
+      model: "gpt-5.1",
+      timestamp,
+    });
+    useChatStore.setState({
+      history: [...historyEntries(), existingTodayEntry],
+      sessionId: null,
+      pendingNewSession: true,
+      turns: [
+        {
+          id: "pending-biryani",
+          mode: "single",
+          prompt,
+          submittedPrompt: prompt,
+          attachments: [],
+          responses: [],
+          status: "streaming",
+          createdAt: timestamp,
+        },
+      ],
+      activeTurnId: "pending-biryani",
+    });
+
+    render(<Sidebar onSelectThread={vi.fn()} activeView="chat" />);
+
+    const preview = screen.getByRole("button", { name: new RegExp(`${prompt}\\. Ask,`) });
+    expect(preview).toHaveAttribute("aria-current", "page");
+    expect(document.querySelector("[data-current-chat-preview]")).toBeInTheDocument();
+    expect(screen.getAllByText("Today")).toHaveLength(1);
+    expect(screen.queryByText("No recent chats")).not.toBeInTheDocument();
+
+    act(() => {
+      useChatStore.setState({
+        sessionId: "biryani-session",
+        pendingNewSession: false,
+        history: [
+          ...historyEntries(),
+          existingTodayEntry,
+          historyEntry({
+            id: 6,
+            sessionId: "biryani-session",
+            prompt,
+            response: "Persisted recipe",
+            mode: "single",
+            provider: "openai",
+            model: "gpt-5.4-mini",
+            timestamp,
+          }),
+        ],
+      });
+    });
+
+    expect(document.querySelector("[data-current-chat-preview]")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Today")).toHaveLength(1);
+    expect(screen.getAllByText(prompt)).toHaveLength(1);
+    expect(screen.getByRole("button", { name: new RegExp(`${prompt}\\. Ask,`) })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
   });
 
   it("collapses and expands the desktop sidebar while keeping icon actions usable", async () => {

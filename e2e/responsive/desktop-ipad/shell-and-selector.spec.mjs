@@ -200,6 +200,103 @@ test("desktop sidebar stays consistent across Chat, Work, Usage, and AI credits"
     await expect(page.locator('section[aria-label="Chat transcript"]')).toBeVisible();
 });
 
+test("desktop sidebar shows a new chat before the response is persisted", async ({
+    responsiveApp,
+}) => {
+    const { page, state } = responsiveApp;
+    await page.setViewportSize({ width: 1440, height: 900 });
+    state.history = [{
+        ...state.history[0],
+        id: 9001,
+        request_id: "existing-today-request",
+        session_id: "existing-today-session",
+        timestamp: new Date().toISOString(),
+        prompt: "How much would an annuity pay",
+        response: "Existing response",
+    }, ...state.history];
+    state.workSessions = [{
+        id: "work-session-pending-chat",
+        session_id: "work-history-pending-chat",
+        title: "Older Work history",
+        status: "completed",
+        agent_provider: "fake",
+        created_at: "2026-08-20T12:00:00Z",
+        updated_at: "2026-08-20T12:05:00Z",
+        latest_run_status: "completed",
+    }];
+    await page.reload();
+
+    const prompt = "how should a proper chicken biryani be cooked";
+    let releaseStream;
+    const streamGate = new Promise(resolve => {
+        releaseStream = resolve;
+    });
+    await page.route("**/v1/chat/stream", async route => {
+        await streamGate;
+        state.history = [{
+            ...state.history[0],
+            id: 9002,
+            request_id: "pending-sidebar-request",
+            session_id: "pending-sidebar-session",
+            timestamp: new Date().toISOString(),
+            prompt,
+            response: "Use layered rice and dum cooking.",
+        }, ...state.history];
+        await route.fulfill({
+            status: 200,
+            headers: { "content-type": "application/x-ndjson" },
+            body: toNdjson([
+                { type: "start", mode: "single", provider: "openai", model: "gpt-5.1" },
+                { type: "line", text: "Use layered rice and dum cooking." },
+                {
+                    type: "response_done",
+                    response: {
+                        request_id: "pending-sidebar-request",
+                        provider: "openai",
+                        model: "gpt-5.1",
+                        text: "Use layered rice and dum cooking.",
+                        latency_ms: 300,
+                        estimated_cost: 0.001,
+                        token_usage: {
+                            prompt_tokens: 10,
+                            completion_tokens: 10,
+                            total_tokens: 20,
+                        },
+                        web_source_items: [],
+                    },
+                },
+                { type: "done", session_id: "pending-sidebar-session" },
+            ]),
+        });
+    });
+
+    await page.locator("#promptInput").fill(prompt);
+    await page.locator("#submitBtn").click();
+
+    const sidebar = page.locator("aside[aria-label='Primary navigation']");
+    const preview = sidebar.locator("[data-current-chat-preview]");
+    const workRow = sidebar.getByRole("button", {
+        name: "Older Work history. Work, completed",
+    });
+    try {
+        await expect(
+            preview.getByRole("button", { name: new RegExp(`${prompt}\\. Ask,`) }),
+        ).toBeVisible();
+        await expect(preview.getByRole("button")).toHaveAttribute("aria-current", "page");
+        await expect(sidebar.getByText("Today", { exact: true })).toHaveCount(1);
+        const previewBox = await preview.boundingBox();
+        const workBox = await workRow.boundingBox();
+        expect(previewBox?.y).toBeLessThan(workBox?.y ?? Number.POSITIVE_INFINITY);
+    } finally {
+        releaseStream();
+    }
+
+    await expect(page.getByText("Use layered rice and dum cooking.")).toBeVisible();
+    await expect(preview).toHaveCount(0);
+    await expect(sidebar.getByText("Today", { exact: true })).toHaveCount(1);
+    await expect(sidebar.getByText(prompt, { exact: true })).toHaveCount(1);
+});
+
 test("desktop composer uses the refresh hairline shell and soft textarea focus state", async ({ responsiveApp }) => {
     const { page } = responsiveApp;
     await page.setViewportSize({ width: 1440, height: 900 });
