@@ -17,6 +17,7 @@ import type {
   SubscriptionPlanCode,
   SubscriptionStatus,
 } from "../types";
+import { formatAiCredits } from "../utils/aiCredits";
 import styles from "./PricingPage.module.css";
 
 interface PricingPageContentProps {
@@ -283,6 +284,9 @@ function resolvePlanAction({
   onCheckout: (planCode: SubscriptionPlanCode) => void;
   onPortal: () => void;
 }): PlanAction {
+  if (loggedIn && currentPlanCode === plan.code && (!billingEnabled || !canManage)) {
+    return { label: "Current plan", disabled: true, kind: "secondary" };
+  }
   if (!billingEnabled) return { label: "Unavailable", disabled: true, kind: "secondary" };
   if (!loggedIn) {
     return {
@@ -332,9 +336,19 @@ function resolvePlanAction({
 function planFeatures(plan: PublicBillingPlan): string[] {
   const allowances = plan.allowances;
   const classes = plan.features.allowed_billing_classes;
+  const workFeatures = plan.features.work_enabled
+    ? [
+        `CortexAI Work with up to ${plan.features.max_active_work_runs} active ${plan.features.max_active_work_runs === 1 ? "run" : "runs"}`,
+        plan.features.custom_mcp_enabled
+          ? "Verified connectors and custom MCP servers"
+          : "Verified Work connectors",
+        plan.features.action_tools_enabled ? "Approval-gated Work actions" : "Read-only Work tools",
+      ]
+    : ["Core Chat and Compare access"];
   return [
-    `${formatCount(allowances.ai_credits)} AI credits per month`,
+    `${formatAiCredits(allowances.ai_credits)} AI credits per month`,
     `Compare up to ${plan.features.max_compare_models} models`,
+    ...workFeatures,
     "Advanced Web Search draws from AI credits",
     "Improve Prompt draws from AI credits",
     "File upload is free; model processing uses AI credits",
@@ -354,10 +368,6 @@ function planSummary(code: SubscriptionPlanCode): string {
 
 function formatPrice(value: number): string {
   return value === 0 ? "$0" : `$${value.toFixed(2)}`;
-}
-
-function formatCount(value: number): string {
-  return new Intl.NumberFormat("en-US").format(value);
 }
 
 function isPaymentPastDue(status?: SubscriptionStatus): boolean {

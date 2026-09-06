@@ -13,7 +13,7 @@ from scripts.run_local_ci import (
     classify_ci_paths,
     python_files,
 )
-
+from scripts import release_gate
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -88,6 +88,24 @@ def test_pytest_uses_the_gate_private_temp_directory(monkeypatch, tmp_path):
     ]
 
 
+def test_release_gate_uses_a_repo_private_pytest_temp_directory(monkeypatch):
+    commands: list[tuple[str, ...]] = []
+
+    monkeypatch.setattr(release_gate, "_iter_python_files", lambda: [])
+    monkeypatch.setattr(
+        release_gate,
+        "_run",
+        lambda command, _label: commands.append(tuple(command)),
+    )
+
+    assert release_gate.main() == 0
+
+    pytest_command = next(command for command in commands if "pytest" in command)
+    basetemp = Path(pytest_command[pytest_command.index("--basetemp") + 1])
+    assert basetemp.name == "pytest"
+    assert basetemp.parent.parent == REPO_ROOT
+
+
 def test_api_image_build_defers_when_docker_is_unavailable(monkeypatch, capsys):
     monkeypatch.delenv("CORTEX_CI_REQUIRE_DOCKER", raising=False)
     monkeypatch.setattr("scripts.run_local_ci.shutil.which", lambda _name: None)
@@ -115,9 +133,7 @@ def test_api_image_build_blocks_when_available_build_fails(monkeypatch):
         return SimpleNamespace(returncode=0, stdout="")
 
     monkeypatch.delenv("CORTEX_CI_REQUIRE_DOCKER", raising=False)
-    monkeypatch.setattr(
-        "scripts.run_local_ci.shutil.which", lambda _name: "C:/tools/docker.exe"
-    )
+    monkeypatch.setattr("scripts.run_local_ci.shutil.which", lambda _name: "C:/tools/docker.exe")
     monkeypatch.setattr("scripts.run_local_ci._run", _fake_run)
 
     with pytest.raises(GateFailure, match="Command failed"):

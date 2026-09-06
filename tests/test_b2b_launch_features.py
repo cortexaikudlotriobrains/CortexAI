@@ -620,6 +620,9 @@ def _bootstrap_b2b_schema(database_url: str) -> None:
         ),
     )
 
+    from tests.billing_schema_helpers import add_subscription_grant_schema
+
+    add_subscription_grant_schema(metadata)
     metadata.create_all(engine)
     with engine.begin() as connection:
         connection.execute(

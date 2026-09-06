@@ -219,7 +219,7 @@ test("dark theme keeps the top Ask and Compare tabs legible", async ({ responsiv
     await page.getByRole("menuitem", { name: "Switch to dark theme" }).click();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 
-    const modeNavigation = page.getByRole("navigation", { name: "Chat mode" });
+    const modeNavigation = page.getByRole("navigation", { name: "Workspace mode" });
     const askTab = modeNavigation.getByRole("button", { name: "Ask" });
     const compareTab = modeNavigation.getByRole("button", { name: "Compare" });
 

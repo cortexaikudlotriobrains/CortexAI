@@ -80,6 +80,9 @@ psql "$env:MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260802_
 psql "$env:MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260804_add_generation_budget_audit.sql
 psql "$env:MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260807_add_cache_aware_credit_accounting.sql
 psql "$env:MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260811_add_direct_s3_attachment_upload.sql
+psql "$env:MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260820_add_cortex_work_mode.sql
+psql "$env:MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260829_add_work_web_output_and_model_identity.sql
+psql "$env:MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260905_add_subscription_grants.sql
 ```
 
 The `20260727` script alters `llm_requests`, so the migration connection must
@@ -87,6 +90,73 @@ own that table. The later unified-credit and activity scripts depend on the
 `20260718` billing foundation. PostgreSQL startup validates the complete table
 and column contract, including generation-budget audit fields, and exits before serving provider traffic if any script is
 missing.
+
+`20260820_add_cortex_work_mode.sql` expands the existing session-mode check and
+adds Work-owned tables/indexes without deleting or rewriting existing data. It
+must be applied before `CORTEX_WORK_ENABLED=true`; Work schema preflight fails
+startup when the flag is enabled and a required table/column is absent. Rollback
+is the feature flag and prior application build. Retain the additive tables for
+billing/approval audit and provider-session recovery.
+
+`20260829_add_work_web_output_and_model_identity.sql` adds the server-owned Work
+output ceiling and one-time enforcement markers, actual provider/Agent/billing
+identity, and the `output_limit_reached` status. Apply it after the base Work
+migration and before deploying an API that enables Work schema preflight.
+
+### Cortex-issued subscription grant migration
+
+`20260905_add_subscription_grants.sql` creates `subscription_grants` and adds
+nullable `usage_periods.subscription_grant_id` without modifying historical
+subscription/payment/counter rows. The grant lifecycle allows only Plus/Pro
+and one open row per billing account. Usage-period uniqueness is split into
+non-grant `(billing_account_id, starts_at)` and grant
+`(subscription_grant_id, starts_at)` partial indexes, so a grant change never
+overwrites another source's history.
+
+Drain/stop all API replicas and period-writing workers before applying this
+migration with the table-owner connection, then deploy/restart the matching
+application build. Old binaries cannot infer the new partial index with their
+old `ON CONFLICT` statement. Keep `BILLING_ENABLED=false`; verify the runtime
+role can read grants and the trusted operator role can insert/update them and
+manage normal billing accounts/periods. See [grant operations](subscription-grants.md)
+for commands, monthly anchors and forward-recovery constraints.
+
+```sql
+SELECT to_regclass('public.subscription_grants');
+SELECT column_name, is_nullable
+FROM information_schema.columns
+WHERE table_schema = 'public' AND table_name = 'usage_periods'
+  AND column_name = 'subscription_grant_id';
+
+SELECT indexname, indexdef FROM pg_indexes
+WHERE schemaname = 'public' AND indexname IN (
+  'uq_subscription_grants_one_active_per_account',
+  'ix_subscription_grants_account_time',
+  'uq_usage_period_account_start', 'uq_usage_period_grant_start'
+);
+SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint
+WHERE conrelid IN ('public.subscription_grants'::regclass,
+                  'public.usage_periods'::regclass)
+ORDER BY conname;
+
+-- Expected: no duplicate open grants, including elapsed rows awaiting retirement.
+SELECT billing_account_id, count(*) FROM public.subscription_grants
+WHERE status = 'active' GROUP BY billing_account_id HAVING count(*) > 1;
+
+-- Run as runtime role: expect true. Operator role additionally needs INSERT/UPDATE.
+SELECT has_table_privilege(current_user, 'public.subscription_grants', 'SELECT');
+
+SELECT p.id, p.plan_code, p.starts_at, p.ends_at, p.subscription_id,
+       p.subscription_grant_id, g.expires_at
+FROM public.usage_periods p
+JOIN public.subscription_grants g ON g.id = p.subscription_grant_id
+ORDER BY p.created_at DESC LIMIT 20;
+```
+
+Expected: the nullable source column and four indexes exist, Stripe and grant
+sources cannot both be set, and each grant period ends no later than grant
+expiry. Reapply the migration in staging to verify idempotency. Revoking access
+uses the operator CLI; retain the additive schema and all audit/usage rows.
 
 ### Direct-S3 attachment lifecycle migration
 

@@ -3,6 +3,7 @@ import type {
   EntitlementsResponse,
   SubscriptionMeterKey,
 } from "../../types";
+import { formatAiCredits, toDisplayAiCredits } from "../../utils/aiCredits";
 import { PlanBadge } from "./PlanBadge";
 import styles from "./UsageAllowance.module.css";
 
@@ -51,7 +52,6 @@ export function UsageAllowance({
             counter={entitlements.allowances[key]!}
             key={key}
             label={compact ? shortLabel : label}
-            meter={key}
           />
         ))}
       </div>
@@ -62,19 +62,14 @@ export function UsageAllowance({
 function AllowanceItem({
   counter,
   label,
-  meter,
 }: {
   counter: AllowanceCounter;
   label: string;
-  meter: SubscriptionMeterKey;
 }) {
   const consumed = Math.max(0, counter.used + counter.reserved);
   const percent = counter.limit > 0 ? Math.min(100, (consumed / counter.limit) * 100) : 100;
   const exhausted = counter.remaining <= 0;
-  const value = `${formatQuantity(counter.remaining, meter)} left of ${formatQuantity(
-    counter.limit,
-    meter,
-  )}`;
+  const value = `${formatAiCredits(counter.remaining)} left of ${formatAiCredits(counter.limit)}`;
 
   return (
     <article className={styles.item} data-exhausted={exhausted ? "true" : "false"}>
@@ -87,18 +82,14 @@ function AllowanceItem({
         role="progressbar"
         aria-label={`${label}: ${value}`}
         aria-valuemin={0}
-        aria-valuemax={counter.limit}
-        aria-valuenow={consumed}
+        aria-valuemax={toDisplayAiCredits(counter.limit)}
+        aria-valuenow={toDisplayAiCredits(consumed)}
+        aria-valuetext={value}
       >
         <span style={{ width: `${percent}%` }} />
       </div>
     </article>
   );
-}
-
-function formatQuantity(value: number, meter: SubscriptionMeterKey): string {
-  void meter;
-  return new Intl.NumberFormat().format(value);
 }
 
 function formatDate(value: string): string {

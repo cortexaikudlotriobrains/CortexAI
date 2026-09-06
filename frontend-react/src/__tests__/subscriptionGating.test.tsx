@@ -70,8 +70,8 @@ describe("subscription feature gating", () => {
     );
     expect(screen.getByRole("heading", { name: "Plan allowances" })).toBeInTheDocument();
     expect(
-      screen.getByRole("progressbar", { name: "AI credits: 90,000 left of 100,000" }),
-    ).toHaveAttribute("aria-valuenow", "10000");
+      screen.getByRole("progressbar", { name: "AI credits: 90 left of 100" }),
+    ).toHaveAttribute("aria-valuenow", "10");
 
     await user.click(screen.getByRole("button", { name: "Manage billing" }));
     expect(manage).toHaveBeenCalledTimes(1);

@@ -241,9 +241,13 @@ def webhook_harness(monkeypatch):
             unique=True,
         ),
     )
+    from tests.billing_schema_helpers import add_subscription_grant_schema
+
+    subscription_grants = add_subscription_grant_schema(metadata)
     tables = {
         table.name: table
         for table in (
+            subscription_grants,
             users,
             billing_accounts,
             subscriptions,

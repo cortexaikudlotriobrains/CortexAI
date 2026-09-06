@@ -6,8 +6,23 @@ from server.app import create_app
 from server.billing.reservation_cleanup import ReservationCleanupStats
 from server.billing.schema_preflight import (
     BillingSchemaPreflightError,
+    REQUIRED_BILLING_SCHEMA,
     validate_billing_schema,
 )
+
+
+def test_schema_preflight_requires_grants_and_period_source(monkeypatch):
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE usage_periods (id TEXT)"))
+    monkeypatch.setattr(
+        "server.billing.schema_preflight.REQUIRED_BILLING_SCHEMA",
+        {name: REQUIRED_BILLING_SCHEMA[name] for name in ("subscription_grants", "usage_periods")},
+    )
+    with pytest.raises(BillingSchemaPreflightError) as exc:
+        validate_billing_schema(engine=engine, schema="main")
+    assert "table main.subscription_grants" in exc.value.missing
+    assert "column main.usage_periods.subscription_grant_id" in exc.value.missing
 
 
 def test_schema_preflight_reports_missing_credit_transactions(monkeypatch):
@@ -47,6 +62,7 @@ def test_postgres_startup_fails_before_serving_when_billing_schema_is_missing(
     from server.billing import schema_preflight
 
     monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://unused:unused@localhost/unused")
+    monkeypatch.setenv("CORTEX_WORK_ENABLED", "false")
     monkeypatch.setenv("ENABLE_ATTACHMENTS_CLEANUP_WORKER", "false")
     monkeypatch.setenv("ENABLE_BILLING_RESERVATION_CLEANUP_WORKER", "false")
     monkeypatch.setattr(
@@ -70,6 +86,7 @@ def test_postgres_startup_runs_one_reservation_cleanup_cycle(monkeypatch):
 
     cleanup_calls: list[int] = []
     monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://unused:unused@localhost/unused")
+    monkeypatch.setenv("CORTEX_WORK_ENABLED", "false")
     monkeypatch.setenv("ENABLE_ATTACHMENTS_CLEANUP_WORKER", "false")
     monkeypatch.setenv("ENABLE_BILLING_RESERVATION_CLEANUP_WORKER", "true")
     monkeypatch.setenv("BILLING_RESERVATION_STALE_AFTER_SECONDS", "1800")

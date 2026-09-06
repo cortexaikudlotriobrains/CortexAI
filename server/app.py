@@ -28,6 +28,8 @@ from server.routes import (
     history,
     optimize,
     reporting,
+    tools,
+    work,
     whoami,
 )
 
@@ -97,6 +99,8 @@ async def lifespan(app: FastAPI):
     attachment_cleanup_stop_event: asyncio.Event | None = None
     reservation_cleanup_task: asyncio.Task | None = None
     reservation_cleanup_stop_event: asyncio.Event | None = None
+    work_reconciler_task: asyncio.Task | None = None
+    work_reconciler_stop_event: asyncio.Event | None = None
 
     plan_catalog = get_plan_catalog()
     logger.info(
@@ -163,6 +167,14 @@ async def lifespan(app: FastAPI):
             logger.info(
                 "Direct attachment upload schema preflight passed",
                 extra={"extra_fields": {"event": "attachment.schema_preflight.passed"}},
+            )
+        if _env_bool("CORTEX_WORK_ENABLED", default=False):
+            from server.work.schema_preflight import validate_work_schema
+
+            validate_work_schema()
+            logger.info(
+                "CortexAI Work database schema preflight passed",
+                extra={"extra_fields": {"event": "work.schema_preflight.passed"}},
             )
     else:
         logger.info(
@@ -391,7 +403,71 @@ async def lifespan(app: FastAPI):
             },
         )
 
+    if postgres_runtime and _env_bool("CORTEX_WORK_ENABLED", default=False):
+        from server.work.config import load_work_config
+        from server.work import reconciler as work_reconciler
+
+        work_config = load_work_config()
+        if work_config.reconciler_enabled:
+            work_reconciler_stop_event = asyncio.Event()
+
+            async def _work_reconciliation_loop():
+                while not work_reconciler_stop_event.is_set():
+                    try:
+                        stats = await asyncio.to_thread(
+                            work_reconciler.run_reconciliation_cycle,
+                            config=work_config,
+                        )
+                        if stats["examined"] or stats["errors"]:
+                            logger.info(
+                                "Cortex Work reconciliation cycle completed",
+                                extra={
+                                    "extra_fields": {
+                                        "event": "work.reconciler.cycle_completed",
+                                        **stats,
+                                    }
+                                },
+                            )
+                    except Exception:
+                        logger.exception(
+                            "Cortex Work reconciliation cycle failed",
+                            extra={
+                                "extra_fields": {
+                                    "event": "work.reconciler.cycle_failed",
+                                }
+                            },
+                        )
+                    try:
+                        await asyncio.wait_for(
+                            work_reconciler_stop_event.wait(),
+                            timeout=work_config.reconciler_interval_seconds,
+                        )
+                    except TimeoutError:
+                        continue
+
+            work_reconciler_task = asyncio.create_task(
+                _work_reconciliation_loop(),
+                name="cortex-work-reconciler",
+            )
+            logger.info(
+                "Cortex Work reconciliation worker started",
+                extra={
+                    "extra_fields": {
+                        "event": "work.reconciler.worker_started",
+                        "interval_seconds": work_config.reconciler_interval_seconds,
+                    }
+                },
+            )
+
     yield
+
+    if work_reconciler_stop_event is not None:
+        work_reconciler_stop_event.set()
+    if work_reconciler_task is not None:
+        try:
+            await asyncio.wait_for(work_reconciler_task, timeout=5)
+        except Exception:
+            work_reconciler_task.cancel()
 
     if reservation_cleanup_stop_event is not None:
         reservation_cleanup_stop_event.set()
@@ -479,6 +555,8 @@ def create_app() -> FastAPI:
     app.include_router(billing.router)
     app.include_router(catalog.router)
     app.include_router(files.router)
+    app.include_router(work.router)
+    app.include_router(tools.router)
 
     @app.get("/runtime-config.js", include_in_schema=False)
     async def frontend_runtime_config(request: Request):

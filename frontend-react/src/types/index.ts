@@ -217,6 +217,11 @@ export interface PublicBillingPlanFeatures {
   research_enabled: boolean;
   prompt_improvement_enabled: boolean;
   file_analysis_enabled: boolean;
+  work_enabled?: boolean;
+  verified_connectors_enabled?: boolean;
+  custom_mcp_enabled?: boolean;
+  action_tools_enabled?: boolean;
+  max_active_work_runs?: number;
   allowed_billing_classes: ModelBillingClass[];
 }
 
@@ -269,6 +274,10 @@ export interface EntitlementsResponse {
     usage_export_enabled: boolean;
     saved_history_enabled: boolean;
     models_catalog_enabled: boolean;
+    work_enabled?: boolean;
+    verified_connectors_enabled?: boolean;
+    custom_mcp_enabled?: boolean;
+    action_tools_enabled?: boolean;
   };
   model_access: {
     allowed_billing_classes: ModelBillingClass[];
@@ -276,6 +285,10 @@ export interface EntitlementsResponse {
   limits: {
     max_files_per_request: number;
     max_file_bytes: number;
+    max_active_work_runs?: number;
+    max_tool_connections?: number;
+    max_mcp_servers_per_run?: number;
+    max_work_credit_budget?: number;
   };
   allowances: Partial<Record<SubscriptionMeterKey, AllowanceCounter>>;
   period: {
@@ -670,6 +683,136 @@ export interface PromptOptimizationState {
   note?: string;
   optimizationStatus?: string;
   fallbackReason?: string;
+}
+
+export type WorkSessionStatus =
+  | "idle"
+  | "running"
+  | "waiting_for_approval"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export type WorkRunStatus =
+  | "created"
+  | "planning"
+  | "running"
+  | "waiting_for_approval"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "budget_exhausted"
+  | "output_limit_reached";
+
+export type WorkWebMode = "auto" | "on" | "off";
+
+export interface WorkSession {
+  id: string;
+  session_id: string;
+  title: string | null;
+  status: WorkSessionStatus;
+  agent_provider: string;
+  created_at: string;
+  updated_at: string;
+  latest_run_status: WorkRunStatus | null;
+}
+
+export interface WorkRun {
+  id: string;
+  work_session_id: string;
+  request_id: string;
+  instruction: string;
+  status: WorkRunStatus;
+  provider: string;
+  max_credit_budget: number;
+  max_output_tokens: number;
+  actual_output_tokens: number;
+  reserved_credits: number;
+  actual_credits: number;
+  provider_model_id: string | null;
+  billing_model_id: string | null;
+  billing_model_source: string | null;
+  provider_agent_id: string | null;
+  provider_agent_version: number | null;
+  output_finalize_requested_at: string | null;
+  output_limit_interrupt_requested_at: string | null;
+  configuration_snapshot: Record<string, unknown>;
+  usage_snapshot: Record<string, unknown>;
+  stop_reason: string | null;
+  error_code: string | null;
+  error_message: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkEvent {
+  id: string;
+  sequence: number;
+  type: string;
+  display_message: string | null;
+  payload: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface WorkEventsResponse {
+  items: WorkEvent[];
+  latest_sequence: number;
+}
+
+export interface WorkArtifact {
+  id: string;
+  file_id: string;
+  role: "input" | "artifact";
+  source: "user" | "agent" | "connector";
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  artifact_type: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface WorkApproval {
+  id: string;
+  work_run_id: string;
+  tool_call_id: string;
+  connection_id: string | null;
+  action_type: string;
+  tool_name: string;
+  description: string;
+  request_payload: Record<string, unknown>;
+  status: "pending" | "approved" | "denied" | "expired";
+  requested_at: string;
+  decided_at: string | null;
+}
+
+export interface ToolCatalogItem {
+  connector_key: string;
+  display_name: string;
+  description: string;
+  icon: string;
+  connection_state: string;
+  plan_requirement: string;
+  capabilities: string[];
+  risk_classes: string[];
+  configuration_required: boolean;
+}
+
+export interface ToolConnection {
+  id: string;
+  connector_key: string;
+  connection_type: "cortex_builtin" | "mcp_remote";
+  display_name: string;
+  server_url: string | null;
+  auth_type: string;
+  status: "pending" | "connected" | "expired" | "error" | "disabled";
+  granted_scopes: string[];
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  last_verified_at: string | null;
 }
 
 export interface ModelKey {

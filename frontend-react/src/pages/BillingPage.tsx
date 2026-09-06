@@ -17,6 +17,7 @@ import type {
   SubscriptionMeterKey,
   SubscriptionStatus,
 } from "../types";
+import { formatAiCredits, toDisplayAiCredits } from "../utils/aiCredits";
 import styles from "./BillingPage.module.css";
 
 interface BillingPageContentProps {
@@ -103,7 +104,8 @@ export function BillingPageContent({
   const paymentPastDue = isPaymentPastDue(status);
   const cancelled = isCancelled(status);
   const paidPlan = Boolean(plan && plan.code !== "free");
-  const canManage = Boolean(subscription?.can_manage);
+  const cortexGrant = plan?.source === "cortex_grant";
+  const canManage = Boolean(!cortexGrant && subscription?.can_manage);
   const periodEnd = plan?.renews_at ?? subscription?.current_period_end ?? null;
 
   return (
@@ -146,11 +148,13 @@ export function BillingPageContent({
 
       {loggedIn && entitlements && plan ? (
         <>
-          {!billingEnabled ? (
+          {cortexGrant || !billingEnabled ? (
             <div className={`${styles.banner} ${styles.bannerNeutral}`} role="status">
               <CortexIcon name="cost" size={18} />
               <span>
-                Paid billing is unavailable in this environment. Free allowances remain active.
+                {cortexGrant
+                  ? "Your plan access is provided by CortexAI. Online billing and payment management are not currently enabled for this access."
+                  : "Online billing is currently unavailable. Your current plan allowances remain active."}
               </span>
             </div>
           ) : null}
@@ -192,12 +196,14 @@ export function BillingPageContent({
                 <div>
                   <h2>{plan.display_name}</h2>
                   <p>
-                    {periodCopy({
-                      status,
-                      paidPlan,
-                      cancelAtPeriodEnd: plan.cancel_at_period_end,
-                      periodEnd,
-                    })}
+                    {cortexGrant
+                      ? `Usage resets ${formatDate(periodEnd)}`
+                      : periodCopy({
+                          status,
+                          paidPlan,
+                          cancelAtPeriodEnd: plan.cancel_at_period_end,
+                          periodEnd,
+                        })}
                   </p>
                 </div>
                 <div className={styles.planMark}>
@@ -219,7 +225,7 @@ export function BillingPageContent({
                         : "Manage subscription"}
                   </button>
                 ) : null}
-                {!billingEnabled ? (
+                {!billingEnabled && !cortexGrant ? (
                   <button type="button" className={styles.secondaryButton} disabled>
                     Billing unavailable
                   </button>
@@ -261,7 +267,7 @@ function UsageRow({ label, counter }: { label: string; counter?: AllowanceCounte
       <div className={styles.usageLabel}>
         <span>{label}</span>
         <strong>
-          {limit > 0 ? `${formatCount(used)} / ${formatCount(limit)}` : "Not included"}
+          {limit > 0 ? `${formatAiCredits(used)} / ${formatAiCredits(limit)}` : "Not included"}
         </strong>
       </div>
       <div
@@ -269,8 +275,9 @@ function UsageRow({ label, counter }: { label: string; counter?: AllowanceCounte
         role="progressbar"
         aria-label={label}
         aria-valuemin={0}
-        aria-valuemax={limit}
-        aria-valuenow={Math.min(used, limit)}
+        aria-valuemax={toDisplayAiCredits(limit)}
+        aria-valuenow={toDisplayAiCredits(Math.min(used, limit))}
+        aria-valuetext={`${formatAiCredits(used)} of ${formatAiCredits(limit)} AI credits used`}
       >
         <span style={{ width: `${percentage}%` }} />
       </div>
@@ -340,10 +347,6 @@ function formatDate(value: string | null): string {
     year: "numeric",
     timeZone: "UTC",
   }).format(date);
-}
-
-function formatCount(value: number): string {
-  return new Intl.NumberFormat("en-US").format(value);
 }
 
 function isPaymentPastDue(status?: SubscriptionStatus): boolean {

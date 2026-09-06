@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "CortexAI B2B API (Complete)",
-    "description": "Postman collection for CortexAI API-first contract validation: health/runtime diagnostics, browser lifecycle diagnostics, display-safe billing plans/current subscription, effective entitlements, server-owned Stripe Checkout/Portal sessions and webhooks, catalog discovery, legacy and direct-to-S3 file upload/status/deletion, chat/compare (sync + streaming), unified-credit Cortex Analysis runs, BYOK, history, reporting/exports, optimize, and admin diagnostics. Cache-aware accounting preserves the existing credit economy, starts in shadow mode, and exposes cache/read/write audit fields plus informational savings. Fresh Tavily research settles as provider credits used x 5,000 Cortex credits after a 10,000-credit normal-search reservation; cached/reused research is not charged again. DATABASE_URL is required at API startup, and PostgreSQL startup fails early when required billing migrations are missing. Reverse-proxy handling defaults to ENABLE_PROXY_HEADERS=true and TRUSTED_PROXY_IPS=*. Session cookies auto-detect HTTPS for the Secure attribute and default to SESSION_MAX_AGE_SECONDS=604800; Cognito endpoint TLS verification defaults to COGNITO_SSL_VERIFY=true.",
+    "description": "Postman collection for CortexAI API-first contract validation: health/runtime diagnostics, browser lifecycle diagnostics, display-safe billing plans/current subscription, effective entitlements, server-owned Stripe Checkout/Portal sessions and webhooks, catalog discovery, legacy and direct-to-S3 file upload/status/deletion, chat/compare (sync + streaming), durable CortexAI Work sessions/runs/events/approvals/artifacts/tool connections, unified-credit Cortex Analysis runs, BYOK, history, reporting/exports, optimize, and admin diagnostics. Cache-aware accounting preserves the existing credit economy, starts in shadow mode, and exposes cache/read/write audit fields plus informational savings. Fresh Tavily research settles as provider credits used x 5,000 Cortex credits after a 10,000-credit normal-search reservation; cached/reused research is not charged again. DATABASE_URL is required at API startup, and PostgreSQL startup fails early when required billing migrations are missing. Reverse-proxy handling defaults to ENABLE_PROXY_HEADERS=true and TRUSTED_PROXY_IPS=*. Session cookies auto-detect HTTPS for the Secure attribute and default to SESSION_MAX_AGE_SECONDS=604800; Cognito endpoint TLS verification defaults to COGNITO_SSL_VERIFY=true.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -71,6 +71,26 @@
     },
     {
       "key": "attachment_upload_url",
+      "value": ""
+    },
+    {
+      "key": "work_session_id",
+      "value": ""
+    },
+    {
+      "key": "work_run_id",
+      "value": ""
+    },
+    {
+      "key": "work_approval_id",
+      "value": ""
+    },
+    {
+      "key": "work_artifact_file_id",
+      "value": ""
+    },
+    {
+      "key": "tool_connection_id",
       "value": ""
     }
   ],
@@ -207,7 +227,7 @@
               }
             ],
             "url": "{{base_url}}/v1/entitlements",
-            "description": "Returns the server-resolved plan, lifecycle state, features, model access categories, server-owned file limits, current period, and unified AI-credit allowance. BILLING_ENABLED=false resolves Free without Stripe."
+            "description": "Returns the server-resolved plan, lifecycle state, features, model access categories, server-owned file limits, current period, and unified AI-credit allowance. BILLING_ENABLED controls Stripe availability. When false, valid Cortex grants resolve Plus/Pro with plan.source=cortex_grant; other users resolve Free. Grant usage resets monthly from its UTC start, clipped at expiry. Grant management is operator CLI only."
           },
           "event": [
             {
@@ -1642,6 +1662,257 @@
               }
             }
           ]
+        }
+      ]
+    },
+    {
+      "name": "CortexAI Work and Tools",
+      "description": "Requires signed-session/Cognito identity, CORTEX_WORK_ENABLED=true, the 20260820 migration, and a Plus/Pro entitlement. Live runs additionally require configured Managed Agent resources. Work session history is chronological and keeps earlier prompts, outcomes, and deliverables visible after follow-up instructions.",
+      "item": [
+        {
+          "name": "POST /v1/work/sessions",
+          "request": {
+            "method": "POST",
+            "description": "Creates a durable Work session. The optional title is limited to 200 characters and normalized to a provider-safe single line by collapsing whitespace and removing Unicode control or format characters.",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{bearer_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"Postman Work task\"\n}" },
+            "url": "{{base_url}}/v1/work/sessions"
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "pm.test('Work session response is explicit', function () { pm.expect([201, 403, 404, 503]).to.include(pm.response.code); });",
+                "if (pm.response.code === 201) { pm.collectionVariables.set('work_session_id', pm.response.json().id); }"
+              ]
+            }
+          }]
+        },
+        {
+          "name": "GET /v1/work/sessions",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{bearer_token}}" }],
+            "url": "{{base_url}}/v1/work/sessions"
+          }
+        },
+        {
+          "name": "GET /v1/work/sessions/{id}/runs",
+          "request": {
+            "method": "GET",
+            "description": "Returns every owned run in chronological order so a client can rebuild the complete Work transcript, including earlier outcomes and deliverables.",
+            "header": [{ "key": "Authorization", "value": "Bearer {{bearer_token}}" }],
+            "url": "{{base_url}}/v1/work/sessions/{{work_session_id}}/runs"
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "pm.test('run history is chronological', function () { pm.expect(pm.response.code).to.eql(200); const rows = pm.response.json(); for (let i = 1; i < rows.length; i += 1) { pm.expect(new Date(rows[i - 1].created_at).getTime()).to.be.at.most(new Date(rows[i].created_at).getTime()); } });",
+                "if (pm.response.code === 200 && pm.response.json().length) { pm.collectionVariables.set('work_run_id', pm.response.json()[pm.response.json().length - 1].id); }"
+              ]
+            }
+          }]
+        },
+        {
+          "name": "POST /v1/work/sessions/{id}/runs",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{bearer_token}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{$guid}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"instruction\": \"Analyze the attached source and prepare a concise report.\",\n  \"input_file_ids\": [],\n  \"enabled_connection_ids\": [],\n  \"web_mode\": \"auto\",\n  \"max_credit_budget\": 250000\n}" },
+            "url": "{{base_url}}/v1/work/sessions/{{work_session_id}}/runs"
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "pm.test('start is accepted or returns a structured gate', function () { pm.expect([202, 402, 403, 404, 409, 422, 502, 503]).to.include(pm.response.code); });",
+                "if (pm.response.code === 202) { pm.collectionVariables.set('work_run_id', pm.response.json().id); }"
+              ]
+            }
+          }]
+        },
+        {
+          "name": "GET /v1/work/runs/{id}",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{bearer_token}}" }],
+            "url": "{{base_url}}/v1/work/runs/{{work_run_id}}"
+          }
+        },
+        {
+          "name": "GET /v1/work/runs/{id}/events",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{bearer_token}}" }],
+            "url": "{{base_url}}/v1/work/runs/{{work_run_id}}/events?after_sequence=0"
+          }
+        },
+        {
+          "name": "GET /v1/work/runs/{id}/stream",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{bearer_token}}" },
+              { "key": "Accept", "value": "text/event-stream" },
+              { "key": "Last-Event-ID", "value": "0" }
+            ],
+            "url": "{{base_url}}/v1/work/runs/{{work_run_id}}/stream?after_sequence=0"
+          }
+        },
+        {
+          "name": "POST /v1/work/sessions/{id}/instructions",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{bearer_token}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{$guid}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"instruction\": \"Refine the outcome into an executive summary.\",\n  \"input_file_ids\": [],\n  \"enabled_connection_ids\": [],\n  \"web_mode\": \"auto\",\n  \"max_credit_budget\": 250000\n}" },
+            "url": "{{base_url}}/v1/work/sessions/{{work_session_id}}/instructions"
+          }
+        },
+        {
+          "name": "POST /v1/work/runs/{id}/cancel",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{bearer_token}}" }],
+            "url": "{{base_url}}/v1/work/runs/{{work_run_id}}/cancel"
+          }
+        },
+        {
+          "name": "GET /v1/work/runs/{id}/artifacts",
+          "request": {
+            "method": "GET",
+            "description": "Returns Cortex-owned deliverables. For terminal runs, this request first retries any missing provider outputs idempotently from the provider session recorded on the originating run; one failed file does not suppress other valid deliverables.",
+            "header": [{ "key": "Authorization", "value": "Bearer {{bearer_token}}" }],
+            "url": "{{base_url}}/v1/work/runs/{{work_run_id}}/artifacts"
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "if (pm.response.code === 200 && pm.response.json().length) { pm.collectionVariables.set('work_artifact_file_id', pm.response.json()[0].file_id); }"
+              ]
+            }
+          }]
+        },
+        {
+          "name": "GET /v1/work/runs/{id}/artifacts/{file_id}/download",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{bearer_token}}" }],
+            "url": "{{base_url}}/v1/work/runs/{{work_run_id}}/artifacts/{{work_artifact_file_id}}/download"
+          }
+        },
+        {
+          "name": "GET /v1/work/approvals/{id}",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{bearer_token}}" }],
+            "url": "{{base_url}}/v1/work/approvals/{{work_approval_id}}"
+          }
+        },
+        {
+          "name": "POST /v1/work/approvals/{id}/approve",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{bearer_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"reason\": null,\n  \"remember\": false\n}" },
+            "url": "{{base_url}}/v1/work/approvals/{{work_approval_id}}/approve"
+          }
+        },
+        {
+          "name": "POST /v1/work/approvals/{id}/deny",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{bearer_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"reason\": \"Denied during contract verification.\",\n  \"remember\": false\n}" },
+            "url": "{{base_url}}/v1/work/approvals/{{work_approval_id}}/deny"
+          }
+        },
+        {
+          "name": "GET /v1/tools/catalog",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{bearer_token}}" }],
+            "url": "{{base_url}}/v1/tools/catalog"
+          }
+        },
+        {
+          "name": "GET /v1/tools/connections",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{bearer_token}}" }],
+            "url": "{{base_url}}/v1/tools/connections"
+          }
+        },
+        {
+          "name": "POST /v1/tools/connections (custom MCP)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{bearer_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"display_name\": \"Reviewed MCP\",\n  \"server_url\": \"https://mcp.example.com/mcp\",\n  \"auth_type\": \"none\",\n  \"credential_reference\": null,\n  \"provider_vault_id\": null\n}" },
+            "url": "{{base_url}}/v1/tools/connections"
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "if (pm.response.code === 201) { pm.collectionVariables.set('tool_connection_id', pm.response.json().id); }"
+              ]
+            }
+          }]
+        },
+        {
+          "name": "POST /v1/tools/connections/{id}/test",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{bearer_token}}" }],
+            "url": "{{base_url}}/v1/tools/connections/{{tool_connection_id}}/test"
+          }
+        },
+        {
+          "name": "DELETE /v1/tools/connections/{id}",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{bearer_token}}" }],
+            "url": "{{base_url}}/v1/tools/connections/{{tool_connection_id}}"
+          }
+        },
+        {
+          "name": "POST /v1/tools/github/oauth/start",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{bearer_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"return_to\": \"/work\"\n}" },
+            "url": "{{base_url}}/v1/tools/github/oauth/start"
+          }
         }
       ]
     },

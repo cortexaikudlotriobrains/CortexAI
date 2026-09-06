@@ -28,6 +28,26 @@ class FakeClient:
         )
 
 
+class StaticTextClient(FakeClient):
+    def __init__(self, provider: str, model: str, text: str):
+        super().__init__(provider, model)
+        self.text = text
+
+    def get_completion(self, *args, **kwargs):
+        return UnifiedResponse(
+            request_id=f"req_{self.provider_name}",
+            text=self.text,
+            provider=self.provider_name,
+            model=self.model_name,
+            latency_ms=1,
+            token_usage=TokenUsage(prompt_tokens=20, completion_tokens=40, total_tokens=60),
+            estimated_cost=0.0,
+            finish_reason="stop",
+            error=None,
+            metadata={},
+        )
+
+
 class SpyClient(FakeClient):
     def __init__(self, provider: str, model: str):
         super().__init__(provider, model)
@@ -229,6 +249,29 @@ def test_research_metadata_attached(monkeypatch):
         research_mode="auto",
     )
     assert resp.metadata.get("research_used") is True
+
+
+def test_direct_ask_preserves_provider_browse_disclaimer(monkeypatch):
+    orchestrator = CortexOrchestrator()
+    provider_text = (
+        "I cannot browse independently, but I can answer using the web research context "
+        "supplied with this request."
+    )
+    fake = StaticTextClient("openai", "gpt-4o-mini", provider_text)
+    monkeypatch.setattr(orchestrator, "_get_client", lambda *_args, **_kwargs: fake)
+    orchestrator.research_service = FakeResearchService()
+
+    response = orchestrator.ask(
+        prompt="Search the web for the latest example.",
+        model_type="openai",
+        model_name="gpt-4o-mini",
+        routing_mode="legacy",
+        research_mode="on",
+    )
+
+    assert response.text == provider_text
+    assert response.metadata["research_used"] is True
+    assert response.metadata["research_error"] is None
 
 
 def test_smart_mode_respects_explicit_model(monkeypatch):
@@ -1228,3 +1271,38 @@ def test_compare_normalizes_empty_output_to_provider_error(monkeypatch):
     assert resp.error is not None
     assert resp.error.code == "provider_error"
     assert "empty response" in resp.error.message.lower()
+
+
+def test_compare_preserves_historical_answers_when_sources_are_off(monkeypatch):
+    orchestrator = CortexOrchestrator()
+
+    def build_client(provider, model, **_kwargs):
+        text = (
+            f"{provider.title()} assessment: for the Napoleonic era, roughly 1792-1815, "
+            "France ranks 1st overall while the remaining powers require a qualified comparison."
+        )
+        return StaticTextClient(provider, model, text)
+
+    monkeypatch.setattr(orchestrator, "_get_client", build_client)
+
+    result = orchestrator.compare(
+        prompt=(
+            "If you need to rate the artillery system of the Napoleonic era, "
+            "rank the different European powers of that time."
+        ),
+        models_list=[
+            {"provider": "openai", "model": "gpt-4o-mini"},
+            {"provider": "gemini", "model": "gemini-2.5-flash-lite"},
+            {"provider": "deepseek", "model": "deepseek-chat"},
+        ],
+        research_mode="off",
+    )
+
+    assert len(result.responses) == 3
+    assert all(response is not None and response.is_success for response in result.responses)
+    assert all("1792-1815" in response.text for response in result.responses if response)
+    assert all(
+        "fabrication_detected" not in response.metadata
+        for response in result.responses
+        if response
+    )

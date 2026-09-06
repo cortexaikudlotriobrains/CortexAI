@@ -10,6 +10,7 @@ import { useChat } from "../../hooks/useChat";
 import { isModelDropdownVisible } from "../../hooks/useSmartRouting";
 import type { ModelCatalogItem } from "../../types";
 import type { UseSubscriptionResult } from "../../hooks/useSubscription";
+import { formatAiCredits } from "../../utils/aiCredits";
 import { DEFAULT_MODELS } from "../../config/defaultModels";
 import { resolveAskModelKey } from "../../config/askDefaults";
 import { resolveCompareModelKeys } from "../../config/compareDefaults";
@@ -315,7 +316,7 @@ function allowanceLabel(
 ): string | undefined {
   const allowance = entitlements?.allowances.ai_credits;
   return allowance
-    ? `${new Intl.NumberFormat().format(allowance.remaining)} credits left`
+    ? `${formatAiCredits(allowance.remaining)} credits left`
     : undefined;
 }
 

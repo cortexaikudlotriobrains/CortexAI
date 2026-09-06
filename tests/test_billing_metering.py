@@ -44,7 +44,70 @@ from server.billing.metering_service import (
     settle_usage_with_supplement,
 )
 from server.billing.plan_catalog import get_plan_catalog
-from server.billing.subscription_service import EffectiveSubscription, resolve_effective_subscription
+from server.billing.subscription_service import (
+    EffectiveSubscription,
+    resolve_effective_subscription,
+)
+
+
+def test_grant_revocation_keeps_reserved_settlement_on_original_ledger(metering_db):
+    from server.billing.grant_service import issue_subscription_grant, revoke_subscription_grant
+
+    db, tables = metering_db
+    user_id = _user(db, tables)
+    now = datetime.now(UTC)
+    grant = issue_subscription_grant(
+        db,
+        user_id,
+        plan_code="pro",
+        expires_at=now + timedelta(days=90),
+        granted_by="operator",
+        reason="beta",
+        now=now,
+    )
+    effective = resolve_effective_subscription(db, user_id)
+    reservation = authorize_and_reserve_usage(
+        db,
+        user_id=user_id,
+        request_id="grant-in-flight",
+        operation_type="ask",
+        model_targets=(ModelTargetIntent("openai", "gpt-4.1-mini", "standard"),),
+        research_enabled=False,
+        input_text="Explain reservations.",
+        max_output_tokens=500,
+    )
+    revoke_subscription_grant(db, user_id, revoked_by="operator", reason="ended")
+    assert resolve_effective_subscription(db, user_id).plan.code == "free"
+    finalize_reserved_usage(
+        db,
+        reservation=reservation,
+        model_usages=(
+            BillableModelUsage(
+                provider="openai",
+                model="gpt-4.1-mini",
+                input_tokens=100,
+                output_tokens=200,
+                provider_cost_usd=0.001,
+            ),
+        ),
+        research_provider_credits_used=0,
+        file_analysis_performed=False,
+    )
+    item = db.execute(select(tables["credit_transactions"])).mappings().one()
+    assert item["usage_period_id"] == effective.usage_period_id
+    assert item["total_credits"] == 900
+    assert _counter(db, tables, effective.usage_period_id)["reserved_quantity"] == 0
+    period = (
+        db.execute(
+            select(tables["usage_periods"]).where(
+                tables["usage_periods"].c.id == effective.usage_period_id
+            )
+        )
+        .mappings()
+        .one()
+    )
+    assert period["status"] == "closed"
+    assert period["subscription_grant_id"] == grant["id"]
 
 
 @pytest.fixture()
@@ -158,9 +221,13 @@ def metering_db(monkeypatch):
             unique=True,
         ),
     )
+    from tests.billing_schema_helpers import add_subscription_grant_schema
+
+    subscription_grants = add_subscription_grant_schema(metadata)
     tables = {
         table.name: table
         for table in (
+            subscription_grants,
             users,
             billing_accounts,
             usage_periods,
@@ -510,10 +577,7 @@ def test_actual_model_tokens_settle_and_create_reconciliation_item(metering_db):
         "initial_query": "How do atomic credit reservations work?",
         "prompt_optimization": False,
     }
-    assert {
-        key: item["metadata"][key]
-        for key in expected_metadata
-    } == expected_metadata
+    assert {key: item["metadata"][key] for key in expected_metadata} == expected_metadata
     assert item["metadata"]["credit_policy_version"]
     assert item["metadata"]["cache_aware_shadow_total"] == item["total_credits"]
 
@@ -595,18 +659,14 @@ def test_under_reserved_provider_result_keeps_answer_billable_and_records_adjust
     )
     assert sum(item["total_credits"] for item in items) == reserved
     assert items[0]["metadata"]["under_reserved"] is True
-    assert items[0]["metadata"]["initial_query"] == (
-        "Why did this request exceed its reservation?"
-    )
+    assert items[0]["metadata"]["initial_query"] == ("Why did this request exceed its reservation?")
     assert items[0]["metadata"]["credit_activity_id"] == "activity-under-reserved"
     assert items[0]["metadata"]["billed_total_credits"] == reserved
     assert items[1]["item_type"] == "adjustment"
     assert items[1]["total_credits"] == 0
     assert items[1]["metadata"]["unbilled_credits"] > 0
     assert items[1]["metadata"]["unbilled_provider_cost_usd"] > 0
-    assert items[1]["metadata"]["initial_query"] == (
-        "Why did this request exceed its reservation?"
-    )
+    assert items[1]["metadata"]["initial_query"] == ("Why did this request exceed its reservation?")
     assert items[1]["metadata"]["credit_activity_id"] == "activity-under-reserved"
 
 
@@ -731,9 +791,7 @@ def test_insufficient_credits_prevents_reservation(metering_db):
     db, tables = metering_db
     user_id = _user(db, tables)
     effective = resolve_effective_subscription(db, user_id)
-    counter = repository.get_or_create_usage_counter(
-        db, effective.usage_period_id, "ai_credits"
-    )
+    counter = repository.get_or_create_usage_counter(db, effective.usage_period_id, "ai_credits")
     db.execute(
         tables["usage_counters"]
         .update()

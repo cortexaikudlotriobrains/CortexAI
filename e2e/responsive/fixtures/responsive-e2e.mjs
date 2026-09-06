@@ -32,6 +32,9 @@ export const test = base.extend({
             uploadedFiles: new Map(),
             models: [...MODELS],
             subscriptionPlan: "free",
+            subscriptionSource: null,
+            billingEnabled: true,
+            billingPlans: [],
             maxFilesPerRequest: 1,
             directUploadIntentRequests: [],
             s3UploadRequests: [],
@@ -39,6 +42,18 @@ export const test = base.extend({
             s3FailuresByFilename: new Map(),
             s3DelayMs: 0,
             directUploadSequence: 0,
+            workSessions: [],
+            workRun: null,
+            workRuns: [],
+            workRunSequence: 0,
+            workStartDelayMs: 0,
+            workStartPayload: null,
+            workEvents: [],
+            workEventsByRun: new Map(),
+            workArtifacts: [],
+            workArtifactsByRun: new Map(),
+            workApproval: null,
+            workConnections: [],
         };
         const pageErrors = [];
         page.on("pageerror", error => pageErrors.push(error));
@@ -98,7 +113,7 @@ async function installResponsiveRoutes(page, state) {
         route.fulfill({
             status: 200,
             contentType: "application/javascript",
-            body: "window.CORTEX_RUNTIME_CONFIG = { enableDevSessionLogin: false, directAttachmentUploads: true, legacyAttachmentUploads: true };",
+            body: "window.CORTEX_RUNTIME_CONFIG = { enableDevSessionLogin: false, directAttachmentUploads: true, legacyAttachmentUploads: true, workEnabled: true };",
         }),
     );
 
@@ -163,8 +178,8 @@ async function installResponsiveRoutes(page, state) {
             return json(route, {
                 currency: "USD",
                 billing_period: "monthly",
-                billing_enabled: true,
-                plans: [],
+                billing_enabled: state.billingEnabled,
+                plans: state.billingPlans,
             });
         }
         if (url.pathname === "/v1/billing/subscription" && method === "GET") {
@@ -172,15 +187,165 @@ async function installResponsiveRoutes(page, state) {
             return json(route, {
                 plan_code: state.subscriptionPlan,
                 status: paid ? "active" : "free",
-                provider: paid ? "stripe" : null,
+                provider: paid && state.subscriptionSource !== "cortex_grant" ? "stripe" : null,
                 current_period_start: "2026-07-01T00:00:00Z",
                 current_period_end: "2026-08-01T00:00:00Z",
                 cancel_at_period_end: false,
-                can_manage: paid,
+                can_manage: paid && state.subscriptionSource !== "cortex_grant",
             });
         }
         if (url.pathname === "/v1/entitlements" && method === "GET") {
-            return json(route, entitlements(state.subscriptionPlan, state.maxFilesPerRequest));
+            const payload = entitlements(state.subscriptionPlan, state.maxFilesPerRequest);
+            if (state.subscriptionSource) payload.plan.source = state.subscriptionSource;
+            return json(route, payload);
+        }
+        if (url.pathname === "/v1/tools/catalog" && method === "GET") {
+            return json(route, [
+                { connector_key: "cortex_files", display_name: "Cortex Files", description: "Use uploaded files.", icon: "files", connection_state: "available", plan_requirement: "plus", capabilities: ["read_files"], risk_classes: ["READ"], configuration_required: false },
+                { connector_key: "github", display_name: "GitHub", description: "Repository tools.", icon: "github", connection_state: "configuration_required", plan_requirement: "plus", capabilities: ["repositories"], risk_classes: ["READ", "WRITE"], configuration_required: true },
+                { connector_key: "custom_mcp", display_name: "Custom Remote MCP", description: "Reviewed remote tools.", icon: "plug", connection_state: "available", plan_requirement: "pro", capabilities: ["remote_mcp"], risk_classes: ["READ", "WRITE"], configuration_required: false },
+            ]);
+        }
+        if (url.pathname === "/v1/tools/connections" && method === "GET") {
+            return json(route, state.workConnections);
+        }
+        if (url.pathname === "/v1/tools/connections" && method === "POST") {
+            const payload = request.postDataJSON();
+            const connection = {
+                id: `connection-${state.workConnections.length + 1}`,
+                connector_key: "custom_mcp",
+                connection_type: "mcp_remote",
+                display_name: payload.display_name,
+                server_url: payload.server_url,
+                auth_type: payload.auth_type,
+                status: "pending",
+                granted_scopes: [],
+                metadata: {},
+                created_at: "2026-08-20T12:00:00Z",
+                updated_at: "2026-08-20T12:00:00Z",
+                last_verified_at: null,
+            };
+            state.workConnections.push(connection);
+            return json(route, connection, 201);
+        }
+        const connectionTest = url.pathname.match(/^\/v1\/tools\/connections\/([^/]+)\/test$/);
+        if (connectionTest && method === "POST") {
+            const connection = state.workConnections.find(item => item.id === connectionTest[1]);
+            if (connection) connection.status = "connected";
+            return json(route, { ok: true, status: "connected", message: "Connected" });
+        }
+        if (url.pathname === "/v1/work/sessions" && method === "GET") {
+            return json(route, state.workSessions);
+        }
+        if (url.pathname === "/v1/work/sessions" && method === "POST") {
+            const payload = request.postDataJSON();
+            const session = makeWorkSession(payload.title || "New work");
+            state.workSessions = [session, ...state.workSessions];
+            return json(route, session, 201);
+        }
+        const workSessionLatest = url.pathname.match(/^\/v1\/work\/sessions\/([^/]+)\/runs\/latest$/);
+        if (workSessionLatest && method === "GET") {
+            const latest = state.workRuns.at(-1) || state.workRun;
+            return latest
+                ? json(route, latest)
+                : json(route, { detail: { code: "work_run_not_found", message: "No run" } }, 404);
+        }
+        const workSessionRuns = url.pathname.match(/^\/v1\/work\/sessions\/([^/]+)\/runs$/);
+        if (workSessionRuns && method === "GET") {
+            return json(route, state.workRuns.length > 0 ? state.workRuns : state.workRun ? [state.workRun] : []);
+        }
+        const workSession = url.pathname.match(/^\/v1\/work\/sessions\/([^/]+)$/);
+        if (workSession && method === "GET") {
+            const session = state.workSessions.find(item => item.id === workSession[1]);
+            return session ? json(route, session) : json(route, { detail: "Not found" }, 404);
+        }
+        const workStart = url.pathname.match(/^\/v1\/work\/sessions\/([^/]+)\/(runs|instructions)$/);
+        if (workStart && method === "POST") {
+            const payload = request.postDataJSON();
+            state.workStartPayload = payload;
+            const session = state.workSessions.find(item => item.id === workStart[1]) || makeWorkSession(payload.instruction.slice(0, 120));
+            if (!state.workSessions.some(item => item.id === session.id)) state.workSessions.unshift(session);
+            if (state.workStartDelayMs > 0) {
+                await new Promise(resolve => setTimeout(resolve, state.workStartDelayMs));
+            }
+            state.workRunSequence += 1;
+            state.workRun = {
+                ...makeWorkRun(session.id, payload.instruction, "running", payload.web_mode),
+                id: `work-run-${state.workRunSequence}`,
+                request_id: `responsive-work-request-${state.workRunSequence}`,
+            };
+            state.workEvents = [
+                makeWorkEvent(1, "run_created", "Work run created"),
+                makeWorkEvent(2, "planning", "Creating a plan"),
+                makeWorkEvent(3, "run_completed", "Work completed"),
+            ];
+            state.workArtifacts = [{
+                id: "artifact-1", file_id: "artifact-file-1", role: "artifact", source: "agent",
+                filename: "work-report.pdf", mime_type: "application/pdf", size_bytes: 4096,
+                artifact_type: "report", metadata: {}, created_at: "2026-08-20T12:04:00Z",
+            }];
+            state.workRuns = [
+                ...state.workRuns.filter(run => run.id !== state.workRun.id),
+                state.workRun,
+            ];
+            state.workEventsByRun.set(state.workRun.id, state.workEvents);
+            state.workArtifactsByRun.set(state.workRun.id, state.workArtifacts);
+            return json(route, state.workRun, 202);
+        }
+        const workRunEvents = url.pathname.match(/^\/v1\/work\/runs\/([^/]+)\/events$/);
+        if (workRunEvents && method === "GET") {
+            const after = Number(url.searchParams.get("after_sequence") || 0);
+            const events = state.workEventsByRun.get(workRunEvents[1])
+                || (state.workRun?.id === workRunEvents[1] ? state.workEvents : []);
+            const items = events.filter(event => event.sequence > after);
+            return json(route, { items, latest_sequence: items.at(-1)?.sequence ?? after });
+        }
+        const workRunStream = url.pathname.match(/^\/v1\/work\/runs\/([^/]+)\/stream$/);
+        if (workRunStream && method === "GET") {
+            const runId = workRunStream[1];
+            const streamedRun = state.workRuns.find(run => run.id === runId)
+                || (state.workRun?.id === runId ? state.workRun : null);
+            if (streamedRun?.status === "running") {
+                const completedRun = { ...streamedRun, status: "completed", actual_credits: 18400, completed_at: "2026-08-20T12:04:00Z", updated_at: "2026-08-20T12:04:00Z" };
+                state.workRuns = state.workRuns.map(run => run.id === runId ? completedRun : run);
+                if (state.workRun?.id === runId) state.workRun = completedRun;
+                const events = state.workEventsByRun.get(runId) || state.workEvents;
+                const terminal = events.at(-1);
+                return route.fulfill({ status: 200, contentType: "text/event-stream", body: `id: ${terminal.sequence}\nevent: ${terminal.type}\ndata: ${JSON.stringify(terminal)}\n\n` });
+            }
+            return route.fulfill({ status: 200, contentType: "text/event-stream", body: ": heartbeat\n\n" });
+        }
+        const workArtifacts = url.pathname.match(/^\/v1\/work\/runs\/([^/]+)\/artifacts$/);
+        if (workArtifacts && method === "GET") {
+            return json(
+                route,
+                state.workArtifactsByRun.get(workArtifacts[1])
+                    || (state.workRun?.id === workArtifacts[1] ? state.workArtifacts : []),
+            );
+        }
+        const workRunCancel = url.pathname.match(/^\/v1\/work\/runs\/([^/]+)\/cancel$/);
+        if (workRunCancel && method === "POST") {
+            const existing = state.workRuns.find(run => run.id === workRunCancel[1]) || state.workRun;
+            const cancelledRun = { ...existing, status: "cancelled", completed_at: "2026-08-20T12:03:00Z" };
+            state.workRuns = state.workRuns.map(run => run.id === workRunCancel[1] ? cancelledRun : run);
+            if (state.workRun?.id === workRunCancel[1]) state.workRun = cancelledRun;
+            return json(route, cancelledRun);
+        }
+        const workRun = url.pathname.match(/^\/v1\/work\/runs\/([^/]+)$/);
+        if (workRun && method === "GET") {
+            const found = state.workRuns.find(run => run.id === workRun[1])
+                || (state.workRun?.id === workRun[1] ? state.workRun : null);
+            return found ? json(route, found) : json(route, { detail: "Not found" }, 404);
+        }
+        const workApproval = url.pathname.match(/^\/v1\/work\/approvals\/([^/]+)$/);
+        if (workApproval && method === "GET") {
+            return state.workApproval ? json(route, state.workApproval) : json(route, { detail: "Not found" }, 404);
+        }
+        const workDecision = url.pathname.match(/^\/v1\/work\/approvals\/([^/]+)\/(approve|deny)$/);
+        if (workDecision && method === "POST") {
+            state.workApproval = { ...state.workApproval, status: workDecision[2] === "approve" ? "approved" : "denied", decided_at: "2026-08-20T12:03:00Z" };
+            state.workRun = { ...state.workRun, status: "running" };
+            return json(route, state.workApproval);
         }
         if (url.pathname === "/v1/credits/transactions" && method === "GET") {
             return json(route, creditTransactions());
@@ -653,6 +818,10 @@ function entitlements(planCode = "free", maxFilesPerRequest = 1) {
             usage_export_enabled: false,
             saved_history_enabled: true,
             models_catalog_enabled: true,
+            work_enabled: planCode !== "free",
+            verified_connectors_enabled: planCode !== "free",
+            custom_mcp_enabled: planCode === "pro",
+            action_tools_enabled: planCode !== "free",
         },
         model_access: {
             allowed_billing_classes: plan.allowedBillingClasses,
@@ -660,6 +829,10 @@ function entitlements(planCode = "free", maxFilesPerRequest = 1) {
         limits: {
             max_files_per_request: maxFilesPerRequest,
             max_file_bytes: 10000000,
+            max_active_work_runs: planCode === "pro" ? 3 : planCode === "plus" ? 1 : 0,
+            max_tool_connections: planCode === "pro" ? 10 : planCode === "plus" ? 3 : 0,
+            max_mcp_servers_per_run: planCode === "pro" ? 10 : planCode === "plus" ? 3 : 0,
+            max_work_credit_budget: planCode === "pro" ? 1000000 : planCode === "plus" ? 250000 : 0,
         },
         allowances: {
             ai_credits: {
@@ -673,6 +846,66 @@ function entitlements(planCode = "free", maxFilesPerRequest = 1) {
             starts_at: "2026-07-01T00:00:00Z",
             ends_at: "2026-08-01T00:00:00Z",
         },
+    };
+}
+
+function makeWorkSession(title = "Postman Work task") {
+    return {
+        id: "work-session-1",
+        session_id: "session-work-1",
+        title,
+        status: "idle",
+        agent_provider: "fake",
+        created_at: "2026-08-20T12:00:00Z",
+        updated_at: "2026-08-20T12:00:00Z",
+        latest_run_status: null,
+    };
+}
+
+function makeWorkRun(workSessionId, instruction, status = "running", webMode = "auto") {
+    return {
+        id: "work-run-1",
+        work_session_id: workSessionId,
+        request_id: "responsive-work-request",
+        instruction,
+        status,
+        provider: "fake",
+        max_credit_budget: 100000,
+        max_output_tokens: 40000,
+        actual_output_tokens: status === "completed" ? 12000 : 6400,
+        reserved_credits: 100000,
+        actual_credits: status === "completed" ? 18400 : 6400,
+        provider_model_id: "claude-haiku-4-5",
+        billing_model_id: "claude-haiku-4-5",
+        billing_model_source: "fake_session_agent_snapshot",
+        provider_agent_id: "fake-agent",
+        provider_agent_version: 1,
+        output_finalize_requested_at: null,
+        output_limit_interrupt_requested_at: null,
+        configuration_snapshot: {
+            requested_web_mode: webMode || "auto",
+            effective_web_enabled: false,
+            enabled_connection_ids: [],
+        },
+        usage_snapshot: {},
+        stop_reason: null,
+        error_code: null,
+        error_message: null,
+        started_at: "2026-08-20T12:00:00Z",
+        completed_at: status === "completed" ? "2026-08-20T12:04:00Z" : null,
+        created_at: "2026-08-20T12:00:00Z",
+        updated_at: "2026-08-20T12:00:00Z",
+    };
+}
+
+function makeWorkEvent(sequence, type, displayMessage, payload = {}) {
+    return {
+        id: `work-event-${sequence}`,
+        sequence,
+        type,
+        display_message: displayMessage,
+        payload,
+        created_at: `2026-08-20T12:0${Math.min(sequence, 9)}:00Z`,
     };
 }
 

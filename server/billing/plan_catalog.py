@@ -202,6 +202,22 @@ def _parse_plan(code: str, raw_plan: Any) -> SubscriptionPlan:
             entitlements_raw["models_catalog_enabled"],
             f"plans.{code}.entitlements.models_catalog_enabled",
         ),
+        work_enabled=_require_bool(
+            entitlements_raw["work_enabled"],
+            f"plans.{code}.entitlements.work_enabled",
+        ),
+        verified_connectors_enabled=_require_bool(
+            entitlements_raw["verified_connectors_enabled"],
+            f"plans.{code}.entitlements.verified_connectors_enabled",
+        ),
+        custom_mcp_enabled=_require_bool(
+            entitlements_raw["custom_mcp_enabled"],
+            f"plans.{code}.entitlements.custom_mcp_enabled",
+        ),
+        action_tools_enabled=_require_bool(
+            entitlements_raw["action_tools_enabled"],
+            f"plans.{code}.entitlements.action_tools_enabled",
+        ),
         allowed_billing_classes=allowed_billing_classes,
     )
 

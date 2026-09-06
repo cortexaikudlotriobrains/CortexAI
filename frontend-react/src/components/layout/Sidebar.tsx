@@ -11,15 +11,16 @@ import { buildHistoryThreads, filterHistoryThreads } from "../../history/history
 import { normalizeSessionId } from "../../session/activeSession";
 import { useChatStore } from "../../store/chatStore";
 import { useHistory } from "../../hooks/useHistory";
-import type { ChatMode, HistoryThread, WhoAmIResponse } from "../../types";
+import type { ChatMode, HistoryThread, WhoAmIResponse, WorkSession } from "../../types";
 import { CortexIcon } from "../shared/CortexIcon";
 import brandMarkUrl from "../../assets/brand/brand-mark.svg";
 import styles from "./Sidebar.module.css";
 
 interface SidebarProps {
   onSelectThread: (thread: HistoryThread) => void;
-  activeView?: "chat" | "usage" | "credits" | "models" | "account";
+  activeView?: "chat" | "work" | "usage" | "credits" | "models" | "account";
   onNavigateChat?: (mode: ChatMode) => void;
+  onNavigateWork?: () => void;
   onNavigateUsage?: () => void;
   onNavigateCredits?: () => void;
   onNavigateModels?: () => void;
@@ -27,6 +28,11 @@ interface SidebarProps {
   loggedIn?: boolean;
   onLogin?: () => void;
   signedOut?: boolean;
+  newLabel?: "New chat" | "New work";
+  onNew?: () => void;
+  workSessions?: WorkSession[];
+  activeWorkSessionId?: string | null;
+  onSelectWorkSession?: (session: WorkSession) => void;
 }
 
 interface HistoryDateGroup {
@@ -35,10 +41,13 @@ interface HistoryDateGroup {
   threads: HistoryThread[];
 }
 
+const MAX_VISIBLE_HISTORY_THREADS = 100;
+
 export function Sidebar({
   onSelectThread,
   activeView = "chat",
   onNavigateChat,
+  onNavigateWork,
   onNavigateUsage,
   onNavigateCredits,
   onNavigateModels,
@@ -46,6 +55,11 @@ export function Sidebar({
   loggedIn,
   onLogin,
   signedOut = false,
+  newLabel = "New chat",
+  onNew,
+  workSessions = [],
+  activeWorkSessionId,
+  onSelectWorkSession,
 }: SidebarProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [openMenuKey, setOpenMenuKey] = useState<string | null>(null);
@@ -66,7 +80,10 @@ export function Sidebar({
   const { removeThread, renameThread } = useHistory();
 
   const filteredThreads = useMemo(() => {
-    return filterHistoryThreads(buildHistoryThreads(history), historySearch).slice(0, 20);
+    return filterHistoryThreads(buildHistoryThreads(history), historySearch).slice(
+      0,
+      MAX_VISIBLE_HISTORY_THREADS,
+    );
   }, [history, historySearch]);
   const historyGroups = useMemo(() => groupHistoryThreads(filteredThreads), [filteredThreads]);
 
@@ -220,6 +237,13 @@ export function Sidebar({
   const modelsActive = activeView === "models";
   const askActive = activeView === "chat" && mode === "single";
   const compareActive = activeView === "chat" && mode === "compare";
+  const workActive = activeView === "work";
+  const visibleWorkSessions = workSessions.filter(
+    (item) =>
+      item.latest_run_status !== null &&
+      (item.title || "New work").toLowerCase().includes(historySearch.trim().toLowerCase()),
+  );
+  const handleNew = onNew ?? startNewChat;
 
   const sidebarClassName = isCollapsed
     ? `${styles.sidebar} ${styles.sidebarCollapsed}`
@@ -261,13 +285,13 @@ export function Sidebar({
           id="historyNewChatBtn"
           type="button"
           className={styles.newChatButton}
-          onClick={startNewChat}
-          aria-label="New chat"
-          title={isCollapsed ? "New chat" : undefined}
+          onClick={handleNew}
+          aria-label={newLabel}
+          title={isCollapsed ? newLabel : undefined}
           disabled={signedOut}
         >
           <CortexIcon name="new-chat" />
-          <span>New chat</span>
+          <span>{newLabel}</span>
           <span className={styles.commandChip} aria-hidden="true">
             ⌘K
           </span>
@@ -299,6 +323,20 @@ export function Sidebar({
           <CortexIcon name="compare" />
           <span>Compare</span>
         </button>
+        {onNavigateWork && (
+          <button
+            type="button"
+            className={workActive ? styles.navItemActive : styles.navItem}
+            onClick={onNavigateWork}
+            aria-current={workActive ? "page" : undefined}
+            aria-label="Work"
+            title={isCollapsed ? "Work" : undefined}
+            disabled={signedOut}
+          >
+            <CortexIcon name="work" />
+            <span>Work</span>
+          </button>
+        )}
         <button
           type="button"
           className={usageActive ? styles.navItemActive : styles.navItem}
@@ -369,6 +407,41 @@ export function Sidebar({
               />
             </div>
             <ul className={styles.historyList}>
+              {visibleWorkSessions.length > 0 && (
+                <li className={styles.historyGroup}>
+                  <div className={styles.historyGroupLabel}>Work</div>
+                  <ul className={styles.historyGroupItems}>
+                    {visibleWorkSessions.map((item) => {
+                      const title = item.title || "New work";
+                      const isActive = item.id === activeWorkSessionId;
+                      return (
+                        <li key={item.id} className={styles.historyItemRow}>
+                          <div
+                            className={`${styles.historyThreadSurface} ${isActive ? styles.historyItemActive : ""}`}
+                            data-mode="work"
+                            title={title}
+                          >
+                            <button
+                              type="button"
+                              className={styles.historySelectButton}
+                              aria-label={`${title}. Work, ${item.latest_run_status || item.status}`}
+                              aria-current={isActive ? "page" : undefined}
+                              onClick={() => onSelectWorkSession?.(item)}
+                            >
+                              <span className={styles.historyTitle}>{title}</span>
+                              <span className={styles.historyRight}>
+                                <span className={styles.historyMeta}>
+                                  {(item.latest_run_status || item.status).replaceAll("_", " ").toUpperCase()}
+                                </span>
+                              </span>
+                            </button>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </li>
+              )}
               {historyGroups.map((group) => (
                 <li key={group.key} className={styles.historyGroup}>
                   <div className={styles.historyGroupLabel}>{group.label}</div>

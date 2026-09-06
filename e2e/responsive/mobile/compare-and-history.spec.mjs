@@ -275,7 +275,7 @@ test("mobile multi-turn Compare switches one natural-height response card at a t
     const runDetails = panels.nth(0).locator('[id^="response-stats-"]');
     await expect(runDetails).toBeVisible();
     await expect(runDetails).toContainText("0.9s");
-    await expect(runDetails).toContainText("tok");
+    await expect(runDetails).not.toContainText("tok");
     const runDetailsGeometry = await panels.nth(0).evaluate(panel => {
         const header = panel.querySelector("header");
         const titleRow = header?.firstElementChild;

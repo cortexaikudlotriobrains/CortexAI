@@ -836,7 +836,7 @@
     bottom: 0;
     left: 0;
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
     border-top: 1px solid var(--cx-hairline-soft);
     background: color-mix(in srgb, var(--cx-surface) 88%, var(--cx-surface-2));
     padding: 6px 8px calc(8px + env(safe-area-inset-bottom));

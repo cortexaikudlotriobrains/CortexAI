@@ -108,6 +108,10 @@ async def entitlements(
             usage_export_enabled=plan_entitlements.usage_export_enabled,
             saved_history_enabled=plan_entitlements.saved_history_enabled,
             models_catalog_enabled=plan_entitlements.models_catalog_enabled,
+            work_enabled=plan_entitlements.work_enabled,
+            verified_connectors_enabled=plan_entitlements.verified_connectors_enabled,
+            custom_mcp_enabled=plan_entitlements.custom_mcp_enabled,
+            action_tools_enabled=plan_entitlements.action_tools_enabled,
         ),
         model_access=EntitlementModelAccessDTO(
             allowed_billing_classes=sorted(plan_entitlements.allowed_billing_classes)
@@ -115,6 +119,10 @@ async def entitlements(
         limits=EntitlementLimitsDTO(
             max_files_per_request=effective.plan.limits.max_files_per_request,
             max_file_bytes=effective.plan.limits.max_file_bytes,
+            max_active_work_runs=effective.plan.limits.max_active_work_runs,
+            max_tool_connections=effective.plan.limits.max_tool_connections,
+            max_mcp_servers_per_run=effective.plan.limits.max_mcp_servers_per_run,
+            max_work_credit_budget=effective.plan.limits.max_work_credit_budget,
         ),
         allowances={
             meter: EntitlementAllowanceDTO(
@@ -168,12 +176,9 @@ async def credit_transactions(
                 id=str(row["id"]),
                 request_id=str(row["request_id"]),
                 activity_id=str(
-                    (row.get("metadata") or {}).get("credit_activity_id")
-                    or row["request_id"]
+                    (row.get("metadata") or {}).get("credit_activity_id") or row["request_id"]
                 ),
-                query=(
-                    str((row.get("metadata") or {}).get("initial_query") or "").strip() or None
-                ),
+                query=(str((row.get("metadata") or {}).get("initial_query") or "").strip() or None),
                 operation_type=str(row["operation_type"]),
                 item_type=str(row["item_type"]),
                 provider=str(row["provider"]) if row.get("provider") else None,
@@ -191,9 +196,7 @@ async def credit_transactions(
                 output_credits=int(row.get("output_credits") or 0),
                 fixed_credits=int(row.get("fixed_credits") or 0),
                 total_credits=int(row.get("total_credits") or 0),
-                uncached_equivalent_credits=int(
-                    row.get("uncached_equivalent_credits") or 0
-                ),
+                uncached_equivalent_credits=int(row.get("uncached_equivalent_credits") or 0),
                 cache_savings_credits=int(row.get("cache_savings_credits") or 0),
                 provider_cost_usd=float(row.get("provider_cost_usd") or 0),
                 usage_estimated=bool(row.get("usage_estimated")),

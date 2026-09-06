@@ -94,6 +94,22 @@ export async function post<T>(path: string, body: unknown, signal?: AbortSignal)
   return handleResponse<T>(res);
 }
 
+export async function postWithHeaders<T>(
+  path: string,
+  body: unknown,
+  headers: Record<string, string | undefined>,
+  signal?: AbortSignal,
+): Promise<T> {
+  const res = await fetch(path, {
+    method: "POST",
+    credentials: "include",
+    headers: buildHeaders(headers),
+    body: JSON.stringify(body),
+    signal,
+  });
+  return handleResponse<T>(res);
+}
+
 export async function patch<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
   const res = await fetch(path, {
     method: "PATCH",

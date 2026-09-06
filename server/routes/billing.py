@@ -216,6 +216,11 @@ async def billing_plans():
                     research_enabled=plan.entitlements.research_enabled,
                     prompt_improvement_enabled=(plan.entitlements.prompt_improvement_enabled),
                     file_analysis_enabled=plan.entitlements.file_analysis_enabled,
+                    work_enabled=plan.entitlements.work_enabled,
+                    verified_connectors_enabled=(plan.entitlements.verified_connectors_enabled),
+                    custom_mcp_enabled=plan.entitlements.custom_mcp_enabled,
+                    action_tools_enabled=(plan.entitlements.action_tools_enabled),
+                    max_active_work_runs=plan.limits.max_active_work_runs,
                     allowed_billing_classes=sorted(plan.entitlements.allowed_billing_classes),
                 ),
                 allowances=PublicBillingPlanAllowancesDTO(

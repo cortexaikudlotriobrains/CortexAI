@@ -102,7 +102,7 @@ If `FRONTEND_DIR` is unset, `server/app.py` serves `frontend-react/dist`. Set th
 - Frontend composer keyboard UX: `Enter` sends prompt, `Shift+Enter` inserts newline.
 - React startup waits for Cognito/local dev-session bootstrap before fetching session-scoped model and history data. Signed-out Cognito users see a workspace sign-in gate instead of the Ask/Compare composer, while authenticated and local dev-session users restore the persisted active `session_id` transcript when the page was reloaded, resumed, or silently reauthenticated in the same browser.
 - React Ask/Compare turns send `context.session_id`, bounded `conversation_history`, and `new_session` to preserve selected-thread continuity while allowing explicit New Chat resets.
-- The React sidebar uses a compact navigation rail with subtle mode/current-session states plus Usage, AI credits, and Models destinations. Desktop has an icon-only top-right control that collapses the sidebar to a narrow action rail and expands it back to the full history view; mobile remains on the separate Ask/Compare/History bottom navigation, with Usage, AI credits, and Models reached from the account menu. The expanded desktop `Recent` list groups chats by Today, Yesterday, and month/day, with one 36px row per session: compact 11.5px ellipsized title and a narrowed `MODE · time` caption, with no leading mode glyph, to preserve substantially more identifying title text. Hover/focus replaces the caption with a Rename/Delete menu; renamed titles persist in `sessions.title`, Delete retains the short in-row confirmation, and keyboard rows support arrows, Enter, R, D, and Escape. The collapsed desktop rail and the separate mobile History surface remain unchanged.
+- The React sidebar uses a compact navigation rail with subtle mode/current-session states plus Usage, AI credits, and Models destinations. Desktop has an icon-only top-right control that collapses the sidebar to a narrow action rail and expands it back to the full history view; mobile remains on the separate Ask/Compare/History bottom navigation, with Usage, AI credits, and Models reached from the account menu. The expanded desktop `Recent` list displays up to the 100 newest grouped chat threads by Today, Yesterday, and month/day, with one 36px row per session: compact 11.5px ellipsized title and a narrowed `MODE · time` caption, with no leading mode glyph, to preserve substantially more identifying title text. Hover/focus replaces the caption with a Rename/Delete menu; renamed titles persist in `sessions.title`, Delete retains the short in-row confirmation, and keyboard rows support arrows, Enter, R, D, and Escape. The collapsed desktop rail and the separate mobile History surface remain unchanged.
 - Selecting a React history row reloads the complete session transcript. Ask rows are restored chronologically and Compare target rows are grouped into one turn by `request_group_id`.
 - Explicit frontend fresh sign-in starts an empty new chat session; browser refreshes, Chrome tab reload/resume, same-browser reauth, and explicit History selections continue the selected thread.
 - React posts non-sensitive lifecycle diagnostics to `/v1/client-diagnostics`; backend logs them as `frontend.diagnostic` events so production refresh reports can be separated into reload/navigation, tab discard, back/forward cache restore, long main-thread task, or frontend error cases.
@@ -120,10 +120,10 @@ If `FRONTEND_DIR` is unset, `server/app.py` serves `frontend-react/dist`. Set th
 - Mobile uses a persistent square-pen header action to start a new session from Ask, Compare, or History. The action cancels active generation, clears the current thread, returns to chat, and preserves the selected mode; the History panel does not render a separate New chat button.
 - Frontend Compare selectors keep at least two active models and send only active selected models in compare requests. Initial empty slots wait for `/v1/entitlements` and use only models whose billing class is allowed by the effective Free, Plus, or Pro plan; locked higher-plan models remain in the offering, and valid existing/manual selections are preserved. Within that eligible default set, the offline fallback prefers `openai:gpt-5.6-luna` plus `claude:claude-sonnet-5`, and Add Model prefers `deepseek:deepseek-v4-flash`; normal authenticated startup replaces that fallback with selectable `/v1/models` rows. Remove controls appear with three active models and compact whichever two remain after any slot is removed.
 - React manual Ask and Compare controls render through the same accessible provider-first model picker. It opens with provider logos and model counts. On fine-pointer desktop layouts, hovering a provider immediately reveals its readable model labels, exact IDs, credit-use hints, locks, and active state in an adjacent panel; the preview remains stable while crossing panels, switches on another provider hover, and dismisses shortly after leaving the picker. Click plus Right/Left Arrow remain accessible fallbacks. Touch/mobile layouts use a compact tap-to-model drill-down with Back. The viewport-positioned body portal prevents Compare's horizontally scrollable model row from clipping either layout. Compare supplies duplicate-selection prevention and removal behavior; synchronized hidden native selects preserve existing Playwright selectors and `selectOption` flows.
-- Frontend Compare response cards use restrained model headings, compact Markdown paragraph/list spacing, compact footers, and a packed mono metric strip for completed duration, tokens, and cost; aggregate tokens, usage, and success counts remain in the summary bar.
+- Frontend Compare response cards use restrained model headings, compact Markdown paragraph/list spacing, compact footers, and a packed mono metric strip for completed duration and AI-credit usage; success/error counts and aggregate AI-credit usage remain in the summary bar without token totals.
 - React composer feature chips provide legacy-compatible explanatory tooltips for Smart, Web/With sources, and Improve in Ask and Compare. Enabled chips use a theme-aware high-contrast fill, label, and accent ring so their state remains clear in light and dark themes. Compare's With sources and Improve controls use the same background, border, label, and shadow treatment whenever they share the same toggle state. The descriptions are associated through `aria-describedby`, open on hover or keyboard focus, and remain viewport-contained on mobile. A touch tap toggles the chip and keeps its tooltip visible for two seconds.
 - React desktop top mode navigation keeps the active and inactive Ask/Compare labels legible in both light and dark themes, with a theme-accent underline identifying the selected mode independently of the sidebar navigation.
-- Mobile and desktop completed response-card duration, token, and cost metadata appears directly in the header without a run-details chevron. Loading and failed cards keep a muted elapsed/status line visible on mobile and desktop. The frontend displays the same UI-observed elapsed duration with abbreviated units when live timestamps are available, falls back to API `latency_ms` for restored rows, and keeps unavailable token counts hidden instead of rendering zero-token placeholders.
+- Mobile and desktop completed response-card duration and AI-credit usage appear directly in the header without a run-details chevron. Loading and failed cards keep a muted elapsed/status line visible on mobile and desktop. The frontend displays the same UI-observed elapsed duration when live timestamps are available and falls back to API `latency_ms` for restored rows. Token usage remains in the API response and React data layer for persistence and reporting but is not rendered on Ask or Compare results.
 - React response headers reuse the model picker's shared provider-logo and model-presentation resolver, including the provider-initial fallback when an image is unavailable.
 - React exposes `/models` for a task-first model selection guide. Authenticated production rows are generated from `/v1/models`, including availability, lifecycle, current prices, and official provider source links; `frontend-react/src/config/models.data.json` supplies only offline presentation/filter defaults. Update `config/model_registry.yaml` for catalogue or pricing changes instead of duplicating model rows in React.
 - The current selectable catalogue contains 21 models. Claude Sonnet 4.6 uses the `advanced` billing class and is available to Plus and Pro; Claude Opus 4.5 and 4.6 use `premium` and are available to Pro. `/v1/models` exposes these rows and their official Anthropic pricing/lifecycle evidence directly from the canonical registry.
@@ -132,7 +132,7 @@ If `FRONTEND_DIR` is unset, `server/app.py` serves `frontend-react/dist`. Set th
 - `server/billing/account_service.py` validates user ownership and lazily creates B2C accounts. `server/billing/subscription_service.py` applies the server-side lifecycle/grace policy and creates the effective usage period. `server/billing/entitlement_service.py` returns feature/model/file decisions and exact reservation quantities without mutating counters.
 - `server/billing/metering_service.py` owns atomic allowance mutation. It locks the billing owner for idempotency-key creation, locks required counters in deterministic order, rejects over-limit reservations before mutation, supplements underestimates when capacity exists, settles only safe successful quantities, releases unused quantities, and expires clearly stale reservations after a default 30-minute threshold. The API runs cleanup once at startup and every five minutes by default, while persisted heartbeats protect demonstrably active requests and `FOR UPDATE SKIP LOCKED` makes multiple instances safe.
 - `server/billing/enforcement_service.py` composes effective-plan resolution, entitlement evaluation, atomic reservation, and output-aware settlement/release for DB-mode Ask, Compare, Optimize, Cortex Analysis, and attachment-backed model calls. `server/persistence.py` owns the short committing units of work; no billing transaction remains open during a provider, optimizer, or object-storage call.
-- `BILLING_ENABLED=false` resolves all users to Free, keeps Stripe lazy, and makes Checkout, Portal, and webhook routes return `503 billing_not_configured`. `DEV_SUBSCRIPTION_PLAN` works only when billing is disabled and the runtime is explicitly local/development. The `unrestricted` development value additionally requires `DEV_SUBSCRIPTION_BYPASS_ENABLED=true`; prefer the guarded `run_app.py --subscription-plan unrestricted` entrypoint.
+- `BILLING_ENABLED=false` keeps valid Cortex grants effective, falls back to Free for other users, keeps Stripe lazy, and makes Checkout, Portal, and webhook routes return `503 billing_not_configured`. `DEV_SUBSCRIPTION_PLAN` works only when billing is disabled and the runtime is explicitly local/development. The `unrestricted` development value additionally requires `DEV_SUBSCRIPTION_BYPASS_ENABLED=true`; prefer the guarded `run_app.py --subscription-plan unrestricted` entrypoint.
 - With billing enabled, startup validates the secret key, webhook signing secret, paid-plan Price IDs, server redirect URLs, and optional API version. The API rejects client-supplied Price IDs, amounts, currencies, Customer IDs, and redirects. `server/billing/webhook_service.py` makes verified Stripe Checkout/subscription/invoice state authoritative, locks provider-event retries, rejects stale snapshots, preserves usage counters across same-period changes, and delegates paid/grace/cancellation access to `subscription_service.py`.
 - `/v1/chat`, `/v1/chat/stream`, `/v1/compare`, and `/v1/compare/stream` calculate one effective output limit and use it for both provider execution and credit reservation. They settle actual successful input/output credits and release unused estimates and failed targets. Advanced Web Search reserves 10,000 Cortex credits for the normal two-credit Tavily call, then settles `provider credits used x 5,000`; missing Tavily usage falls back to two credits and is marked estimated. Cached/session-reused research is free for the turn. Compare shares retrieval and performs aggregate partial settlement. Improve Prompt reserves all configured attempts and settles each billable usage item. Cortex Analysis reserves and settles its source-context synthesis as a separate unified-wallet call without charging again for reused Compare research. Upload/storage itself is free.
 - Cache-aware accounting partitions reported prompt usage into normal, cached-read, and cache-write tokens, applies effective provider-price ratios to the existing Cortex input multiplier, and falls back to the full multiplier when pricing evidence is absent. The canonical calculator feeds settlement, response DTOs, and history. Initial rollout computes `cache_aware_shadow_total`, `legacy_total`, and their delta while `CACHE_AWARE_CREDIT_SETTLEMENT_ENABLED=false` keeps legacy settlement authoritative.
@@ -151,6 +151,108 @@ If `FRONTEND_DIR` is unset, `server/app.py` serves `frontend-react/dist`. Set th
 - Frontend streaming responses do not auto-follow generated text as it grows, and the transcript no longer renders a floating down-arrow jump control.
 
 ## Endpoints
+
+### CortexAI Work
+
+- `POST /v1/work/sessions` and `GET /v1/work/sessions`
+- `GET /v1/work/sessions/{work_session_id}`
+- `GET /v1/work/sessions/{work_session_id}/runs`
+- `GET /v1/work/sessions/{work_session_id}/runs/latest`
+- `POST /v1/work/sessions/{work_session_id}/runs`
+- `POST /v1/work/sessions/{work_session_id}/instructions`
+- `GET /v1/work/runs/{run_id}`
+- `GET /v1/work/runs/{run_id}/events?after_sequence=N`
+- `GET /v1/work/runs/{run_id}/stream?after_sequence=N`
+- `POST /v1/work/runs/{run_id}/cancel`
+- `GET /v1/work/runs/{run_id}/artifacts`
+- `GET /v1/work/runs/{run_id}/artifacts/{file_id}/download`
+- `GET /v1/work/approvals/{approval_id}`
+- `POST /v1/work/approvals/{approval_id}/approve`
+- `POST /v1/work/approvals/{approval_id}/deny`
+- `GET /v1/tools/catalog` and `GET /v1/tools/connections`
+- `POST /v1/tools/connections`, `POST /v1/tools/connections/{id}/test`, and
+  `DELETE /v1/tools/connections/{id}`
+- `POST /v1/tools/{connector_key}/oauth/start` and
+  `GET /v1/tools/{connector_key}/oauth/callback`
+
+Every Work lookup is authenticated and joined through the owning Work session.
+`POST /v1/work/sessions` collapses whitespace and removes Unicode control or
+format characters from `title`, yielding an optional provider-safe single-line
+value of at most 200 characters. The Managed Agent adapter repeats this
+normalization before remote session creation so older stored titles are safe to
+retry.
+Starting a run accepts `Idempotency-Key`; the ID is the idempotency key within the
+user's Work history. React stores the newly created session before starting its
+first run, reuses that session after a structured start denial, and shows only
+run-backed Work sessions in the sidebar; zero-run shells remain outside visible
+history. While the accepted-run response is pending, React immediately renders
+a `Starting work` workspace with the submitted instruction. Stop remains
+unavailable until the backend returns a durable run ID. The activity rail omits
+unlabeled internal progress events, animates
+only the latest visible activity while the run is nonterminal, and renders no
+active indicators after a terminal outcome; completed runs show every plan step
+done. SSE emits persisted events in sequence, accepts either the
+`after_sequence` query or `Last-Event-ID`, sends heartbeat events without
+advancing the durable cursor, and can reconstruct the current state after a
+process or browser reconnect. When a run status becomes terminal ahead of the
+browser's current event sequence, React fetches and merges the remaining events
+before stopping the stream so the final written outcome appears without a page
+refresh. Provider thinking and raw secret values are never included in the
+public event payload.
+
+`GET /v1/work/sessions/{work_session_id}/runs` returns every owned run in
+chronological order. React hydrates each run's durable events and artifacts and
+renders a session transcript, so sending an instruction appends a turn without
+removing earlier prompts, outcomes, or deliverables. Web/MCP selection changes
+are applied to the existing provider session to retain context. When immutable
+provider vault resources require a replacement session, the backend supplies a
+bounded PostgreSQL-backed transcript of prior visible turns with the new
+instruction.
+
+Artifact listing for a terminal run performs a best-effort idempotent import
+retry before returning Cortex-owned files. Import uses the provider session ID
+recorded on that run, skips input/non-downloadable files, and isolates each
+provider output so one failed download or storage write does not suppress the
+other deliverables.
+
+The run request accepts `web_mode: "auto" | "on" | "off"` and defaults to
+`auto`. The backend resolves `auto` from the instruction's current-information
+intent, persists both requested and effective Web state, and remains the
+authority even if browser state changes while a session is being created.
+Legacy `web_enabled` booleans remain accepted as explicit On/Off requests.
+
+The master feature flag is `CORTEX_WORK_ENABLED`. A disabled environment returns
+404 for Work operations and omits Work navigation through `/runtime-config.js`.
+The full provider, MCP, OAuth, AWS, rollout, rollback, and troubleshooting
+contract is in `docs/runbooks/cortex-work.md`.
+
+The default Work ceiling is 1,000,000 raw AI-credit units ($1.00), presented as
+1,000 AI credits in the browser and clamped to the effective plan limit. Managed
+Agents enforces the provider session budget and
+pauses it at `budget_reached`; reconciliation never emits timer-driven
+`user.interrupt` events. Reused provider sessions receive a cumulative cap
+extension for the newly reserved run. If the prior turn is budget-paused, that
+budget update resumes it without sending a concurrent follow-up message.
+Built-in file/search reads are automatic, while bash/write/edit and sensitive
+or mutating connector actions retain approval enforcement.
+
+Separately, each run defaults to a 40,000 output-token ceiling. The always-on
+lease-based reconciler requests concise finalization at 32,000 and interrupts
+at 40,000, recording `output_limit_reached` after the provider stops. This
+worker also reconciles active runs when no browser SSE request is connected.
+Provider usage is sampled, so the recorded total may include a bounded amount
+produced between snapshots.
+
+Work billing prices normal input, cache-read input, cache-write input, output,
+active runtime, and web searches from their independent cumulative deltas. It
+also converts the provider's cumulative USD `list_cost` delta to AI credits and
+uses it as a minimum settlement floor when the reconstructed component charge
+is lower. Non-USD or malformed provider cost snapshots fail reconciliation so
+the reservation remains open for investigation rather than being underbilled.
+The pricing model is resolved from the retrieved Managed Agent session's Agent
+snapshot and persisted with provider model and Agent identity. There is no
+runtime `ANTHROPIC_MANAGED_BILLING_MODEL` fallback; missing, unknown, or
+multi-model identity fails closed before the task is sent or settled.
 
 - `GET /health`
 - `GET /health/runtime`
@@ -271,7 +373,7 @@ Invalid or missing credentials return `401`.
 
 ### Effective subscription and entitlements
 
-`GET /v1/entitlements` uses API-key, Cognito bearer, or signed-session authentication. It commits lazy account/usage-period creation and returns the unified `allowances.ai_credits` counter with `used`, `reserved`, `limit`, and nonnegative `remaining` values. It also returns the effective plan's server-owned `limits.max_files_per_request` and `limits.max_file_bytes` so clients can explain file denials without copying plan configuration. Free periods are UTC calendar months; paid periods use stored provider boundaries.
+`GET /v1/entitlements` uses API-key, Cognito bearer, or signed-session authentication. It commits lazy account/usage-period creation and returns the unified `allowances.ai_credits` counter with `used`, `reserved`, `limit`, and nonnegative `remaining` values. It also returns the effective plan's server-owned `limits.max_files_per_request` and `limits.max_file_bytes` so clients can explain file denials without copying plan configuration. Free periods are UTC calendar months; Stripe periods use stored provider boundaries; grant periods use monthly UTC anniversaries of the grant start, clipped at expiry.
 
 Plan budgets and safety limits are server-owned: Free has 100,000 credits, 5 requests/minute, and 1 × 10 MB files; Plus has 1,000,000 credits, 15 requests/minute, and 3 × 20 MB files; Pro has 3,000,000 credits, 30 requests/minute, and 5 × 20 MB files. Plus is USD 6.99/month and Pro is USD 12.99/month.
 
@@ -279,12 +381,15 @@ Plan budgets and safety limits are server-owned: Free has 100,000 credits, 5 req
 
 Effective lifecycle rules are server-side and conservative:
 
-- `trialing` and `active`: paid plan for a valid current stored period
-- `past_due`: paid plan only through `grace_until`; otherwise Free
+- `active`: Stripe paid plan for a valid current stored period
+- `trialing`: no Stripe paid access
+- `past_due`: paid plan only through `grace_until`; otherwise grant/Free fallback
 - `canceled`: paid plan only when `cancel_at_period_end=true` and the stored period has not ended
-- `unpaid`, `incomplete`, `incomplete_expired`, `paused`, expired cancellation, unknown status, or unknown plan: Free
+- `unpaid`, `incomplete`, `incomplete_expired`, `paused`, expired cancellation, unknown status, or unknown plan: valid Cortex grant, then Free
 
 The endpoint returns `plan`, `features`, `model_access`, `limits`, `allowances`, and `period` sections and never exposes provider subscription IDs, Stripe price IDs, customer IDs, amounts, or secrets. `/v1/whoami.plan_tier` remains a compatibility display field populated from the effective plan in database mode; new integrations should use `/v1/entitlements` plus `/v1/whoami.billing.plan_code`.
+
+Cortex-issued Plus/Pro access uses the existing plan catalogue and `EffectiveSubscription`. Resolution order is guarded local override, valid Stripe paid state when enabled, valid Cortex grant, then Free. `/v1/entitlements` returns `plan.source="cortex_grant"`; `/v1/billing/subscription` returns the granted plan, active status, null provider, no cancellation and `can_manage=false`. `/v1/billing/plans.billing_enabled` still means Stripe hosted-billing availability. There is no grant-assignment HTTP endpoint; use the [operator CLI](runbooks/subscription-grants.md). Pricing shows Current plan for granted access while Stripe is disabled; Billing describes CortexAI-provided access and monthly usage resets.
 
 ### Stripe hosted billing sessions
 
@@ -328,9 +433,11 @@ STRIPE_PORTAL_RETURN_URL=https://app.example.com/account/billing
 
 See `docs/runbooks/stripe-billing.md` for the enablement checklist. Do not place Stripe secrets in frontend runtime configuration or commit them.
 
-React consumes these contracts through `frontend-react/src/api/billing.ts`, `frontend-react/src/api/entitlements.ts`, and the auth-aware `useSubscription` hook. Signed-out hooks call only the public plans endpoint. Checkout-success polling remains bounded and considers payment confirmed only after `/v1/entitlements` reports a paid effective plan; browser storage and the return query string are never plan authority.
+React consumes these contracts through `frontend-react/src/api/billing.ts`, `frontend-react/src/api/entitlements.ts`, and the auth-aware `useSubscription` hook. Signed-out hooks call only the public plans endpoint. Checkout-success polling remains bounded and considers payment confirmed only after `/v1/entitlements` reports a paid effective plan with `source=stripe` (Cortex grants do not confirm payment); browser storage and the return query string are never plan authority.
 
 React exposes `/pricing` for the public Free/Plus/Pro catalogue and `/account/billing` for authenticated plan status, lifecycle notices, allowance progress, and Portal management. Billing-disabled, Free, active paid, past-due, cancel-at-period-end, fully cancelled, and delayed Checkout-confirmation states render from these server contracts. Account-menu plan context stays summary-only.
+
+The API, database, ledger, reservations, and React state retain raw integer AI-credit units. Customer-facing React surfaces use `frontend-react/src/utils/aiCredits.ts` to display one AI credit per 1,000 raw units: Free/Plus/Pro therefore render 100/1,000/3,000 AI credits while the API contracts remain 100,000/1,000,000/3,000,000. Balances, allowance meters, response/Compare usage, itemized activity, structured insufficient-credit messages, and Work budgets use the same formatter. React still sends raw Work budgets and other credit-bearing request values back to the API.
 
 React model/composer/file locks are user-experience controls only. They consume live `/v1/models` catalogue and billing metadata, show the Pro-only third Compare target, display Web/Improve/file allowances, and open contextual dialogs for structured backend denials. Unknown model billing metadata is unavailable rather than optimistically allowed. Prompt text and attachments are cleared only after a stream is accepted, so a preflight denial remains editable; restored historical responses are not filtered after downgrade. The AI credits route shows the unified allowance separately from the provider token/cost analytics on Usage & insights. Its credit history groups itemized API rows by `activity_id` into one card with the original pre-optimization question and total first; Prompt Optimizer and the following Ask/Compare share that display key. When both exist, the native expandable breakdown presents their combined credits as one `Final optimized ... answer` line and explicitly identifies the included optimizer attempts and final answer generation. Optimizer-only activity remains identifiable, Compare/Cortex Analysis/Web Search charges remain understandable, optimizer retries are aggregated, zero-credit adjustments stay out of the visible breakdown, and an explicit fallback covers legacy or privacy-policy-limited activity with no query.
 
@@ -722,6 +829,8 @@ psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260802_add_
 psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260804_add_generation_budget_audit.sql
 psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260807_add_cache_aware_credit_accounting.sql
 psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260811_add_direct_s3_attachment_upload.sql
+psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260820_add_cortex_work_mode.sql
+psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260829_add_work_web_output_and_model_identity.sql
 ```
 
 The first Cortex Analysis migration adds Compare response revision metadata and
@@ -755,6 +864,7 @@ GPT-5.6 and Codex-family models use the Responses API with `max_output_tokens` a
 - When `routing.research_mode=true`, Ask performs a fresh research pass for the current turn.
 - When `routing.research_mode=true`, Compare performs one shared research pass for the compare turn.
 - Injected sources are primary evidence for current/source-dependent facts; models may still use non-conflicting baseline knowledge for background context.
+- Successful provider answers are not scanned or replaced using phrase, number, date, or citation heuristics. When research is disabled, non-empty answers are returned as generated by the selected models.
 - Response payloads expose normalized source metadata through `web_source_items`.
 - Query sanitization anchors underspecified follow-up searches to the previous user topic when the current prompt omits that topic.
 - Tavily search calls use a deterministic local resolver with fixed retrieval params: `max_results=5`, `search_depth=advanced`, `chunks_per_source=1..3` (default `3`), `include_raw_content=false`, `include_answer=false`, and `auto_parameters=false`.
@@ -771,6 +881,7 @@ Applied in `server/utils.py`:
 - Empty length-limited responses remain successful-but-incomplete billable work, even when reasoning consumed the allowance before visible output. Unexplained empty successes still normalize to provider errors.
 - Provider-native availability failures are sanitized before DTO/stream output. Upstream 503/high-demand/overloaded errors are tagged as `error.details.kind="transient_capacity"` and rendered as `This model is temporarily busy. Try again shortly or switch to another model.` instead of raw provider JSON.
 - Smart Ask keeps the existing automatic fallback loop for retryable provider failures. Manual Ask and Compare keep the user-selected model targets and return safe per-model errors when those explicit targets are unavailable.
+- CortexAI does not attempt to determine whether a non-empty successful LLM answer is fabricated. Web research provides optional grounding; provider-native safety/filter outcomes remain authoritative.
 
 Security/logging:
 - `X-API-Key` and `Authorization` headers are redacted in auth logs.

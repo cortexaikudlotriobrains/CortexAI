@@ -74,14 +74,14 @@ describe("CreditsPage", () => {
     );
     expect(screen.getByRole("heading", { name: "AI credit balance" })).toBeInTheDocument();
     expect(
-      screen.getByRole("progressbar", { name: "AI credits: 90,000 left of 100,000" }),
+      screen.getByRole("progressbar", { name: "AI credits: 90 left of 100" }),
     ).toBeInTheDocument();
 
     await waitFor(() => {
       expect(screen.getByText("Final optimized AI answer + Web Search")).toBeInTheDocument();
     });
     const question = screen.getByText("How do atomic credit reservations work?");
-    const total = screen.getByText("13,000 credits");
+    const total = screen.getByText("13 credits");
     expect(
       question.compareDocumentPosition(total) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
@@ -92,14 +92,16 @@ describe("CreditsPage", () => {
     const breakdownItems = within(activityRegion).getAllByRole("listitem");
     expect(breakdownItems).toHaveLength(2);
     expect(within(breakdownItems[0]).getByText("Final optimized AI answer")).toBeInTheDocument();
-    expect(within(breakdownItems[0]).getByText("3,000 credits")).toBeInTheDocument();
+    expect(within(breakdownItems[0]).getByText("3 credits")).toBeInTheDocument();
     expect(
       within(breakdownItems[0]).getByText(
-        "Includes Prompt Optimizer (1 optimizer attempt) and final answer · GPT-5.4 Mini · 1,500 question processing + 1,500 answer generation",
+        "Includes Prompt Optimizer (1 optimizer attempt) and final answer · GPT-5.4 Mini · 1.5 question processing + 1.5 answer generation",
       ),
     ).toBeInTheDocument();
     expect(within(breakdownItems[1]).getByText("Web Search")).toBeInTheDocument();
-    expect(within(breakdownItems[1]).getByText("2 search credits × 5,000")).toBeInTheDocument();
+    expect(
+      within(breakdownItems[1]).getByText("2 search credits × 5 AI credits each"),
+    ).toBeInTheDocument();
     expect(hookMocks.fetchCreditTransactions).toHaveBeenCalledWith(
       100,
       0,
@@ -157,13 +159,13 @@ describe("CreditsPage", () => {
     const activity = await screen.findByRole("article", {
       name: "Credit activity for Make this question clearer",
     });
-    expect(within(activity).getAllByText("1,100 credits")).toHaveLength(2);
+    expect(within(activity).getAllByText("1.1 credits")).toHaveLength(2);
     expect(within(activity).getAllByText("Prompt Optimizer")).toHaveLength(2);
     expect(within(activity).getByText("1 charge")).toBeInTheDocument();
     fireEvent.click(within(activity).getByText("View credit breakdown"));
     expect(
       screen.getByText(
-        "GPT-5.4 Mini · 2 attempts · 650 question processing + 450 answer generation",
+        "GPT-5.4 Mini · 2 attempts · 0.65 question processing + 0.45 answer generation",
       ),
     ).toBeInTheDocument();
   });
@@ -214,7 +216,7 @@ describe("CreditsPage", () => {
     expect(
       within(activity).getByText(/Includes Prompt Optimizer \(1 optimizer attempt\) and 2 final answers/),
     ).toBeInTheDocument();
-    expect(within(activity).getAllByText("3,000 credits")).toHaveLength(2);
+    expect(within(activity).getAllByText("3 credits")).toHaveLength(2);
   });
 });
 

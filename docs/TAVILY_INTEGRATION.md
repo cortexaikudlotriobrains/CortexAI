@@ -32,6 +32,7 @@ Current behavior highlights:
 - In `on`, local research cache reuse is bypassed.
 - If sanitized query is empty in `on`, system falls back to raw prompt.
 - Source metadata is normalized into `web_source_items` on responses.
+- Research metadata is additive: CortexAI does not post-classify successful model text as fabricated or replace it based on phrases, dates, numbers, or missing citation markers.
 - Missing provider timestamp values are normalized to server UTC ISO timestamps.
 - Tavily search-option resolution is deterministic and local. It does not call an LLM, does not call Tavily, and does not rewrite the query.
 

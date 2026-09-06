@@ -122,6 +122,9 @@ describe("subscription data layer", () => {
     expect(error.kind).toBe("allowance");
     expect(error.status).toBe(402);
     expect(error.retryable).toBe(false);
+    expect(error.message).toBe(
+      "This request is estimated to require 15 AI credits. You have 2 remaining.",
+    );
     expect(error.details).toMatchObject({
       meter: "ai_credits",
       required: 15_000,
@@ -252,6 +255,33 @@ describe("subscription data layer", () => {
     expect(entitlementCalls).toBe(2);
     expect(result.current.entitlements?.plan.code).toBe("free");
     expect(result.current.error).toBeNull();
+  });
+
+  it("does not treat Cortex-granted access as a confirmed Stripe payment", async () => {
+    const baseFetch = subscriptionFetchMock({ planCode: "pro" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (...args: Parameters<typeof fetch>) => {
+        const response = await baseFetch(args[0]);
+        if (String(args[0]).includes("/v1/entitlements")) {
+          const payload = await response.json();
+          payload.plan.source = "cortex_grant";
+          return new Response(JSON.stringify(payload), { status: 200 });
+        }
+        return response;
+      }),
+    );
+    const { result } = renderHook(() =>
+      useSubscription({
+        authLoading: false,
+        loggedIn: true,
+        checkoutReturn: "success",
+        checkoutPollIntervalMs: 1,
+        checkoutPollMaxAttempts: 1,
+      }),
+    );
+    await waitFor(() => expect(result.current.checkoutConfirmation).toBe("pending"));
+    expect(result.current.entitlements?.plan.code).toBe("pro");
   });
 
   it("follows only validated server-returned hosted billing URLs", async () => {

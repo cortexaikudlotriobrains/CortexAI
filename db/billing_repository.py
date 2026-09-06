@@ -414,6 +414,137 @@ def get_active_usage_period(
     return _first_record(db.execute(stmt))
 
 
+def get_current_subscription_grant(
+    db: Session,
+    billing_account_id: UUID,
+) -> BillingRecord | None:
+    """Inspect the open lifecycle row, including a scheduled or elapsed grant."""
+    grants = _table("subscription_grants")
+    return _record(
+        db.execute(
+            select(grants).where(
+                grants.c.billing_account_id == billing_account_id,
+                grants.c.status == "active",
+            )
+        )
+        .mappings()
+        .one_or_none()
+    )
+
+
+def get_effective_subscription_grant(
+    db: Session,
+    billing_account_id: UUID,
+    at_time: datetime,
+) -> BillingRecord | None:
+    """Return the sole time-valid candidate; the service validates its catalogue plan."""
+    grants = _table("subscription_grants")
+    return _record(
+        db.execute(
+            select(grants).where(
+                grants.c.billing_account_id == billing_account_id,
+                grants.c.status == "active",
+                grants.c.revoked_at.is_(None),
+                grants.c.starts_at <= at_time,
+                grants.c.expires_at > at_time,
+            )
+        )
+        .mappings()
+        .one_or_none()
+    )
+
+
+def create_subscription_grant(
+    db: Session,
+    *,
+    billing_account_id: UUID,
+    plan_code: str,
+    starts_at: datetime,
+    expires_at: datetime,
+    granted_by: str,
+    reason: str,
+    now: datetime,
+) -> BillingRecord:
+    """Insert under the account lock; an open grant must first be revoked by the service."""
+    if lock_billing_account(db, billing_account_id) is None:
+        raise ValueError("Billing account does not exist")
+    grants = _table("subscription_grants")
+    db.execute(
+        update(grants)
+        .where(
+            grants.c.billing_account_id == billing_account_id,
+            grants.c.status == "active",
+            grants.c.expires_at <= now,
+        )
+        .values(status="expired", updated_at=now)
+    )
+    if get_current_subscription_grant(db, billing_account_id) is not None:
+        raise ValueError("An open grant already exists; use change to replace it")
+    return dict(
+        db.execute(
+            insert(grants)
+            .values(
+                id=_new_id_for(grants),
+                billing_account_id=billing_account_id,
+                plan_code=plan_code,
+                status="active",
+                starts_at=starts_at,
+                expires_at=expires_at,
+                granted_by=granted_by,
+                reason=reason,
+                created_at=now,
+                updated_at=now,
+            )
+            .returning(*grants.c)
+        )
+        .mappings()
+        .one()
+    )
+
+
+def revoke_current_subscription_grant(
+    db: Session,
+    *,
+    billing_account_id: UUID,
+    now: datetime,
+    revoked_by: str,
+    reason: str,
+) -> BillingRecord | None:
+    """Retain issuance audit and append revocation evidence without committing."""
+    lock_billing_account(db, billing_account_id)
+    grants = _table("subscription_grants")
+    return _first_record(
+        db.execute(
+            update(grants)
+            .where(
+                grants.c.billing_account_id == billing_account_id,
+                grants.c.status == "active",
+            )
+            .values(
+                status="revoked",
+                revoked_at=now,
+                revoked_by=revoked_by,
+                revocation_reason=reason,
+                updated_at=now,
+            )
+            .returning(*grants.c)
+        )
+    )
+
+
+def close_grant_usage_periods(db: Session, subscription_grant_id: UUID) -> None:
+    """Close access while preserving dates, counters, reservations and ledger history."""
+    periods = _table("usage_periods")
+    db.execute(
+        update(periods)
+        .where(
+            periods.c.subscription_grant_id == subscription_grant_id,
+            periods.c.status == "active",
+        )
+        .values(status="closed", updated_at=func.now())
+    )
+
+
 def create_usage_period(
     db: Session,
     *,
@@ -422,6 +553,7 @@ def create_usage_period(
     starts_at: datetime,
     ends_at: datetime,
     subscription_id: UUID | None = None,
+    subscription_grant_id: UUID | None = None,
 ) -> BillingRecord:
     if ends_at <= starts_at:
         raise ValueError("ends_at must be after starts_at")
@@ -433,6 +565,7 @@ def create_usage_period(
             id=_new_id_for(usage_periods),
             billing_account_id=billing_account_id,
             subscription_id=subscription_id,
+            subscription_grant_id=subscription_grant_id,
             plan_code=_required_text(plan_code, "plan_code").lower(),
             starts_at=starts_at,
             ends_at=ends_at,
@@ -454,6 +587,7 @@ def get_or_create_usage_period(
     starts_at: datetime,
     ends_at: datetime,
     subscription_id: UUID | None = None,
+    subscription_grant_id: UUID | None = None,
 ) -> BillingRecord:
     """Atomically create an exact usage period or return its matching row."""
     if ends_at <= starts_at:
@@ -461,18 +595,37 @@ def get_or_create_usage_period(
 
     usage_periods = _table("usage_periods")
     normalized_plan = _required_text(plan_code, "plan_code").lower()
+    if subscription_id is not None and subscription_grant_id is not None:
+        raise ValueError("Usage period must have only one subscription source")
+    grant_period = subscription_grant_id is not None
+    source_match = (
+        usage_periods.c.subscription_grant_id == subscription_grant_id
+        if grant_period
+        else usage_periods.c.subscription_grant_id.is_(None)
+    )
     stmt = (
         _dialect_insert(db, usage_periods)
         .values(
             id=_new_id_for(usage_periods),
             billing_account_id=billing_account_id,
             subscription_id=subscription_id,
+            subscription_grant_id=subscription_grant_id,
             plan_code=normalized_plan,
             starts_at=starts_at,
             ends_at=ends_at,
             status="active",
         )
-        .on_conflict_do_nothing(index_elements=["billing_account_id", "starts_at"])
+        .on_conflict_do_nothing(
+            index_elements=[
+                "subscription_grant_id" if grant_period else "billing_account_id",
+                "starts_at",
+            ],
+            index_where=(
+                usage_periods.c.subscription_grant_id.is_not(None)
+                if grant_period
+                else usage_periods.c.subscription_grant_id.is_(None)
+            ),
+        )
         .returning(*usage_periods.c)
     )
     created = _first_record(db.execute(stmt))
@@ -483,6 +636,7 @@ def get_or_create_usage_period(
         and_(
             usage_periods.c.billing_account_id == billing_account_id,
             usage_periods.c.starts_at == starts_at,
+            source_match,
         )
     )
     existing = _first_record(db.execute(existing_stmt))
@@ -491,6 +645,7 @@ def get_or_create_usage_period(
 
     definition_conflicts = (
         existing.get("subscription_id") != subscription_id
+        or existing.get("subscription_grant_id") != subscription_grant_id
         or existing.get("plan_code") != normalized_plan
         or not _same_datetime(existing.get("ends_at"), ends_at)
     )
@@ -524,6 +679,7 @@ def synchronize_usage_period(
     starts_at: datetime,
     ends_at: datetime,
     subscription_id: UUID | None = None,
+    subscription_grant_id: UUID | None = None,
 ) -> BillingRecord:
     """Synchronize one provider period without replacing its usage counters.
 
@@ -534,6 +690,16 @@ def synchronize_usage_period(
     """
     if ends_at <= starts_at:
         raise ValueError("ends_at must be after starts_at")
+    if subscription_grant_id is not None:
+        return get_or_create_usage_period(
+            db,
+            billing_account_id=billing_account_id,
+            plan_code=plan_code,
+            starts_at=starts_at,
+            ends_at=ends_at,
+            subscription_id=subscription_id,
+            subscription_grant_id=subscription_grant_id,
+        )
     usage_periods = _table("usage_periods")
     normalized_plan = _required_text(plan_code, "plan_code").lower()
     stmt = (
@@ -549,6 +715,7 @@ def synchronize_usage_period(
         )
         .on_conflict_do_update(
             index_elements=["billing_account_id", "starts_at"],
+            index_where=usage_periods.c.subscription_grant_id.is_(None),
             set_={
                 "subscription_id": subscription_id,
                 "plan_code": normalized_plan,

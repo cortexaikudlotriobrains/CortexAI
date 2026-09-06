@@ -28,6 +28,10 @@ class PlanLimits:
     requests_per_minute: int
     max_files_per_request: int
     max_file_bytes: int
+    max_active_work_runs: int
+    max_tool_connections: int
+    max_mcp_servers_per_run: int
+    max_work_credit_budget: int
 
 
 @dataclass(frozen=True)
@@ -40,6 +44,10 @@ class PlanEntitlements:
     usage_export_enabled: bool
     saved_history_enabled: bool
     models_catalog_enabled: bool
+    work_enabled: bool
+    verified_connectors_enabled: bool
+    custom_mcp_enabled: bool
+    action_tools_enabled: bool
     allowed_billing_classes: frozenset[str]
 
 

@@ -58,3 +58,7 @@ Invalid signatures are rejected before persistence. Never weaken timestamp toler
 ## Closeout
 
 Confirm a new signed test event succeeds, failed/received rows have reached a terminal state, `/v1/entitlements` matches Stripe lifecycle policy, one usage period exists for each provider period start, counters were preserved, and no secret or full payload entered logs or incident artifacts.
+
+## Cortex grants
+
+`BILLING_ENABLED=false` stops Stripe, but valid Cortex grants retain their plan access. Inspect the existing user with `python scripts/manage_subscription_grant.py inspect --email user@example.com`; check lifecycle status, UTC start/expiry and current period source. Use the [grant runbook](subscription-grants.md) for changes/revocations and monthly resets. A valid enabled Stripe subscription takes precedence. Never convert Stripe/trial rows to grants or edit usage history to repair access.

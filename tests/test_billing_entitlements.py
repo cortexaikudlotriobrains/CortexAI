@@ -176,9 +176,13 @@ def billing_service_db(monkeypatch):
         Column("metadata", JSON, nullable=False, default=dict),
         Column("created_at", DateTime(timezone=True), nullable=False, default=datetime.now),
     )
+    from tests.billing_schema_helpers import add_subscription_grant_schema
+
+    subscription_grants = add_subscription_grant_schema(metadata)
     tables = {
         table.name: table
         for table in (
+            subscription_grants,
             users,
             billing_accounts,
             subscriptions,
@@ -797,7 +801,12 @@ def test_entitlements_endpoint_lazy_creates_free_snapshot_with_all_counters(
     assert payload["limits"] == {
         "max_files_per_request": 1,
         "max_file_bytes": 10_000_000,
+        "max_active_work_runs": 0,
+        "max_tool_connections": 0,
+        "max_mcp_servers_per_run": 0,
+        "max_work_credit_budget": 0,
     }
+    assert payload["features"]["work_enabled"] is False
     assert payload["period"]["starts_at"].endswith("Z")
     assert payload["period"]["ends_at"].endswith("Z")
     assert len(db.execute(select(tables["usage_counters"])).all()) == 1

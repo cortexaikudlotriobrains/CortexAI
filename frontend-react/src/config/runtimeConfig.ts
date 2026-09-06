@@ -4,6 +4,7 @@ export interface CortexRuntimeConfig {
   devSessionLoginToken?: string;
   directAttachmentUploads?: boolean;
   legacyAttachmentUploads?: boolean;
+  workEnabled?: boolean;
 }
 
 export type AttachmentUploadMode = "direct" | "legacy" | "disabled";

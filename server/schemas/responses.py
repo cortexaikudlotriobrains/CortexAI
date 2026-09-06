@@ -257,10 +257,7 @@ class CompareResponseDTO(BaseModel):
             error_count=mur.error_count,
             total_tokens=mur.total_tokens,
             total_cost=mur.total_cost,
-            total_ai_credits=(
-                sum(item.ai_credits for item in response_dtos)
-                + research_credits
-            ),
+            total_ai_credits=(sum(item.ai_credits for item in response_dtos) + research_credits),
             total_cache_savings_ai_credits=sum(
                 item.cache_savings_ai_credits for item in response_dtos
             ),
@@ -562,6 +559,10 @@ class EntitlementFeaturesDTO(BaseModel):
     usage_export_enabled: bool
     saved_history_enabled: bool
     models_catalog_enabled: bool
+    work_enabled: bool
+    verified_connectors_enabled: bool
+    custom_mcp_enabled: bool
+    action_tools_enabled: bool
 
 
 class EntitlementModelAccessDTO(BaseModel):
@@ -571,6 +572,10 @@ class EntitlementModelAccessDTO(BaseModel):
 class EntitlementLimitsDTO(BaseModel):
     max_files_per_request: int
     max_file_bytes: int
+    max_active_work_runs: int
+    max_tool_connections: int
+    max_mcp_servers_per_run: int
+    max_work_credit_budget: int
 
 
 class EntitlementAllowanceDTO(BaseModel):
@@ -636,6 +641,11 @@ class PublicBillingPlanFeaturesDTO(BaseModel):
     research_enabled: bool
     prompt_improvement_enabled: bool
     file_analysis_enabled: bool
+    work_enabled: bool
+    verified_connectors_enabled: bool
+    custom_mcp_enabled: bool
+    action_tools_enabled: bool
+    max_active_work_runs: int
     allowed_billing_classes: List[str] = Field(default_factory=list)
 
 

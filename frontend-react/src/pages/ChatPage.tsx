@@ -1,8 +1,9 @@
 import { type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { fetchCortexAnalysisRuns } from "../api/cortexAnalysis";
 import { fetchHistory } from "../api/history";
+import { listWorkSessions } from "../api/work";
 import { PromptComposer } from "../components/composer/PromptComposer";
 import { ResultsSection } from "../components/results/ResultsSection";
 import { ErrorBanner } from "../components/shared/ErrorBanner";
@@ -15,6 +16,7 @@ import { SubscriptionBanner } from "../components/subscription/SubscriptionBanne
 import { UpgradeDialog } from "../components/subscription/UpgradeDialog";
 import { DEFAULT_MODELS } from "../config/defaultModels";
 import { getModelPresentation } from "../config/modelPresentation";
+import { getRuntimeConfig } from "../config/runtimeConfig";
 import { formatHistoryDateTime } from "../history/historyDate";
 import { buildHistoryThreads, filterHistoryThreads } from "../history/historyThreads";
 import { useAuth } from "../hooks/useAuth";
@@ -26,7 +28,7 @@ import { useTheme } from "../hooks/useTheme";
 import { normalizeSessionId } from "../session/activeSession";
 import { useChatStore } from "../store/chatStore";
 import { getAccountMenuSubscriptionPresentation } from "../subscription/accountMenuPresentation";
-import type { ChatMode, HistoryThread, ModelCatalogItem } from "../types";
+import type { ChatMode, HistoryThread, ModelCatalogItem, WorkSession } from "../types";
 import brandMarkUrl from "../assets/brand/brand-mark.svg";
 import styles from "./ChatPage.module.css";
 
@@ -40,6 +42,7 @@ interface MobileHistoryDateGroup {
 
 export function ChatPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { whoAmI, cognitoConfig, loading: authLoading, loggedIn, login, logout } = useAuth();
   const authEnabled = cognitoConfig?.enabled ?? false;
   const signedOut = !authLoading && authEnabled && !loggedIn;
@@ -55,6 +58,7 @@ export function ChatPage() {
   const { theme, toggleTheme } = useTheme();
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>("chat");
   const [composerCollapsed, setComposerCollapsed] = useState(false);
+  const [workSessions, setWorkSessions] = useState<WorkSession[]>([]);
   const streaming = useChatStore((s) => s.streaming);
   const error = useChatStore((s) => s.error);
   const setError = useChatStore((s) => s.setError);
@@ -80,6 +84,16 @@ export function ChatPage() {
   useEffect(() => {
     if (workspaceReady) void loadHistory({ restoreActiveTranscript: true });
   }, [loadHistory, workspaceReady]);
+
+  useEffect(() => {
+    if (!workspaceReady || getRuntimeConfig().workEnabled === false) return;
+    void listWorkSessions().then(setWorkSessions).catch(() => setWorkSessions([]));
+  }, [workspaceReady]);
+
+  useEffect(() => {
+    const requestedMode = new URLSearchParams(location.search).get("mode");
+    if (requestedMode === "compare") setMode("compare");
+  }, [location.search, setMode]);
 
   // Collapse the composer sheet on mobile as soon as the user submits
   const prevStreamingRef = useRef(false);
@@ -171,12 +185,15 @@ export function ChatPage() {
         onSelectThread={(thread) => void handleSelectHistoryThread(thread)}
         activeView="chat"
         onNavigateUsage={() => navigate("/usage")}
+        onNavigateWork={getRuntimeConfig().workEnabled === false ? undefined : () => navigate("/work")}
         onNavigateCredits={() => navigate("/credits")}
         onNavigateModels={() => navigate("/models")}
         whoAmI={whoAmI}
         loggedIn={loggedIn}
         onLogin={authEnabled ? login : undefined}
         signedOut={signedOut}
+        workSessions={workSessions}
+        onSelectWorkSession={(session) => navigate(`/work/${session.id}`)}
       />
 
       <main className={styles.main}>
@@ -216,7 +233,7 @@ export function ChatPage() {
         </header>
 
         <header className={styles.topbar}>
-          <nav className={styles.tabs} aria-label="Chat mode">
+          <nav className={styles.tabs} aria-label="Workspace mode">
             <button
               id="btnSingleMode"
               type="button"
@@ -237,6 +254,15 @@ export function ChatPage() {
             >
               Compare
             </button>
+            {getRuntimeConfig().workEnabled !== false && <button
+              type="button"
+              className={styles.tab}
+              onClick={() => navigate("/work")}
+              aria-label="Work"
+              disabled={signedOut}
+            >
+              Work
+            </button>}
           </nav>
           <div className={styles.topActions} aria-label="Workspace actions">
             <button
@@ -364,6 +390,12 @@ export function ChatPage() {
               </span>
               <span>Compare</span>
             </button>
+            {getRuntimeConfig().workEnabled !== false && <button type="button" onClick={() => navigate("/work")}>
+              <span className={styles.mobileNavIcon}>
+                <CortexIcon name="work" />
+              </span>
+              <span>Work</span>
+            </button>}
             <button
               type="button"
               className={mobilePanel === "history" ? styles.mobileNavActive : ""}

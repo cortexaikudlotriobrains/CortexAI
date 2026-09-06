@@ -104,16 +104,22 @@ describe("ResponseCard", () => {
   });
 
   it("shows completed response stats without a run-details disclosure control", () => {
-    render(<ResponseCard response={{ ...response(), ai_credits: 1_234 }} compact />);
+    render(
+      <ResponseCard
+        response={{ ...response(), ai_credits: 1_234, cache_savings_ai_credits: 250 }}
+        compact
+      />,
+    );
 
     const stats = document.querySelector('[id^="response-stats-"]');
 
     expect(screen.queryByRole("button", { name: /run details/i })).not.toBeInTheDocument();
     expect(stats).toHaveTextContent("20.0s");
-    expect(stats).toHaveTextContent("60 tok");
-    expect(stats).toHaveTextContent("1,234 credits");
+    expect(stats).not.toHaveTextContent("60 tok");
+    expect(stats).toHaveTextContent("1.234 credits");
     expect(stats).not.toHaveTextContent("$0.0010");
-    expect(stats?.querySelectorAll("svg")).toHaveLength(3);
+    expect(stats?.querySelectorAll("svg")).toHaveLength(2);
+    expect(screen.getByText("Saved ~0.25 credits through context reuse")).toBeInTheDocument();
   });
 
   it("preserves a token-limited partial answer and offers a larger retry", () => {
@@ -170,7 +176,7 @@ describe("ResponseCard", () => {
     expect(header).toHaveTextContent("00:10 elapsed · Generating response");
   });
 
-  it("formats completed metrics with duration and grouped token count", () => {
+  it("shows completed duration without rendering token usage from the response", () => {
     const completed = {
       ...response(false, "Completed answer."),
       latency_ms: 12400,
@@ -186,9 +192,8 @@ describe("ResponseCard", () => {
 
     const header = document.querySelector("header");
     expect(header).toHaveTextContent("12.4s");
-    expect(header).toHaveTextContent("1,248 tok");
-    expect(header?.querySelectorAll("svg")).toHaveLength(2);
-    expect(header).not.toHaveTextContent("1.2k");
+    expect(header).not.toHaveTextContent("1,248 tok");
+    expect(header?.querySelectorAll("svg")).toHaveLength(1);
   });
 
   it("uses UI-observed timestamps for completed duration when available", () => {
@@ -207,7 +212,7 @@ describe("ResponseCard", () => {
     expect(header).not.toHaveTextContent("1.2s");
   });
 
-  it("hides the token metric when completed token usage is unavailable", () => {
+  it("shows completed duration when token usage is unavailable", () => {
     const completed = {
       ...response(false, "Completed answer."),
       token_usage: null,

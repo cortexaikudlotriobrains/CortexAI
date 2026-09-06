@@ -70,11 +70,11 @@ test("mobile account menu exposes the Usage and AI credits entry points", async 
         page.getByRole("heading", { name: "See what each question cost." }),
     ).toBeVisible();
     await expect(
-        page.getByRole("progressbar", { name: "AI credits: 90,000 left of 100,000" }),
+        page.getByRole("progressbar", { name: "AI credits: 90 left of 100" }),
     ).toBeVisible();
     await expect(page.getByRole("heading", { name: "Recent activity" })).toBeVisible();
     await expect(page.getByText("How do atomic credit reservations work?")).toBeVisible();
-    await expect(page.getByText("13,000 credits")).toBeVisible();
+    await expect(page.getByText("13 credits")).toBeVisible();
     await expect(
       page.locator('section[aria-labelledby="recent-credit-activity-title"] article'),
     ).toHaveCount(1);

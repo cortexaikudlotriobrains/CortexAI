@@ -151,7 +151,10 @@ export function useSubscription(options: UseSubscriptionOptions): UseSubscriptio
           ]);
           if (signal.aborted) return;
 
-          const confirmed = shouldPoll && entitlements.plan.code !== "free";
+          const confirmed =
+            shouldPoll &&
+            entitlements.plan.code !== "free" &&
+            entitlements.plan.source === "stripe";
           const exhausted = shouldPoll && attempt === maxAttempts && !confirmed;
           setState((previous) => ({
             ...previous,

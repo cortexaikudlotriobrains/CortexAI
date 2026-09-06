@@ -15,6 +15,7 @@ import { useChat } from "../../hooks/useChat";
 import { useCortexAnalysis } from "../../hooks/useCortexAnalysis";
 import { useChatStore } from "../../store/chatStore";
 import type { ChatTurn } from "../../types";
+import { formatAiCredits } from "../../utils/aiCredits";
 import { CortexIcon } from "../shared/CortexIcon";
 import { ProviderLogo } from "../shared/ProviderLogo";
 import { CortexAnalysisZone } from "./CortexAnalysisZone";
@@ -264,12 +265,9 @@ const CompareTurn = memo(function CompareTurn({
           <span className={`${styles.summaryPill} ${styles.summaryNeutral}`}>
             {turn.compareSummary.error_count} errors
           </span>
-          <span className={`${styles.summaryPill} ${styles.summaryMono}`}>
-            {turn.compareSummary.total_tokens.toLocaleString()} tok
-          </span>
           {(turn.compareSummary.total_ai_credits ?? 0) > 0 && (
             <span className={`${styles.summaryPill} ${styles.summaryMono}`}>
-              {(turn.compareSummary.total_ai_credits ?? 0).toLocaleString()} credits
+              {formatAiCredits(turn.compareSummary.total_ai_credits ?? 0)} credits
             </span>
           )}
         </div>

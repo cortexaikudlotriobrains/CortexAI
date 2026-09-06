@@ -45,7 +45,6 @@ from server import circuit_breaker
 from server.utils import get_client_safe_provider_error_message
 from tools.web import create_research_service_from_env
 from tools.web.intent import (
-    is_explicit_web_request,
     normalize_topic,
     sanitize_query,
     should_reuse_research,
@@ -89,13 +88,6 @@ class CortexOrchestrator:
         self._fallback_manager: FallbackManager | None = None
         self._prompt_analyzer: PromptAnalyzer | None = None
         self._tier_decider: TierDecider | None = None
-        self._enable_browse_disclaimer_check = (
-            os.getenv("ENABLE_BROWSE_DISCLAIMER_CHECK", "true").lower() == "true"
-        )
-        self._enable_fabrication_check = (
-            os.getenv("ENABLE_FABRICATION_CHECK", "true").lower() == "true"
-        )
-
         # /v1/optimize is the default UI optimization path. Orchestrator-level
         # auto-optimization is opt-in so chat/compare do not rewrite twice.
         self._prompt_optimizer = None
@@ -808,238 +800,6 @@ Never claim you performed web browsing yourself; the system handles retrieval.
                 "research_error": research_ctx.error,
                 "sources": [],
             }
-
-    def _check_browse_disclaimer(
-        self, response: UnifiedResponse, research_used: bool, prompt: str = ""
-    ) -> UnifiedResponse:
-        """
-        Guard against model claiming "no internet access" inappropriately.
-
-        If research was used OR user explicitly requested web search,
-        and model response contains disclaimer phrases, replace with error message.
-
-        Args:
-            response: UnifiedResponse from model
-            research_used: Whether research was actually used
-            prompt: Original user prompt (to detect explicit web requests)
-
-        Returns:
-            Potentially modified UnifiedResponse
-        """
-        if not response.text:
-            return response
-
-        # Check if user explicitly requested web search
-        explicit_request = is_explicit_web_request(prompt) if prompt else False
-
-        # Only check disclaimers if:
-        # 1. Research was actually used, OR
-        # 2. User explicitly requested web search (catches logic bugs where search should have happened)
-        if not research_used and not explicit_request:
-            return response
-
-        # Expanded disclaimer phrases that indicate model ignored research or made false promises
-        disclaimer_phrases = [
-            # Denial phrases
-            "i can't browse",
-            "i don't have internet",
-            "i cannot access",
-            "i don't have access",  # Catches "I don't have access to real-time information"
-            "i am not able to browse",
-            "i cannot browse",
-            "i do not have access to real-time",
-            "do not have access to real-time web browsing",
-            "do not have access to real-time web browsing capabilities",
-            "real-time web browsing capabilities",
-            "can't access the internet",
-            "unable to access real-time",
-            "don't have real-time",
-            "do not have real-time",
-            "cannot access real-time",
-            "can't provide real-time",
-            "cannot provide real-time",
-            "don't have the ability",  # Catches any "don't have the ability to X"
-            "do not have the ability",
-            "don't have the ability to browse",
-            "do not have the ability to browse",
-            "ability to browse the internet",  # Catches full phrase
-            "knowledge cutoff",
-            "trained on data",
-            "as an ai language model",
-            "as an ai",
-            "i was last updated",
-            "beyond those provided",  # Catches "beyond those provided in the conversation"
-            "external sources",  # Catches "access external sources"
-            # False promises (saying they WILL do something they can't control)
-            "i will need to access",
-            "i will access",
-            "i will retrieve",
-            "i will check",
-            "i will search",
-            "i will look",
-            "i will browse",
-            "let me retrieve",
-            "let me access",
-            "let me check",
-            "let me search",
-            "let me look",
-            "let me recheck",  # "let me recheck the sources"
-            "let me re-check",
-            "just a moment",  # "just a moment, please"
-            "give me a moment to retrieve",
-            "give me a moment to access",
-            "give me a moment to check",
-            "please give me a moment",
-            "the system has the capability",  # Caught in earlier log
-        ]
-
-        response_lower = response.text.lower()
-        found_disclaimer = None
-
-        for phrase in disclaimer_phrases:
-            if phrase in response_lower:
-                found_disclaimer = phrase
-                break
-
-        if found_disclaimer:
-            logger.warning(
-                f"Model claimed '{found_disclaimer}' despite research being provided",
-                extra={
-                    "extra_fields": {
-                        "provider": response.provider,
-                        "model": response.model,
-                        "research_used": research_used,
-                        "disclaimer_found": found_disclaimer,
-                    }
-                },
-            )
-
-            # Replace response text with clear error message
-            if explicit_request and not research_used:
-                # User requested search but it didn't happen - system bug
-                replacement_text = (
-                    "[SYSTEM ERROR] You requested web research, but the system failed to perform it. "
-                    "Please try rephrasing your request or contact support."
-                )
-            else:
-                # Research was provided but model ignored it
-                replacement_text = (
-                    "[SYSTEM CORRECTION] Web research sources were provided above. "
-                    "The information you're looking for may be in sources [1], [2], or [3]. "
-                    "If the specific information you need isn't in those sources, please ask me to search for more sources."
-                )
-
-            # Update metadata to indicate the model error
-            md = response.metadata or {}
-            md["research_error"] = "model_claimed_no_internet"
-
-            modified_response = replace(response, text=replacement_text, metadata=md)
-            return modified_response
-
-        return response
-
-    def _check_fabrication(
-        self, response: UnifiedResponse, research_used: bool, prompt: str = ""
-    ) -> UnifiedResponse:
-        """
-        NUCLEAR CHECK: Detect if model fabricated numbers/facts without web research.
-
-        This is the most critical safety check - prevents hallucinated financial data,
-        statistics, or facts from being shown to users.
-
-        Args:
-            response: UnifiedResponse from model
-            research_used: Whether research was actually used
-            prompt: Original user prompt
-
-        Returns:
-            Potentially modified UnifiedResponse with error if fabrication detected
-        """
-        if not response.text or research_used:
-            return response  # If research was used, sources are cited
-
-        response_lower = response.text.lower()
-        prompt_lower = prompt.lower() if prompt else ""
-
-        # Detect queries that REQUIRE factual data
-        factual_query_indicators = [
-            "how much",
-            "what was",
-            "what is",
-            "what were",
-            "how many",
-            "percentage",
-            "percent",
-            "return",
-            "performance",
-            "growth",
-            "decline",
-            "gained",
-            "lost",
-            "price",
-            "value",
-            "rate",
-            "score",
-            "number",
-        ]
-
-        requires_facts = any(ind in prompt_lower for ind in factual_query_indicators)
-
-        if not requires_facts:
-            return response  # General questions OK without research
-
-        # Detect fabricated numbers/stats in response
-        fabrication_patterns = [
-            r"\d+\.?\d*%",  # Percentages: "28.7%", "5%"
-            r"\$\d+",  # Dollar amounts: "$1000"
-            r"\d{4}",  # Years when talking about performance: "2025"
-            r"around \d+",  # "around 28"
-            r"approximately \d+",  # "approximately 15"
-            r"about \d+",  # "about 20"
-            r"reached .* high",  # "reached new highs" without citation
-            r"strong performance",  # Vague claims without data
-            r"record high",  # "record highs" without citation
-            r"significant growth",  # Vague claims
-            r"delivered .* return",  # "delivered X% return" without citation
-        ]
-
-        import re
-
-        has_numbers = any(re.search(pattern, response_lower) for pattern in fabrication_patterns)
-
-        # Check if numbers are cited (has [1], [2], [3])
-        has_citations = bool(re.search(r"\[\d+\]", response.text))
-
-        if has_numbers and not has_citations:
-            logger.error(
-                "FABRICATION DETECTED: Model provided numbers/facts without web research",
-                extra={
-                    "extra_fields": {
-                        "provider": response.provider,
-                        "model": response.model,
-                        "research_used": research_used,
-                        "prompt": prompt[:100],
-                        "response_preview": response.text[:200],
-                    }
-                },
-            )
-
-            # BLOCK THE RESPONSE
-            replacement_text = (
-                "[SYSTEM ERROR: FABRICATED DATA DETECTED]\n\n"
-                "The AI provided numbers or facts without performing web research. "
-                "This violates safety protocols.\n\n"
-                "For factual queries like yours, the system MUST perform web research. "
-                "Please try your query again. If the issue persists, the system may need configuration."
-            )
-
-            md = response.metadata or {}
-            md["fabrication_detected"] = True
-            md["fabrication_reason"] = "numbers_without_research"
-
-            return replace(response, text=replacement_text, metadata=md)
-
-        return response
 
     def _build_routing_constraints(self, raw: dict[str, Any] | None) -> RoutingConstraints | None:
         if not raw:
@@ -1786,15 +1546,6 @@ Never claim you performed web browsing yourself; the system handles retrieval.
             merged_md = {**md, **research_metadata, **opt_metadata, "research_mode": research_mode}
             resp = replace(resp, metadata=merged_md)
 
-            # Check for browse disclaimer if research was used or explicitly requested
-            research_used = research_metadata.get("research_used", False)
-            if self._enable_browse_disclaimer_check:
-                resp = self._check_browse_disclaimer(resp, research_used, optimized_prompt)
-
-            # CRITICAL: Check for fabricated numbers/facts
-            if self._enable_fabrication_check:
-                resp = self._check_fabrication(resp, research_used, optimized_prompt)
-
             if record_direct_circuit:
                 circuit_breaker.record_response(resp)
 
@@ -1963,21 +1714,11 @@ Never claim you performed web browsing yourself; the system handles retrieval.
             # Merge init-time failures + runtime results
             responses.extend(result.responses)
 
-            # Merge research metadata into each response and check for browse disclaimer + fabrication
-            research_used = research_metadata.get("research_used", False)
+            # Merge shared research metadata into each provider response without
+            # rewriting the provider's successful answer text.
             updated_responses = []
             for resp in responses:
-                resp_with_metadata = with_turn_metadata(resp)
-                # Check for browse disclaimer if research was used or explicitly requested
-                resp_checked = resp_with_metadata
-                if self._enable_browse_disclaimer_check:
-                    resp_checked = self._check_browse_disclaimer(
-                        resp_with_metadata, research_used, prompt
-                    )
-                # Check for fabricated numbers/facts
-                resp_final = resp_checked
-                if self._enable_fabrication_check:
-                    resp_final = self._check_fabrication(resp_checked, research_used, prompt)
+                resp_final = with_turn_metadata(resp)
                 updated_responses.append(resp_final)
                 circuit_breaker.record_response(resp_final)
 

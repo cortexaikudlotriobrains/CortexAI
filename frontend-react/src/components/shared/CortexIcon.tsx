@@ -2,6 +2,7 @@ import type { SVGProps } from "react";
 
 export type CortexIconName =
   | "analyze"
+  | "alert"
   | "ask"
   | "attach"
   | "branch"
@@ -34,6 +35,7 @@ export type CortexIconName =
   | "send"
   | "smart"
   | "sparkle"
+  | "settings"
   | "sources"
   | "stop"
   | "summarize"
@@ -42,10 +44,13 @@ export type CortexIconName =
   | "thumb-down"
   | "thumb-up"
   | "tokens"
+  | "tools"
+  | "table"
   | "trash"
   | "usage"
   | "user"
-  | "web";
+  | "web"
+  | "work";
 
 interface CortexIconProps extends Omit<SVGProps<SVGSVGElement>, "name"> {
   name: CortexIconName;
@@ -95,6 +100,44 @@ export function CortexIcon({
 
 function iconPath(name: Exclude<CortexIconName, "stop">) {
   switch (name) {
+    case "work":
+      return (
+        <>
+          <rect x="4" y="4.5" width="16" height="15" rx="3" />
+          <path d="m7.8 10.4 1.7 1.7 3.3-3.4" />
+          <path d="M7.5 15.5h9" />
+        </>
+      );
+    case "tools":
+      return (
+        <>
+          <path d="M9 3.5v3.8M15 3.5v3.8" />
+          <path d="M6.8 7.3h10.4v2.9a5.2 5.2 0 0 1-10.4 0z" />
+          <path d="M12 15.4v5.1" />
+        </>
+      );
+    case "alert":
+      return (
+        <>
+          <path d="M12 4.6 20.8 20H3.2z" />
+          <path d="M12 10.2v3.6M12 16.8h.01" />
+        </>
+      );
+    case "table":
+      return (
+        <>
+          <rect x="4" y="4.5" width="16" height="15" rx="2.5" />
+          <path d="M4 9.6h16M9.6 9.6v9.9M14.6 9.6v9.9" />
+        </>
+      );
+    case "settings":
+      return (
+        <>
+          <path d="M4 8.5h9.5M17.5 8.5H20M4 15.5h3.5M11.5 15.5H20" />
+          <circle cx="15.5" cy="8.5" r="2.2" />
+          <circle cx="9.5" cy="15.5" r="2.2" />
+        </>
+      );
     case "ask":
       return (
         <>

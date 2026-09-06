@@ -56,19 +56,20 @@ def build_frontend_runtime_config(request: Request) -> dict[str, Any]:
     if explicit_frontend_dev_login is None:
         enable_dev_session_login = _env_bool("ENABLE_DEV_SESSION_LOGIN", default=False)
     else:
-        enable_dev_session_login = _env_bool("FRONTEND_RUNTIME_ENABLE_DEV_SESSION_LOGIN", default=False)
+        enable_dev_session_login = _env_bool(
+            "FRONTEND_RUNTIME_ENABLE_DEV_SESSION_LOGIN", default=False
+        )
     if runtime_env in PRODUCTION_ENV_VALUES:
         enable_dev_session_login = False
 
     payload: dict[str, Any] = {
         "apiBase": api_base,
         "enableDevSessionLogin": bool(enable_dev_session_login),
-        "directAttachmentUploads": _env_bool(
-            "ATTACHMENTS_DIRECT_UPLOAD_ENABLED", default=False
-        ),
+        "directAttachmentUploads": _env_bool("ATTACHMENTS_DIRECT_UPLOAD_ENABLED", default=False),
         "legacyAttachmentUploads": _env_bool(
             "ATTACHMENTS_LEGACY_PROXY_UPLOAD_ENABLED", default=True
         ),
+        "workEnabled": _env_bool("CORTEX_WORK_ENABLED", default=False),
     }
 
     frontend_dev_login_token = str(

@@ -72,7 +72,34 @@ REQUIRED_BILLING_SCHEMA: Mapping[str, frozenset[str]] = {
             "current_period_end",
         }
     ),
-    "usage_periods": frozenset({"id", "billing_account_id", "plan_code", "starts_at", "ends_at"}),
+    "subscription_grants": frozenset(
+        {
+            "id",
+            "billing_account_id",
+            "plan_code",
+            "status",
+            "starts_at",
+            "expires_at",
+            "granted_by",
+            "reason",
+            "revoked_at",
+            "revoked_by",
+            "revocation_reason",
+            "created_at",
+            "updated_at",
+        }
+    ),
+    "usage_periods": frozenset(
+        {
+            "id",
+            "billing_account_id",
+            "subscription_id",
+            "subscription_grant_id",
+            "plan_code",
+            "starts_at",
+            "ends_at",
+        }
+    ),
     "usage_counters": frozenset(
         {"id", "usage_period_id", "meter_key", "used_quantity", "reserved_quantity"}
     ),

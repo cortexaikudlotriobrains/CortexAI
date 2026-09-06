@@ -157,7 +157,7 @@ def _parse_args() -> argparse.Namespace:
         description="Run the CortexAI API and React frontend in one local dev process.",
     )
     parser.add_argument("--api-host", default="127.0.0.1", help="FastAPI host")
-    parser.add_argument("--api-port", type=int, default=8001, help="FastAPI port")
+    parser.add_argument("--api-port", type=int, default=8000, help="FastAPI port")
     parser.add_argument("--frontend-host", default="127.0.0.1", help="Vite host")
     parser.add_argument("--frontend-port", type=int, default=5173, help="Vite port")
     parser.add_argument(

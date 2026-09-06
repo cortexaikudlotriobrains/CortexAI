@@ -13,12 +13,15 @@ from sqlalchemy.orm import Session
 from db.billing_repository import (
     close_usage_period,
     get_active_usage_period,
+    get_effective_subscription_grant,
     get_latest_subscription_for_account,
     get_live_subscription_for_account,
+    lock_billing_account,
     synchronize_usage_period,
 )
 from server.billing.account_service import get_or_create_user_billing_account
 from server.billing.errors import BillingConfigurationError
+from server.billing.grant_service import monthly_grant_bounds
 from server.billing.models import SubscriptionPlan
 from server.billing.plan_catalog import PlanCatalog, get_plan_catalog
 from utils.logger import get_logger
@@ -158,6 +161,7 @@ def _ensure_usage_period(
     starts_at: datetime,
     ends_at: datetime,
     now: datetime,
+    subscription_grant_id: UUID | None = None,
 ) -> dict[str, Any]:
     active = get_active_usage_period(db, billing_account_id, now)
     if active is not None:
@@ -166,6 +170,7 @@ def _ensure_usage_period(
         if (
             str(active.get("plan_code") or "").lower() == plan_code
             and active.get("subscription_id") == subscription_id
+            and active.get("subscription_grant_id") == subscription_grant_id
             and active_start == starts_at
             and active_end == ends_at
         ):
@@ -177,6 +182,7 @@ def _ensure_usage_period(
             db,
             billing_account_id=billing_account_id,
             subscription_id=subscription_id,
+            subscription_grant_id=subscription_grant_id,
             plan_code=plan_code,
             starts_at=starts_at,
             ends_at=ends_at,
@@ -185,7 +191,7 @@ def _ensure_usage_period(
         raise BillingConfigurationError("Current usage period could not be resolved") from exc
 
 
-def _free_effective(
+def _grant_or_free_effective(
     db: Session,
     *,
     billing_account_id: UUID,
@@ -198,6 +204,42 @@ def _free_effective(
     cancel_at_period_end: bool = False,
     grace_until: datetime | None = None,
 ) -> EffectiveSubscription:
+    # Every conservative Stripe fallback first considers trusted Cortex access.
+    try:
+        grant = get_effective_subscription_grant(db, billing_account_id, now)
+    except Exception as exc:
+        raise BillingConfigurationError("Subscription grant could not be resolved") from exc
+    if grant is not None:
+        grant_plan = catalog.get(str(grant.get("plan_code") or ""))
+        if grant_plan is not None and grant_plan.code in {"plus", "pro"}:
+            grant_start = _as_utc(grant.get("starts_at"))
+            grant_expiry = _as_utc(grant.get("expires_at"))
+            if grant_start is not None and grant_expiry is not None:
+                starts_at, ends_at = monthly_grant_bounds(grant_start, grant_expiry, now)
+                period = _ensure_usage_period(
+                    db,
+                    billing_account_id=billing_account_id,
+                    subscription_id=None,
+                    subscription_grant_id=grant["id"],
+                    plan_code=grant_plan.code,
+                    starts_at=starts_at,
+                    ends_at=ends_at,
+                    now=now,
+                )
+                return EffectiveSubscription(
+                    billing_account_id=billing_account_id,
+                    usage_period_id=period["id"],
+                    plan=grant_plan,
+                    source="cortex_grant",
+                    provider=None,
+                    provider_subscription_id=None,
+                    status="active",
+                    current_period_start=starts_at,
+                    current_period_end=ends_at,
+                    cancel_at_period_end=False,
+                    grace_until=None,
+                )
+        logger.error("Ignoring subscription grant with invalid plan configuration")
     plan = catalog.require("free")
     starts_at, ends_at = _utc_month_bounds(now)
     period = _ensure_usage_period(
@@ -275,6 +317,8 @@ def resolve_effective_subscription(
         raise BillingConfigurationError("Current time could not be resolved")
     plan_catalog = catalog or get_plan_catalog()
     account = get_or_create_user_billing_account(db, user_id)
+    # Serialize resolution/period transitions with operator grant changes.
+    lock_billing_account(db, account.id)
 
     override = _development_override(plan_catalog)
     if override is not None:
@@ -307,7 +351,7 @@ def resolve_effective_subscription(
         )
 
     if not _env_bool("BILLING_ENABLED", default=False):
-        return _free_effective(
+        return _grant_or_free_effective(
             db,
             billing_account_id=account.id,
             catalog=plan_catalog,
@@ -321,7 +365,7 @@ def resolve_effective_subscription(
     except Exception as exc:
         raise BillingConfigurationError("Subscription snapshot could not be resolved") from exc
     if snapshot is None:
-        return _free_effective(
+        return _grant_or_free_effective(
             db,
             billing_account_id=account.id,
             catalog=plan_catalog,
@@ -343,7 +387,7 @@ def resolve_effective_subscription(
                 }
             },
         )
-        return _free_effective(
+        return _grant_or_free_effective(
             db,
             billing_account_id=account.id,
             catalog=plan_catalog,
@@ -353,7 +397,7 @@ def resolve_effective_subscription(
         )
 
     if plan.code == "free":
-        return _free_effective(
+        return _grant_or_free_effective(
             db,
             billing_account_id=account.id,
             catalog=plan_catalog,
@@ -404,7 +448,7 @@ def resolve_effective_subscription(
                 extra={"extra_fields": {"billing_account_id": str(account.id)}},
             )
 
-    return _free_effective(
+    return _grant_or_free_effective(
         db,
         billing_account_id=account.id,
         catalog=plan_catalog,

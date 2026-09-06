@@ -6,6 +6,7 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SMOKE_SCRIPT = REPO_ROOT / "scripts" / "db_mode_smoke.py"
@@ -54,7 +55,19 @@ def _run_py_compile(files: list[str], chunk_size: int = 100) -> None:
 def main() -> int:
     python_files = _iter_python_files()
     _run_py_compile(python_files)
-    _run([sys.executable, "-m", "pytest", "-q"], "pytest -q")
+    with TemporaryDirectory(prefix=".release-gate-", dir=REPO_ROOT) as temporary:
+        pytest_basetemp = Path(temporary) / "pytest"
+        _run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "-q",
+                "--basetemp",
+                str(pytest_basetemp),
+            ],
+            "pytest -q",
+        )
     _run([sys.executable, str(SMOKE_SCRIPT)], "DB mode smoke")
     print("[release-gate] All checks passed.")
     return 0

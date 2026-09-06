@@ -26,6 +26,9 @@ describe("PricingPageContent", () => {
     expect(screen.getByRole("heading", { name: "Plus" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Pro" })).toBeInTheDocument();
     expect(screen.getByText("$6.99")).toBeInTheDocument();
+    expect(within(planCard("Free")).getByText("100 AI credits per month")).toBeInTheDocument();
+    expect(within(planCard("Plus")).getByText("1,000 AI credits per month")).toBeInTheDocument();
+    expect(within(planCard("Pro")).getByText("3,000 AI credits per month")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Sign in to choose" })).toHaveLength(3);
 
     await user.click(screen.getAllByRole("button", { name: "Sign in to choose" })[1]);
@@ -111,12 +114,54 @@ describe("PricingPageContent", () => {
         entitlements: entitlementsResponse("free"),
       }),
     );
-    expect(screen.getAllByRole("button", { name: "Unavailable" })).toHaveLength(3);
+    expect(screen.getAllByRole("button", { name: "Unavailable" })).toHaveLength(2);
+    expect(within(planCard("Free")).getByRole("button", { name: "Current plan" })).toBeDisabled();
   });
+
+  it.each(["plus", "pro"] as const)(
+    "shows granted %s as current when hosted billing is disabled",
+    (code) => {
+      const entitlements = entitlementsResponse(code);
+      entitlements.plan.source = "cortex_grant";
+      renderPricing({
+        loggedIn: true,
+        plans: plansResponse(false),
+        entitlements,
+        subscription: { ...subscriptionResponse(code), provider: null, can_manage: false },
+      });
+      expect(
+        within(planCard(code === "plus" ? "Plus" : "Pro")).getByRole("button", {
+          name: "Current plan",
+        }),
+      ).toBeDisabled();
+      expect(screen.getAllByRole("button", { name: "Unavailable" })).toHaveLength(2);
+      expect(screen.queryByRole("button", { name: /Manage|Upgrade/ })).not.toBeInTheDocument();
+    },
+  );
 });
 
 describe("BillingPageContent", () => {
   afterEach(cleanup);
+
+  it.each(["plus", "pro"] as const)(
+    "describes granted %s access and monthly resets without payment actions",
+    (code) => {
+      const entitlements = entitlementsResponse(code);
+      entitlements.plan.source = "cortex_grant";
+      renderBilling({
+        loggedIn: true,
+        plans: plansResponse(false),
+        entitlements,
+        subscription: { ...subscriptionResponse(code), provider: null, can_manage: false },
+      });
+      expect(screen.getByText(/plan access is provided by CortexAI/)).toBeInTheDocument();
+      expect(screen.getByText(/Usage resets August 18, 2026/)).toBeInTheDocument();
+      expect(screen.queryByText(/Free allowances|Renews/)).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /Manage subscription|Update payment/ }),
+      ).not.toBeInTheDocument();
+    },
+  );
 
   it("asks signed-out visitors to authenticate", async () => {
     const user = userEvent.setup();
@@ -141,10 +186,10 @@ describe("BillingPageContent", () => {
     expect(screen.getByText("PLUS PLAN")).toBeInTheDocument();
     expect(screen.getByText("Active")).toBeInTheDocument();
     expect(screen.getByText("Renews August 18, 2026")).toBeInTheDocument();
-    expect(screen.getByText("124,000 / 1,000,000")).toBeInTheDocument();
+    expect(screen.getByText("124 / 1,000")).toBeInTheDocument();
     expect(screen.getByRole("progressbar", { name: "AI credits" })).toHaveAttribute(
       "aria-valuenow",
-      "124000",
+      "124",
     );
 
     await user.click(screen.getByRole("button", { name: "Manage subscription" }));
@@ -160,7 +205,7 @@ describe("BillingPageContent", () => {
     });
 
     expect(screen.getByText("FREE PLAN")).toBeInTheDocument();
-    expect(screen.getByText(/paid billing is unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText(/online billing is currently unavailable/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Billing unavailable" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Manage subscription" })).not.toBeInTheDocument();
   });
@@ -322,36 +367,32 @@ function plansResponse(billingEnabled = true): BillingPlansResponse {
         ["plus", "Plus", 6.99, true, 1_000_000, 2],
         ["pro", "Pro", 12.99, false, 3_000_000, 3],
       ] as const
-    ).map(
-      ([
-        code,
-        displayName,
-        price,
-        recommended,
-        credits,
-        compare,
-      ]) => ({
-        code,
-        display_name: displayName,
-        monthly_price: price,
-        recommended,
-        features: {
-          max_compare_models: compare,
-          research_enabled: true,
-          prompt_improvement_enabled: true,
-          file_analysis_enabled: true,
-          allowed_billing_classes:
-            code === "pro"
-              ? ["economical", "standard", "advanced", "premium"]
-              : code === "plus"
-                ? ["economical", "standard", "advanced"]
-                : ["economical", "standard"],
-        },
-        allowances: {
-          ai_credits: credits,
-        },
-      }),
-    ),
+    ).map(([code, displayName, price, recommended, credits, compare]) => ({
+      code,
+      display_name: displayName,
+      monthly_price: price,
+      recommended,
+      features: {
+        max_compare_models: compare,
+        research_enabled: true,
+        prompt_improvement_enabled: true,
+        file_analysis_enabled: true,
+        work_enabled: code !== "free",
+        verified_connectors_enabled: code !== "free",
+        custom_mcp_enabled: code === "pro",
+        action_tools_enabled: code !== "free",
+        max_active_work_runs: code === "pro" ? 3 : code === "plus" ? 1 : 0,
+        allowed_billing_classes:
+          code === "pro"
+            ? ["economical", "standard", "advanced", "premium"]
+            : code === "plus"
+              ? ["economical", "standard", "advanced"]
+              : ["economical", "standard"],
+      },
+      allowances: {
+        ai_credits: credits,
+      },
+    })),
   };
 }
 
@@ -375,8 +416,7 @@ function entitlementsResponse(
   status: SubscriptionStatus = planCode === "free" ? "free" : "active",
   cancelAtPeriodEnd = false,
 ): EntitlementsResponse {
-  const creditLimit =
-    planCode === "free" ? 100_000 : planCode === "plus" ? 1_000_000 : 3_000_000;
+  const creditLimit = planCode === "free" ? 100_000 : planCode === "plus" ? 1_000_000 : 3_000_000;
   const counters = (used: number, limit: number) => ({
     used,
     reserved: 0,

@@ -5,6 +5,7 @@ import { CreditsPage } from "./pages/CreditsPage";
 import { ModelsPage } from "./pages/ModelsPage";
 import { PricingPage } from "./pages/PricingPage";
 import { UsageInsightsPage } from "./pages/UsageInsightsPage";
+import { WorkPage } from "./pages/WorkPage";
 
 export function App() {
   return (
@@ -12,6 +13,8 @@ export function App() {
       <Routes>
         <Route path="/" element={<ChatPage />} />
         <Route path="/usage" element={<UsageInsightsPage />} />
+        <Route path="/work" element={<WorkPage />} />
+        <Route path="/work/:workSessionId" element={<WorkPage />} />
         <Route path="/credits" element={<CreditsPage />} />
         <Route path="/models" element={<ModelsPage />} />
         <Route path="/pricing" element={<PricingPage />} />

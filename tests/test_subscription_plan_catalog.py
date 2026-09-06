@@ -27,7 +27,7 @@ def _write_catalog(tmp_path: Path, data: dict) -> Path:
 def test_default_plan_catalog_loads_as_immutable_decimal_backed_types():
     catalog = PlanCatalog.from_yaml()
 
-    assert catalog.version == 2
+    assert catalog.version == 3
     assert [plan.code for plan in catalog.list_plans()] == ["free", "plus", "pro"]
     assert catalog.require("plus").monthly_price_usd == Decimal("6.99")
     assert catalog.require("pro").entitlements.allowed_billing_classes == frozenset(
@@ -38,6 +38,13 @@ def test_default_plan_catalog_loads_as_immutable_decimal_backed_types():
     assert catalog.require("pro").allowances.ai_credits == 3_000_000
     assert [plan.limits.requests_per_minute for plan in catalog.list_plans()] == [5, 15, 30]
     assert catalog.require("free").entitlements.usage_export_enabled is False
+    assert catalog.require("free").entitlements.work_enabled is False
+    assert catalog.require("plus").entitlements.work_enabled is True
+    assert catalog.require("plus").limits.max_active_work_runs == 1
+    assert catalog.require("plus").limits.max_work_credit_budget == 250_000
+    assert catalog.require("pro").entitlements.custom_mcp_enabled is True
+    assert catalog.require("pro").limits.max_tool_connections == 10
+    assert catalog.require("pro").limits.max_work_credit_budget == 1_000_000
     with pytest.raises(FrozenInstanceError):
         catalog.require("free").rank = 99
 

@@ -1,4 +1,5 @@
 import { ApiClientError } from "../api/client";
+import { formatAiCredits } from "../utils/aiCredits";
 
 export type SubscriptionErrorKind =
   | "authentication"
@@ -47,9 +48,10 @@ export function toSubscriptionError(
   if (error instanceof ApiClientError) {
     const detail = structuredDetail(error.body);
     const code = detail.code ?? fallbackCode(error.status);
+    const fallback = detail.message ?? error.message ?? fallbackMessage;
     return new SubscriptionError({
       code,
-      message: detail.message ?? error.message ?? fallbackMessage,
+      message: displaySubscriptionMessage(code, detail.fields, fallback),
       status: error.status,
       kind: errorKind(code, error.status),
       retryable: isRetryable(code, error.status),
@@ -148,6 +150,22 @@ function structuredDetail(body: unknown): StructuredDetail {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function displaySubscriptionMessage(
+  code: string,
+  fields: Record<string, unknown>,
+  fallback: string,
+): string {
+  if (code !== "insufficient_credits") return fallback;
+  const required = finiteNumber(fields.required);
+  const remaining = finiteNumber(fields.remaining);
+  if (required === null || remaining === null) return fallback;
+  return `This request is estimated to require ${formatAiCredits(required)} AI credits. You have ${formatAiCredits(remaining)} remaining.`;
+}
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function fallbackCode(status: number): string {

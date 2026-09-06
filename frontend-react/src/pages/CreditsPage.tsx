@@ -10,6 +10,7 @@ import { useAuth } from "../hooks/useAuth";
 import { useSubscription } from "../hooks/useSubscription";
 import { getAccountMenuSubscriptionPresentation } from "../subscription/accountMenuPresentation";
 import type { CreditTransaction } from "../types";
+import { formatAiCredits } from "../utils/aiCredits";
 import styles from "./CreditsPage.module.css";
 
 export function CreditsPage() {
@@ -182,7 +183,7 @@ function RecentCreditActivity({
                     <p>{question}</p>
                   </div>
                   <div className={styles.creditAmount}>
-                    <strong>{formatInteger(activity.totalCredits)} credits</strong>
+                    <strong>{formatAiCredits(activity.totalCredits)} credits</strong>
                     <span>{formatCreditTimestamp(activity.createdAt)}</span>
                   </div>
                 </div>
@@ -203,7 +204,7 @@ function RecentCreditActivity({
                           <strong>{item.label}</strong>
                           <span>{item.detail}</span>
                         </div>
-                        <strong>{formatInteger(item.totalCredits)} credits</strong>
+                        <strong>{formatAiCredits(item.totalCredits)} credits</strong>
                       </div>
                     ))}
                   </div>
@@ -348,7 +349,7 @@ function toCreditBreakdownItem(transaction: CreditTransaction): CreditBreakdownI
       providerCredits !== null && conversion !== null
         ? `${formatInteger(providerCredits)} search ${
             providerCredits === 1 ? "credit" : "credits"
-          } × ${formatInteger(conversion)}`
+          } × ${formatAiCredits(conversion)} AI credits each`
         : "Search retrieval charge";
     return {
       key: transaction.id,
@@ -398,7 +399,7 @@ function modelSummary(transactions: CreditTransaction[]): string {
 }
 
 function formatModelCreditParts(inputCredits: number, outputCredits: number): string {
-  return `${formatInteger(inputCredits)} question processing + ${formatInteger(
+  return `${formatAiCredits(inputCredits)} question processing + ${formatAiCredits(
     outputCredits,
   )} answer generation`;
 }

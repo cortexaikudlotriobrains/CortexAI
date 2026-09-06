@@ -83,6 +83,10 @@ def _delete_test_account(engine, account_id) -> None:
             {"account_id": account_id},
         )
         connection.execute(
+            text("DELETE FROM subscription_grants WHERE billing_account_id = :account_id"),
+            {"account_id": account_id},
+        )
+        connection.execute(
             text("DELETE FROM subscriptions WHERE billing_account_id = :account_id"),
             {"account_id": account_id},
         )
@@ -98,6 +102,7 @@ def test_billing_schema_is_queryable_through_reflection(postgres_runtime):
     for table_name in (
         "billing_accounts",
         "subscriptions",
+        "subscription_grants",
         "usage_periods",
         "usage_counters",
         "usage_reservations",
@@ -109,6 +114,78 @@ def test_billing_schema_is_queryable_through_reflection(postgres_runtime):
         assert table.name == table_name
         assert table.schema == "public"
     assert "last_activity_at" in get_table("usage_reservations").c
+    assert "subscription_grant_id" in get_table("usage_periods").c
+
+
+def test_concurrent_grant_issuance_serializes_on_account(postgres_runtime):
+    session_factory = sessionmaker(bind=postgres_runtime)
+    with session_factory.begin() as db:
+        account = repository.get_or_create_billing_account_for_user(db, uuid4())
+    now = datetime.now(UTC)
+    first_inserted = threading.Event()
+    release_first = threading.Event()
+    second_finished = threading.Event()
+    failures: Queue[BaseException] = Queue()
+    results: Queue[str] = Queue()
+
+    def issue(db):
+        repository.create_subscription_grant(
+            db,
+            billing_account_id=account["id"],
+            plan_code="pro",
+            starts_at=now,
+            expires_at=now + timedelta(days=90),
+            granted_by="test_operator",
+            reason="concurrency_test",
+            now=now,
+        )
+
+    def first_transaction():
+        try:
+            with session_factory.begin() as db:
+                issue(db)
+                first_inserted.set()
+                if not release_first.wait(5):
+                    raise TimeoutError("First grant lock was not released")
+        except BaseException as exc:
+            failures.put(exc)
+
+    def second_transaction():
+        try:
+            if not first_inserted.wait(5):
+                raise TimeoutError("First grant was not inserted")
+            with session_factory.begin() as db:
+                issue(db)
+            results.put("unexpected_duplicate")
+        except ValueError as exc:
+            results.put(str(exc))
+        except BaseException as exc:
+            failures.put(exc)
+        finally:
+            second_finished.set()
+
+    first = threading.Thread(target=first_transaction)
+    second = threading.Thread(target=second_transaction)
+    try:
+        first.start()
+        assert first_inserted.wait(5)
+        second.start()
+        assert not second_finished.wait(0.25)
+        release_first.set()
+        first.join(5)
+        second.join(5)
+        assert second_finished.is_set()
+        assert failures.empty(), list(failures.queue)
+        assert "open grant already exists" in results.get_nowait()
+        with session_factory() as db:
+            grant = repository.get_effective_subscription_grant(db, account["id"], now)
+            assert grant["plan_code"] == "pro"
+    finally:
+        release_first.set()
+        first.join(5)
+        if second.ident is not None:
+            second.join(5)
+        _delete_test_account(postgres_runtime, account["id"])
 
 
 def test_lock_usage_counters_serializes_concurrent_reservation_paths(postgres_runtime):

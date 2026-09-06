@@ -169,9 +169,13 @@ def billing_db(monkeypatch):
         ),
     )
 
+    from tests.billing_schema_helpers import add_subscription_grant_schema
+
+    subscription_grants = add_subscription_grant_schema(metadata)
     tables = {
         table.name: table
         for table in (
+            subscription_grants,
             billing_accounts,
             subscriptions,
             usage_periods,

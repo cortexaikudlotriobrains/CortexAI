@@ -1,4 +1,4 @@
-version: 2
+version: 3
 
 plans:
   free:
@@ -16,6 +16,10 @@ plans:
       usage_export_enabled: false
       saved_history_enabled: true
       models_catalog_enabled: true
+      work_enabled: false
+      verified_connectors_enabled: false
+      custom_mcp_enabled: false
+      action_tools_enabled: false
       allowed_billing_classes:
         - economical
         - standard
@@ -25,6 +29,10 @@ plans:
       requests_per_minute: 5
       max_files_per_request: 1
       max_file_bytes: 10000000
+      max_active_work_runs: 0
+      max_tool_connections: 0
+      max_mcp_servers_per_run: 0
+      max_work_credit_budget: 0
 
   plus:
     display_name: Plus
@@ -41,6 +49,10 @@ plans:
       usage_export_enabled: true
       saved_history_enabled: true
       models_catalog_enabled: true
+      work_enabled: true
+      verified_connectors_enabled: true
+      custom_mcp_enabled: false
+      action_tools_enabled: true
       allowed_billing_classes:
         - economical
         - standard
@@ -51,6 +63,10 @@ plans:
       requests_per_minute: 15
       max_files_per_request: 3
       max_file_bytes: 20000000
+      max_active_work_runs: 1
+      max_tool_connections: 3
+      max_mcp_servers_per_run: 3
+      max_work_credit_budget: 250000
 
   pro:
     display_name: Pro
@@ -67,6 +83,10 @@ plans:
       usage_export_enabled: true
       saved_history_enabled: true
       models_catalog_enabled: true
+      work_enabled: true
+      verified_connectors_enabled: true
+      custom_mcp_enabled: true
+      action_tools_enabled: true
       allowed_billing_classes:
         - economical
         - standard
@@ -78,3 +98,7 @@ plans:
       requests_per_minute: 30
       max_files_per_request: 5
       max_file_bytes: 20000000
+      max_active_work_runs: 3
+      max_tool_connections: 10
+      max_mcp_servers_per_run: 10
+      max_work_credit_budget: 1000000
