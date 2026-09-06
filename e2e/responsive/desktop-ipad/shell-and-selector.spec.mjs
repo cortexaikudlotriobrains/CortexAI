@@ -140,6 +140,66 @@ test("desktop history keeps compact title, mode, and date rows", async ({ respon
     await expectNoHorizontalOverflow(page);
 });
 
+test("desktop sidebar stays consistent across Chat, Work, Usage, and AI credits", async ({
+    responsiveApp,
+}) => {
+    const { page, state } = responsiveApp;
+    await page.setViewportSize({ width: 1440, height: 900 });
+    state.workSessions = [{
+        id: "work-session-sidebar",
+        session_id: "work-history-sidebar",
+        title: "Prepare the sidebar regression report",
+        status: "completed",
+        agent_provider: "fake",
+        created_at: "2026-08-20T12:00:00Z",
+        updated_at: "2026-08-20T12:05:00Z",
+        latest_run_status: "completed",
+    }];
+    await page.reload();
+
+    const sidebar = page.locator("aside[aria-label='Primary navigation']");
+    await expect(
+        sidebar.getByRole("button", {
+            name: "Prepare the sidebar regression report. Work, completed",
+        }),
+    ).toBeVisible();
+
+    await sidebar.getByRole("button", { name: "Collapse sidebar" }).click();
+    await sidebar.getByRole("button", { name: "AI credits" }).click();
+    await expect(page).toHaveURL(/\/credits$/);
+    await expect(sidebar).toHaveAttribute("data-collapsed", "true");
+    await expect(sidebar.getByRole("button", { name: "Work", exact: true })).toBeVisible();
+
+    await sidebar.getByRole("button", { name: "Expand sidebar" }).click();
+    await expect(
+        sidebar.getByRole("button", {
+            name: "Prepare the sidebar regression report. Work, completed",
+        }),
+    ).toBeVisible();
+
+    await sidebar.getByRole("button", { name: "New chat" }).click();
+    await expect(page).toHaveURL(/\/$/);
+    await expect(sidebar.getByRole("button", { name: "Ask", exact: true })).toHaveAttribute(
+        "aria-current",
+        "page",
+    );
+
+    await sidebar.getByRole("button", { name: "Usage" }).click();
+    await expect(page).toHaveURL(/\/usage$/);
+    await expect(sidebar.getByRole("button", { name: "Work", exact: true })).toBeVisible();
+
+    await sidebar.getByRole("button", { name: "Work", exact: true }).click();
+    await expect(page).toHaveURL(/\/work$/);
+    const chatHistory = sidebar.getByRole("button", {
+        name: /Plan a multi-region platform migration.*Ask,/,
+    });
+    await expect(chatHistory).toBeVisible();
+    await chatHistory.click();
+
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.locator('section[aria-label="Chat transcript"]')).toBeVisible();
+});
+
 test("desktop composer uses the refresh hairline shell and soft textarea focus state", async ({ responsiveApp }) => {
     const { page } = responsiveApp;
     await page.setViewportSize({ width: 1440, height: 900 });

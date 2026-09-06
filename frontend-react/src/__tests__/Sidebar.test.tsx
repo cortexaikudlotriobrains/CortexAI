@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Sidebar } from "../components/layout/Sidebar";
 import { useChatStore } from "../store/chatStore";
+import { useSidebarStore } from "../store/sidebarStore";
 import type { HistoryEntry, HistoryThread, WorkSession } from "../types";
 
 describe("Sidebar", () => {
@@ -115,6 +116,19 @@ describe("Sidebar", () => {
       "true",
     );
     expect(screen.getByRole("textbox", { name: "Search chats" })).toBeInTheDocument();
+  });
+
+  it("preserves the collapsed state when the routed sidebar remounts", async () => {
+    const user = userEvent.setup();
+    const firstRender = render(<Sidebar onSelectThread={vi.fn()} activeView="usage" />);
+
+    await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+    expect(screen.getByLabelText("Primary navigation")).toHaveAttribute("data-collapsed", "true");
+
+    firstRender.unmount();
+    render(<Sidebar onSelectThread={vi.fn()} activeView="credits" />);
+
+    expect(screen.getByLabelText("Primary navigation")).toHaveAttribute("data-collapsed", "true");
   });
 
   it("marks Usage active and routes Ask or Compare back to chat", async () => {
@@ -459,6 +473,48 @@ describe("Sidebar", () => {
     const entries = screen.getAllByRole("button", { name: `${title}. Work, completed` });
     expect(entries).toHaveLength(1);
   });
+
+  it("marks history rows current only inside their owning workspace view", () => {
+    useChatStore.setState({ history: historyEntries(), sessionId: "ask-session" });
+    const completedWork = workSession({
+      id: "completed-1",
+      latest_run_status: "completed",
+      status: "completed",
+    });
+
+    const { rerender } = render(
+      <Sidebar
+        onSelectThread={vi.fn()}
+        activeView="credits"
+        workSessions={[completedWork]}
+        activeWorkSessionId="completed-1"
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /Quarterly planning\. Ask,/ })).not.toHaveAttribute(
+      "aria-current",
+    );
+    expect(screen.getByRole("button", { name: /Work task\. Work, completed/ })).not.toHaveAttribute(
+      "aria-current",
+    );
+
+    rerender(
+      <Sidebar
+        onSelectThread={vi.fn()}
+        activeView="work"
+        workSessions={[completedWork]}
+        activeWorkSessionId="completed-1"
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /Quarterly planning\. Ask,/ })).not.toHaveAttribute(
+      "aria-current",
+    );
+    expect(screen.getByRole("button", { name: /Work task\. Work, completed/ })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+  });
 });
 
 function workSession(overrides: Partial<WorkSession> = {}): WorkSession {
@@ -590,4 +646,5 @@ function resetStore() {
   useChatStore.getState().setHistory([]);
   useChatStore.getState().setHistorySearch("");
   useChatStore.getState().setMode("single");
+  useSidebarStore.getState().setCollapsed(false);
 }

@@ -10,15 +10,18 @@ import { formatHistoryDateTime } from "../../history/historyDate";
 import { buildHistoryThreads, filterHistoryThreads } from "../../history/historyThreads";
 import { normalizeSessionId } from "../../session/activeSession";
 import { useChatStore } from "../../store/chatStore";
+import { useSidebarStore } from "../../store/sidebarStore";
 import { useHistory } from "../../hooks/useHistory";
 import type { ChatMode, HistoryThread, WhoAmIResponse, WorkSession } from "../../types";
 import { CortexIcon } from "../shared/CortexIcon";
 import brandMarkUrl from "../../assets/brand/brand-mark.svg";
 import styles from "./Sidebar.module.css";
 
+export type SidebarView = "chat" | "work" | "usage" | "credits" | "models" | "account";
+
 interface SidebarProps {
   onSelectThread: (thread: HistoryThread) => void;
-  activeView?: "chat" | "work" | "usage" | "credits" | "models" | "account";
+  activeView?: SidebarView;
   onNavigateChat?: (mode: ChatMode) => void;
   onNavigateWork?: () => void;
   onNavigateUsage?: () => void;
@@ -61,7 +64,8 @@ export function Sidebar({
   activeWorkSessionId,
   onSelectWorkSession,
 }: SidebarProps) {
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const isCollapsed = useSidebarStore((state) => state.isCollapsed);
+  const toggleCollapsed = useSidebarStore((state) => state.toggleCollapsed);
   const [openMenuKey, setOpenMenuKey] = useState<string | null>(null);
   const [renamingKey, setRenamingKey] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
@@ -269,7 +273,7 @@ export function Sidebar({
           <button
             type="button"
             className={styles.collapseButton}
-            onClick={() => setIsCollapsed((current) => !current)}
+            onClick={toggleCollapsed}
             aria-controls="desktopSidebar"
             aria-expanded={!isCollapsed}
             aria-label={collapseLabel}
@@ -413,7 +417,7 @@ export function Sidebar({
                   <ul className={styles.historyGroupItems}>
                     {visibleWorkSessions.map((item) => {
                       const title = item.title || "New work";
-                      const isActive = item.id === activeWorkSessionId;
+                      const isActive = activeView === "work" && item.id === activeWorkSessionId;
                       return (
                         <li key={item.id} className={styles.historyItemRow}>
                           <div
@@ -431,7 +435,9 @@ export function Sidebar({
                               <span className={styles.historyTitle}>{title}</span>
                               <span className={styles.historyRight}>
                                 <span className={styles.historyMeta}>
-                                  {(item.latest_run_status || item.status).replaceAll("_", " ").toUpperCase()}
+                                  {(item.latest_run_status || item.status)
+                                    .replaceAll("_", " ")
+                                    .toUpperCase()}
                                 </span>
                               </span>
                             </button>
@@ -452,6 +458,7 @@ export function Sidebar({
                       const timeLabel = formatHistoryTime(thread.latestTimestamp);
                       const dateTimeLabel = formatHistoryDateTime(thread.latestTimestamp);
                       const isActive =
+                        activeView === "chat" &&
                         normalizeSessionId(thread.sessionId) !== null &&
                         normalizeSessionId(thread.sessionId) === normalizeSessionId(sessionId);
                       const isMenuOpen = openMenuKey === thread.key;

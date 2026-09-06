@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useNavigate } from "react-router-dom";
-import { fetchCortexAnalysisRuns } from "../api/cortexAnalysis";
-import { fetchHistory } from "../api/history";
 import { AccountMenu } from "../components/layout/AccountMenu";
-import { Sidebar } from "../components/layout/Sidebar";
+import { WorkspaceSidebar } from "../components/layout/WorkspaceSidebar";
 import { ProviderLogo } from "../components/shared/ProviderLogo";
 import { CortexIcon } from "../components/shared/CortexIcon";
 import { PlanBadge } from "../components/subscription/PlanBadge";
@@ -24,27 +22,16 @@ import {
   type ModelsCatalog,
 } from "../config/modelsCatalog";
 import { getModelPresentation } from "../config/modelPresentation";
-import { buildHistoryThreads } from "../history/historyThreads";
 import { useAuth } from "../hooks/useAuth";
 import { useChat } from "../hooks/useChat";
-import { useHistory } from "../hooks/useHistory";
 import { useModels } from "../hooks/useModels";
 import { useSubscription } from "../hooks/useSubscription";
 import { useTheme } from "../hooks/useTheme";
 import { useChatStore } from "../store/chatStore";
 import { getAccountMenuSubscriptionPresentation } from "../subscription/accountMenuPresentation";
-import {
-  modelAccessError,
-  requiredPlanForModel,
-} from "../subscription/subscriptionAccess";
+import { modelAccessError, requiredPlanForModel } from "../subscription/subscriptionAccess";
 import type { SubscriptionError } from "../subscription/subscriptionErrors";
-import type {
-  BillingPlansResponse,
-  ChatMode,
-  EntitlementsResponse,
-  HistoryThread,
-  ModelCatalogItem,
-} from "../types";
+import type { BillingPlansResponse, EntitlementsResponse, ModelCatalogItem } from "../types";
 import styles from "./ModelsPage.module.css";
 
 type ProviderStyle = CSSProperties & {
@@ -70,15 +57,11 @@ interface CatalogModelAccess {
 export function ModelsPage() {
   const navigate = useNavigate();
   const { whoAmI, cognitoConfig, loading: authLoading, loggedIn, login, logout } = useAuth();
-  const { load: loadHistory } = useHistory();
   const { cancel } = useChat();
   const { theme, toggleTheme } = useTheme();
-  const hydrateFromHistoryThread = useChatStore((s) => s.hydrateFromHistoryThread);
-  const setMode = useChatStore((s) => s.setMode);
   const startNewChat = useChatStore((s) => s.startNewChat);
   const setHistory = useChatStore((s) => s.setHistory);
   const setHistorySearch = useChatStore((s) => s.setHistorySearch);
-  const setError = useChatStore((s) => s.setError);
   const authEnabled = cognitoConfig?.enabled ?? false;
   const subscriptionState = useSubscription({ authLoading, loggedIn });
   const accountSubscription = getAccountMenuSubscriptionPresentation(
@@ -95,32 +78,6 @@ export function ModelsPage() {
         modelCount: liveModels.length,
       };
   const [accessError, setAccessError] = useState<SubscriptionError | null>(null);
-
-  useEffect(() => {
-    if (!authLoading) void loadHistory({ restoreActiveTranscript: false });
-  }, [authLoading, loadHistory]);
-
-  const openChatMode = (nextMode: ChatMode) => {
-    setMode(nextMode);
-    navigate("/");
-  };
-
-  const handleSelectHistoryThread = async (thread: HistoryThread) => {
-    try {
-      const [entries, analysisRuns] = thread.sessionId
-        ? await Promise.all([
-            fetchHistory(500, thread.sessionId),
-            fetchCortexAnalysisRuns({ sessionId: thread.sessionId }),
-          ])
-        : [thread.entries, []];
-      const completeThread = buildHistoryThreads(entries)[0] ?? thread;
-      hydrateFromHistoryThread(completeThread, analysisRuns);
-      navigate("/");
-    } catch (historyError) {
-      setError(historyError instanceof Error ? historyError.message : "Failed to load chat history");
-      navigate("/");
-    }
-  };
 
   const handleLogout = () => {
     cancel();
@@ -140,13 +97,10 @@ export function ModelsPage() {
 
   return (
     <div className={styles.layout}>
-      <Sidebar
-        onSelectThread={(thread) => void handleSelectHistoryThread(thread)}
+      <WorkspaceSidebar
         activeView="models"
-        onNavigateChat={openChatMode}
-        onNavigateUsage={() => navigate("/usage")}
-        onNavigateCredits={() => navigate("/credits")}
-        onNavigateModels={() => navigate("/models")}
+        authLoading={authLoading}
+        authEnabled={authEnabled}
         whoAmI={whoAmI}
         loggedIn={loggedIn}
         onLogin={authEnabled ? login : undefined}
@@ -237,10 +191,7 @@ export function ModelsCatalogScreen({
   const [selectedTask, setSelectedTask] = useState(catalog.tasks[0] ?? "All");
   const [searchQuery, setSearchQuery] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const summary = useMemo(
-    () => getModelsCatalogSummary(effectiveCatalog),
-    [effectiveCatalog],
-  );
+  const summary = useMemo(() => getModelsCatalogSummary(effectiveCatalog), [effectiveCatalog]);
   const normalizedSearch = searchQuery.trim().toLowerCase();
   const isAllTask = selectedTask === "All";
   const recId = isAllTask ? undefined : effectiveCatalog.rec[selectedTask];
@@ -278,9 +229,8 @@ export function ModelsCatalogScreen({
         <div className={styles.titleBlock}>
           <h1>Models</h1>
           <p>
-            {summary.providerCount} providers <span aria-hidden="true">·</span>{" "}
-            {summary.modelCount} models <span aria-hidden="true">·</span> pick one manually or let
-            Smart route
+            {summary.providerCount} providers <span aria-hidden="true">·</span> {summary.modelCount}{" "}
+            models <span aria-hidden="true">·</span> pick one manually or let Smart route
           </p>
         </div>
         <label className={styles.searchField}>
@@ -326,12 +276,7 @@ export function ModelsCatalogScreen({
           recommendation={recommendation}
           access={
             recommendation
-              ? resolveCatalogModelAccess(
-                  recommendation.model,
-                  liveModels,
-                  entitlements,
-                  plans,
-                )
+              ? resolveCatalogModelAccess(recommendation.model, liveModels, entitlements, plans)
               : null
           }
         />
@@ -416,12 +361,7 @@ function RecommendationCallout({
         <p>{model.bestFor}</p>
       </div>
       <div className={styles.recommendationMeters}>
-        <Meter
-          label="Speed"
-          level={speedLevel}
-          valueLabel={model.speed}
-          fill="var(--cx-ink-900)"
-        />
+        <Meter label="Speed" level={speedLevel} valueLabel={model.speed} fill="var(--cx-ink-900)" />
         <Meter
           label="Depth"
           level={depth.level}
@@ -459,7 +399,11 @@ function ProviderGroup({
   const providerStyle = buildProviderStyle(provider);
 
   return (
-    <section className={styles.providerGroup} style={providerStyle} aria-labelledby={`${provider.key}-models`}>
+    <section
+      className={styles.providerGroup}
+      style={providerStyle}
+      aria-labelledby={`${provider.key}-models`}
+    >
       <header className={styles.providerHeader}>
         <ProviderGlyphTile provider={provider} size={26} />
         <h2 id={`${provider.key}-models`}>{provider.name}</h2>

@@ -60,7 +60,7 @@ vi.mock("../subscription/accountMenuPresentation", () => ({
     billingDestination: null,
   }),
 }));
-vi.mock("../components/layout/Sidebar", () => ({ Sidebar: () => null }));
+vi.mock("../components/layout/WorkspaceSidebar", () => ({ WorkspaceSidebar: () => null }));
 vi.mock("../components/layout/AccountMenu", () => ({ AccountMenu: () => null }));
 vi.mock("../components/subscription/SubscriptionBanner", () => ({
   SubscriptionBanner: () => null,
@@ -92,7 +92,11 @@ vi.mock("../components/work/WorkComposer", () => ({
 vi.mock("../components/work/WorkRail", () => ({ WorkRail: () => null }));
 vi.mock("../components/work/WorkArtifacts", () => ({
   WorkArtifacts: ({ artifacts }: { artifacts: WorkArtifact[] }) => (
-    <div>{artifacts.map((artifact) => <span key={artifact.id}>{artifact.filename}</span>)}</div>
+    <div>
+      {artifacts.map((artifact) => (
+        <span key={artifact.id}>{artifact.filename}</span>
+      ))}
+    </div>
   ),
 }));
 vi.mock("../components/work/WorkApproval", () => ({ WorkApproval: () => null }));
@@ -199,7 +203,9 @@ describe("WorkPage terminal event synchronization", () => {
     expect(starting).toHaveTextContent("Starting work...");
     expect(screen.getByRole("heading", { name: "Prepare a launch report" })).toBeInTheDocument();
     expect(screen.getByText("Starting", { exact: true })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "What should I work on?" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "What should I work on?" }),
+    ).not.toBeInTheDocument();
 
     pendingStart.resolve(workRun({ instruction: "Prepare a launch report" }));
     await waitFor(() => {
@@ -238,16 +244,15 @@ describe("WorkPage terminal event synchronization", () => {
     );
     apiMocks.listWorkRuns.mockResolvedValue([original, followup]);
     apiMocks.getWorkEvents.mockImplementation(async (runId: string) => ({
-      items: runId === original.id
-        ? [workEvent(10, "agent_message", "Security review complete with six findings.")]
-        : [workEvent(20, "agent_message", "The deliverables remain attached above.")],
+      items:
+        runId === original.id
+          ? [workEvent(10, "agent_message", "Security review complete with six findings.")]
+          : [workEvent(20, "agent_message", "The deliverables remain attached above.")],
       latest_sequence: runId === original.id ? 10 : 20,
     }));
-    apiMocks.listWorkArtifacts.mockImplementation(async (runId: string) => (
-      runId === original.id
-        ? [workArtifact("security-report", "SECURITY_ANALYSIS_REPORT.md")]
-        : []
-    ));
+    apiMocks.listWorkArtifacts.mockImplementation(async (runId: string) =>
+      runId === original.id ? [workArtifact("security-report", "SECURITY_ANALYSIS_REPORT.md")] : [],
+    );
 
     render(
       <MemoryRouter initialEntries={["/work/work-session-1"]}>
@@ -257,7 +262,9 @@ describe("WorkPage terminal event synchronization", () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText("Analyze the application security concerns")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Analyze the application security concerns"),
+    ).toBeInTheDocument();
     expect(screen.getByText("Security review complete with six findings.")).toBeInTheDocument();
     expect(screen.getByText("SECURITY_ANALYSIS_REPORT.md")).toBeInTheDocument();
     expect(screen.getByText("Where are the deliverables? I do not see them.")).toBeInTheDocument();

@@ -1,9 +1,6 @@
 import { type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
-import { fetchCortexAnalysisRuns } from "../api/cortexAnalysis";
-import { fetchHistory } from "../api/history";
-import { listWorkSessions } from "../api/work";
 import { PromptComposer } from "../components/composer/PromptComposer";
 import { ResultsSection } from "../components/results/ResultsSection";
 import { ErrorBanner } from "../components/shared/ErrorBanner";
@@ -11,7 +8,7 @@ import { ExampleChips } from "../components/shared/ExampleChips";
 import { CortexIcon } from "../components/shared/CortexIcon";
 import { ProviderLogo } from "../components/shared/ProviderLogo";
 import { AccountMenu } from "../components/layout/AccountMenu";
-import { Sidebar } from "../components/layout/Sidebar";
+import { WorkspaceSidebar } from "../components/layout/WorkspaceSidebar";
 import { SubscriptionBanner } from "../components/subscription/SubscriptionBanner";
 import { UpgradeDialog } from "../components/subscription/UpgradeDialog";
 import { DEFAULT_MODELS } from "../config/defaultModels";
@@ -19,6 +16,7 @@ import { getModelPresentation } from "../config/modelPresentation";
 import { getRuntimeConfig } from "../config/runtimeConfig";
 import { formatHistoryDateTime } from "../history/historyDate";
 import { buildHistoryThreads, filterHistoryThreads } from "../history/historyThreads";
+import { loadCompleteHistoryThread } from "../history/loadHistoryThread";
 import { useAuth } from "../hooks/useAuth";
 import { useChat } from "../hooks/useChat";
 import { useHistory } from "../hooks/useHistory";
@@ -28,7 +26,7 @@ import { useTheme } from "../hooks/useTheme";
 import { normalizeSessionId } from "../session/activeSession";
 import { useChatStore } from "../store/chatStore";
 import { getAccountMenuSubscriptionPresentation } from "../subscription/accountMenuPresentation";
-import type { ChatMode, HistoryThread, ModelCatalogItem, WorkSession } from "../types";
+import type { ChatMode, HistoryThread, ModelCatalogItem } from "../types";
 import brandMarkUrl from "../assets/brand/brand-mark.svg";
 import styles from "./ChatPage.module.css";
 
@@ -53,18 +51,17 @@ export function ChatPage() {
   );
   const accountBillingDestination = accountSubscription.billingDestination;
   const { models, loading: modelsLoading } = useModels(workspaceReady);
-  const { load: loadHistory, removeThread } = useHistory();
+  const { removeThread } = useHistory();
   const { submit, regenerate, cancel } = useChat();
   const { theme, toggleTheme } = useTheme();
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>("chat");
   const [composerCollapsed, setComposerCollapsed] = useState(false);
-  const [workSessions, setWorkSessions] = useState<WorkSession[]>([]);
   const streaming = useChatStore((s) => s.streaming);
   const error = useChatStore((s) => s.error);
   const setError = useChatStore((s) => s.setError);
+  const hydrateFromHistoryThread = useChatStore((s) => s.hydrateFromHistoryThread);
   const subscriptionError = useChatStore((s) => s.subscriptionError);
   const setSubscriptionError = useChatStore((s) => s.setSubscriptionError);
-  const hydrateFromHistoryThread = useChatStore((s) => s.hydrateFromHistoryThread);
   const mode = useChatStore((s) => s.mode);
   const sessionId = useChatStore((s) => s.sessionId);
   const setMode = useChatStore((s) => s.setMode);
@@ -80,15 +77,6 @@ export function ChatPage() {
   });
   const showComposerSheet = !composerCollapsed;
   const showComposerBackdrop = showComposerSheet && hasTurns;
-
-  useEffect(() => {
-    if (workspaceReady) void loadHistory({ restoreActiveTranscript: true });
-  }, [loadHistory, workspaceReady]);
-
-  useEffect(() => {
-    if (!workspaceReady || getRuntimeConfig().workEnabled === false) return;
-    void listWorkSessions().then(setWorkSessions).catch(() => setWorkSessions([]));
-  }, [workspaceReady]);
 
   useEffect(() => {
     const requestedMode = new URLSearchParams(location.search).get("mode");
@@ -114,14 +102,8 @@ export function ChatPage() {
 
   const handleSelectHistoryThread = async (thread: HistoryThread) => {
     try {
-      const [entries, analysisRuns] = thread.sessionId
-        ? await Promise.all([
-            fetchHistory(500, thread.sessionId),
-            fetchCortexAnalysisRuns({ sessionId: thread.sessionId }),
-          ])
-        : [thread.entries, []];
-      const completeThread = buildHistoryThreads(entries)[0] ?? thread;
-      hydrateFromHistoryThread(completeThread, analysisRuns);
+      const loaded = await loadCompleteHistoryThread(thread);
+      hydrateFromHistoryThread(loaded.thread, loaded.analysisRuns);
       setMobilePanel("chat");
       setComposerCollapsed(true);
     } catch (historyError) {
@@ -181,19 +163,22 @@ export function ChatPage() {
 
   return (
     <div className={styles.layout} data-theme={theme}>
-      <Sidebar
-        onSelectThread={(thread) => void handleSelectHistoryThread(thread)}
+      <WorkspaceSidebar
         activeView="chat"
-        onNavigateUsage={() => navigate("/usage")}
-        onNavigateWork={getRuntimeConfig().workEnabled === false ? undefined : () => navigate("/work")}
-        onNavigateCredits={() => navigate("/credits")}
-        onNavigateModels={() => navigate("/models")}
+        authLoading={authLoading}
+        authEnabled={authEnabled}
+        restoreActiveTranscript
+        onChatThreadSelected={() => {
+          setMobilePanel("chat");
+          setComposerCollapsed(true);
+        }}
+        onNew={() => {
+          setMobilePanel("chat");
+          setComposerCollapsed(false);
+        }}
         whoAmI={whoAmI}
         loggedIn={loggedIn}
         onLogin={authEnabled ? login : undefined}
-        signedOut={signedOut}
-        workSessions={workSessions}
-        onSelectWorkSession={(session) => navigate(`/work/${session.id}`)}
       />
 
       <main className={styles.main}>
@@ -254,15 +239,17 @@ export function ChatPage() {
             >
               Compare
             </button>
-            {getRuntimeConfig().workEnabled !== false && <button
-              type="button"
-              className={styles.tab}
-              onClick={() => navigate("/work")}
-              aria-label="Work"
-              disabled={signedOut}
-            >
-              Work
-            </button>}
+            {getRuntimeConfig().workEnabled !== false && (
+              <button
+                type="button"
+                className={styles.tab}
+                onClick={() => navigate("/work")}
+                aria-label="Work"
+                disabled={signedOut}
+              >
+                Work
+              </button>
+            )}
           </nav>
           <div className={styles.topActions} aria-label="Workspace actions">
             <button
@@ -390,12 +377,14 @@ export function ChatPage() {
               </span>
               <span>Compare</span>
             </button>
-            {getRuntimeConfig().workEnabled !== false && <button type="button" onClick={() => navigate("/work")}>
-              <span className={styles.mobileNavIcon}>
-                <CortexIcon name="work" />
-              </span>
-              <span>Work</span>
-            </button>}
+            {getRuntimeConfig().workEnabled !== false && (
+              <button type="button" onClick={() => navigate("/work")}>
+                <span className={styles.mobileNavIcon}>
+                  <CortexIcon name="work" />
+                </span>
+                <span>Work</span>
+              </button>
+            )}
             <button
               type="button"
               className={mobilePanel === "history" ? styles.mobileNavActive : ""}

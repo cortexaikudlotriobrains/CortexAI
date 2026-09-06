@@ -24,7 +24,7 @@ import {
 } from "../api/work";
 import { ApiClientError, makeRequestId } from "../api/client";
 import { AccountMenu } from "../components/layout/AccountMenu";
-import { Sidebar } from "../components/layout/Sidebar";
+import { WorkspaceSidebar } from "../components/layout/WorkspaceSidebar";
 import { SubscriptionBanner } from "../components/subscription/SubscriptionBanner";
 import { CortexIcon } from "../components/shared/CortexIcon";
 import { WorkApproval } from "../components/work/WorkApproval";
@@ -369,14 +369,10 @@ export function WorkPage() {
 
   return (
     <div className={styles.layout} data-theme={theme}>
-      <Sidebar
-        onSelectThread={() => undefined}
+      <WorkspaceSidebar
         activeView="work"
-        onNavigateChat={(mode) => navigate(mode === "compare" ? "/?mode=compare" : "/")}
-        onNavigateWork={runtimeWorkEnabled ? () => navigate("/work") : undefined}
-        onNavigateUsage={() => navigate("/usage")}
-        onNavigateCredits={() => navigate("/credits")}
-        onNavigateModels={() => navigate("/models")}
+        authLoading={authLoading}
+        authEnabled={authEnabled}
         newLabel="New work"
         onNew={handleNewWork}
         workSessions={store.sessions}
@@ -385,7 +381,6 @@ export function WorkPage() {
         whoAmI={whoAmI}
         loggedIn={loggedIn}
         onLogin={authEnabled ? login : undefined}
-        signedOut={signedOut}
       />
       <main className={styles.main}>
         <header className={styles.mobileTopbar}>

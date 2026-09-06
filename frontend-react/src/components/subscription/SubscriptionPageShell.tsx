@@ -1,14 +1,11 @@
-import { useEffect, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { fetchHistory } from "../../api/history";
 import brandMarkUrl from "../../assets/brand/brand-mark.svg";
-import { buildHistoryThreads } from "../../history/historyThreads";
-import { useHistory } from "../../hooks/useHistory";
 import { useTheme } from "../../hooks/useTheme";
 import { useChatStore } from "../../store/chatStore";
-import type { ChatMode, HistoryThread, WhoAmIResponse } from "../../types";
+import type { WhoAmIResponse } from "../../types";
 import { AccountMenu } from "../layout/AccountMenu";
-import { Sidebar } from "../layout/Sidebar";
+import { WorkspaceSidebar } from "../layout/WorkspaceSidebar";
 import { CortexIcon } from "../shared/CortexIcon";
 import styles from "./SubscriptionPageShell.module.css";
 
@@ -46,35 +43,10 @@ export function SubscriptionPageShell({
   activeView = "account",
 }: SubscriptionPageShellProps) {
   const navigate = useNavigate();
-  const { load: loadHistory } = useHistory();
   const { theme, toggleTheme } = useTheme();
-  const hydrateFromHistoryThread = useChatStore((state) => state.hydrateFromHistoryThread);
-  const setMode = useChatStore((state) => state.setMode);
   const startNewChat = useChatStore((state) => state.startNewChat);
   const setHistory = useChatStore((state) => state.setHistory);
   const setHistorySearch = useChatStore((state) => state.setHistorySearch);
-  const setError = useChatStore((state) => state.setError);
-
-  useEffect(() => {
-    if (!authLoading) void loadHistory({ restoreActiveTranscript: false });
-  }, [authLoading, loadHistory]);
-
-  const openChatMode = (mode: ChatMode) => {
-    setMode(mode);
-    navigate("/");
-  };
-
-  const handleSelectHistoryThread = async (thread: HistoryThread) => {
-    try {
-      const entries = thread.sessionId ? await fetchHistory(500, thread.sessionId) : thread.entries;
-      const completeThread = buildHistoryThreads(entries)[0] ?? thread;
-      hydrateFromHistoryThread(completeThread);
-      navigate("/");
-    } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : "Failed to load chat history");
-      navigate("/");
-    }
-  };
 
   const handleLogout = () => {
     startNewChat();
@@ -103,13 +75,10 @@ export function SubscriptionPageShell({
 
   return (
     <div className={styles.layout}>
-      <Sidebar
-        onSelectThread={(thread) => void handleSelectHistoryThread(thread)}
+      <WorkspaceSidebar
         activeView={activeView}
-        onNavigateChat={openChatMode}
-        onNavigateUsage={() => navigate("/usage")}
-        onNavigateCredits={() => navigate("/credits")}
-        onNavigateModels={() => navigate("/models")}
+        authLoading={authLoading}
+        authEnabled={authEnabled}
         whoAmI={whoAmI}
         loggedIn={loggedIn}
         onLogin={authEnabled ? onLogin : undefined}
