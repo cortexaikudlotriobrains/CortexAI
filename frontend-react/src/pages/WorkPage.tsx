@@ -467,7 +467,7 @@ function WorkStartingView({ instruction }: { instruction: string }) {
 function WorkSessionView({ session, run, history, resultText, onCancel, approval, artifacts, rail, composer }: { session: WorkSession | null; run: WorkRun; history: WorkRunHistoryItem[]; resultText?: string | null; onCancel: () => void; approval: React.ReactNode; artifacts: WorkArtifact[]; rail: React.ReactNode; composer: React.ReactNode }) {
   const terminal = TERMINAL_STATUSES.has(run.status);
   const previous = history.filter((item) => item.run.id !== run.id);
-  return <div className={styles.workArea}><header className={styles.taskHeader}><div><h1 title={session?.title || run.instruction}>{session?.title || run.instruction}</h1><p>{run.started_at ? `Started ${formatRelative(run.started_at)}` : "Preparing"} · {formatAiCredits(run.actual_credits)} credits</p></div><div className={styles.taskHeaderActions}><WorkStatusPill status={run.status} />{!terminal && <button type="button" className={styles.stopButton} onClick={onCancel}><CortexIcon name="stop" size={15} /> Stop</button>}</div></header><div className={styles.workColumns}><section className={styles.stream}><div className={styles.streamInner}><div className={styles.transcript} aria-label="Work conversation">{previous.map((item) => <WorkTurn key={item.run.id} run={item.run} events={item.events} artifacts={item.artifacts} />)}<WorkTurn run={run} events={[]} artifacts={artifacts} resultText={resultText} current approval={approval} rail={rail} /></div>{!terminal && <button type="button" className={styles.mobileStop} onClick={onCancel}><CortexIcon name="stop" size={15} /> Stop work</button>}</div>{terminal && <div className={styles.composerDock}>{composer}</div>}</section><div className={styles.desktopRail}>{rail}</div></div></div>;
+  return <div className={styles.workArea}><header className={styles.taskHeader}><div><h1 title={session?.title || run.instruction}>{session?.title || run.instruction}</h1><p><time dateTime={run.created_at}>Asked {formatAskedAt(run.created_at)}</time> · {formatAiCredits(run.actual_credits)} credits</p></div><div className={styles.taskHeaderActions}><WorkStatusPill status={run.status} />{!terminal && <button type="button" className={styles.stopButton} onClick={onCancel}><CortexIcon name="stop" size={15} /> Stop</button>}</div></header><div className={styles.workColumns}><section className={styles.stream}><div className={styles.streamInner}><div className={styles.transcript} aria-label="Work conversation">{previous.map((item) => <WorkTurn key={item.run.id} run={item.run} events={item.events} artifacts={item.artifacts} />)}<WorkTurn run={run} events={[]} artifacts={artifacts} resultText={resultText} current approval={approval} rail={rail} /></div>{!terminal && <button type="button" className={styles.mobileStop} onClick={onCancel}><CortexIcon name="stop" size={15} /> Stop work</button>}</div>{terminal && <div className={styles.composerDock}>{composer}</div>}</section><div className={styles.desktopRail}>{rail}</div></div></div>;
 }
 
 function WorkTurn({ run, events, artifacts, resultText, current = false, approval = null, rail = null }: { run: WorkRun; events: WorkEvent[]; artifacts: WorkArtifact[]; resultText?: string | null; current?: boolean; approval?: React.ReactNode; rail?: React.ReactNode }) {
@@ -500,4 +500,17 @@ async function pendingApprovalFromEvents(events: WorkEvent[]) {
 }
 function isTerminalEvent(event: WorkEvent): boolean { return ["run_completed", "run_failed", "run_cancelled", "budget_exhausted", "output_limit_reached"].includes(event.type); }
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : "Cortex Work could not complete that request."; }
-function formatRelative(value: string): string { const seconds = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 1000)); if (seconds < 60) return "moments ago"; const minutes = Math.floor(seconds / 60); return `${minutes} min ago`; }
+function formatAskedAt(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "date unavailable";
+  const dateLabel = new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+  const timeLabel = new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+  return `${dateLabel} at ${timeLabel}`;
+}

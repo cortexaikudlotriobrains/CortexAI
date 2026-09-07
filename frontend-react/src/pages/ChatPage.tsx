@@ -46,6 +46,7 @@ export function ChatPage() {
   const signedOut = !authLoading && authEnabled && !loggedIn;
   const workspaceReady = !authLoading && !signedOut;
   const subscriptionState = useSubscription({ authLoading, loggedIn });
+  const reloadSubscription = subscriptionState.reload;
   const accountSubscription = getAccountMenuSubscriptionPresentation(
     subscriptionState.entitlements,
   );
@@ -86,9 +87,11 @@ export function ChatPage() {
   // Collapse the composer sheet on mobile as soon as the user submits
   const prevStreamingRef = useRef(false);
   useEffect(() => {
-    if (streaming && !prevStreamingRef.current) setComposerCollapsed(true);
+    const wasStreaming = prevStreamingRef.current;
+    if (streaming && !wasStreaming) setComposerCollapsed(true);
+    if (!streaming && wasStreaming) reloadSubscription();
     prevStreamingRef.current = streaming;
-  }, [streaming]);
+  }, [reloadSubscription, streaming]);
 
   useEffect(() => {
     if (!subscriptionError) return;

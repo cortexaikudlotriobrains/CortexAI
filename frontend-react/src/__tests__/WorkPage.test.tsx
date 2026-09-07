@@ -181,6 +181,41 @@ describe("WorkPage terminal event synchronization", () => {
     });
   });
 
+  it("shows the calendar date and time when the current question was asked", async () => {
+    const createdAt = "2026-08-24T12:34:00";
+    const startedAt = "2026-08-24T12:45:00";
+    const completedRun = workRun({
+      status: "completed",
+      created_at: createdAt,
+      started_at: startedAt,
+      completed_at: "2026-08-24T12:50:00",
+    });
+    apiMocks.listWorkRuns.mockResolvedValue([completedRun]);
+
+    render(
+      <MemoryRouter initialEntries={["/work/work-session-1"]}>
+        <Routes>
+          <Route path="/work/:workSessionId" element={<WorkPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const askedAt = await screen.findByText(/^Asked /);
+    const expectedDate = new Intl.DateTimeFormat(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    }).format(new Date(createdAt));
+    const expectedTime = new Intl.DateTimeFormat(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(new Date(createdAt));
+
+    expect(askedAt).toHaveAttribute("datetime", createdAt);
+    expect(askedAt).toHaveTextContent(`Asked ${expectedDate} at ${expectedTime}`);
+    expect(askedAt).not.toHaveTextContent("ago");
+  });
+
   it("shows a starting workspace while the run-start request is pending", async () => {
     const pendingStart = deferred<WorkRun>();
     apiMocks.startWorkRun.mockReturnValue(pendingStart.promise);

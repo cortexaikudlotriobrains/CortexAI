@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { BrowserRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   submit: vi.fn(),
   regenerate: vi.fn(),
   cancel: vi.fn(),
+  reloadSubscription: vi.fn(),
   useModels: vi.fn(),
   subscriptionEntitlements: {
     current: null as null | {
@@ -53,7 +54,10 @@ vi.mock("../hooks/useModels", () => ({
 }));
 
 vi.mock("../hooks/useSubscription", () => ({
-  useSubscription: () => ({ entitlements: mocks.subscriptionEntitlements.current }),
+  useSubscription: () => ({
+    entitlements: mocks.subscriptionEntitlements.current,
+    reload: mocks.reloadSubscription,
+  }),
 }));
 
 vi.mock("../hooks/useHistory", () => ({
@@ -184,6 +188,31 @@ describe("ChatPage authentication gate", () => {
 
     expect(mocks.regenerate).toHaveBeenCalledWith(turnId);
     expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["Ask", "single"],
+    ["Compare", "compare"],
+  ] as const)("reloads the AI-credit balance when a %s stream settles", async (_label, mode) => {
+    Object.assign(mocks.authState, {
+      whoAmI: whoAmI(),
+      cognitoConfig: { enabled: false },
+      loading: false,
+      loggedIn: true,
+    });
+    useChatStore.getState().setMode(mode);
+
+    renderChatPage();
+
+    expect(mocks.reloadSubscription).not.toHaveBeenCalled();
+    act(() => useChatStore.getState().setStreaming(true));
+    expect(mocks.reloadSubscription).not.toHaveBeenCalled();
+
+    act(() => useChatStore.getState().setStreaming(false));
+
+    await waitFor(() => {
+      expect(mocks.reloadSubscription).toHaveBeenCalledTimes(1);
+    });
   });
 });
 
