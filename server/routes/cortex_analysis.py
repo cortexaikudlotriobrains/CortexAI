@@ -28,6 +28,7 @@ from server.billing.enforcement_service import (
     resolve_model_target,
 )
 from server.billing.errors import enforcement_http_exception
+from server.billing.response_credit_service import calculate_response_credit_usage
 from server.dependencies import AuthResult, get_auth
 from server.routes.session_auth import SessionScopedAuthGuard
 from server.schemas.cortex_analysis import (
@@ -464,11 +465,29 @@ def _run_to_dto(
     if not isinstance(disagreements, list):
         disagreements = []
     source_fingerprint = str(run.get("source_fingerprint") or "")
+    analysis_model = str(
+        run.get("model") or analysis_service.configured_analysis_model()
+    )
+    pricing_snapshot = run.get("pricing_snapshot")
+    credit_usage = calculate_response_credit_usage(
+        provider="openai",
+        model=analysis_model,
+        input_tokens=max(0, int(run.get("prompt_tokens") or 0)),
+        cached_input_tokens=max(0, int(run.get("cached_input_tokens") or 0)),
+        cache_write_tokens=max(0, int(run.get("cache_write_tokens") or 0)),
+        reasoning_tokens=max(0, int(run.get("reasoning_tokens") or 0)),
+        output_tokens=max(0, int(run.get("completion_tokens") or 0)),
+        output_text=str(run.get("recommended_answer") or ""),
+        pricing_snapshot=(
+            pricing_snapshot if isinstance(pricing_snapshot, dict) else None
+        ),
+        include_research_charge=False,
+    )
     return CortexAnalysisRunDTO(
         analysisId=str(run.get("analysis_id") or ""),
         requestGroupId=str(run.get("request_group_id") or ""),
         sessionId=str(run.get("session_id") or ""),
-        model=str(run.get("model") or analysis_service.configured_analysis_model()),
+        model=analysis_model,
         recommendedAnswer=str(run.get("recommended_answer") or ""),
         agreements=[str(item) for item in run.get("agreements") or [] if str(item)],
         disagreements=[
@@ -515,6 +534,8 @@ def _run_to_dto(
             min(3, int(run.get("combined_response_count") or 2)),
         ),
         failedResponseCount=max(0, int(run.get("failed_response_count") or 0)),
+        aiCredits=credit_usage.ai_credits,
+        creditUsageEstimated=credit_usage.credit_usage_estimated,
         createdAt=str(run.get("created_at") or ""),
         isStale=(current_fingerprint is not None and source_fingerprint != current_fingerprint),
     )

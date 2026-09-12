@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceSidebar } from "../components/layout/WorkspaceSidebar";
 import { useChatStore } from "../store/chatStore";
 import { useSidebarStore } from "../store/sidebarStore";
+import { useWorkStore } from "../store/workStore";
 import type { HistoryEntry, WorkSession } from "../types";
 
 const mocks = vi.hoisted(() => ({
@@ -60,8 +61,13 @@ describe("WorkspaceSidebar", () => {
     resetStores();
   });
 
-  it("keeps Work navigation and run-backed history available on secondary routes", async () => {
+  it("returns secondary routes to the remembered Work session", async () => {
     const user = userEvent.setup();
+    useWorkStore.getState().setSession({
+      ...workSession(),
+      status: "running",
+      latest_run_status: "running",
+    });
     renderSidebar("credits", "/credits");
 
     expect(
@@ -71,7 +77,7 @@ describe("WorkspaceSidebar", () => {
     expect(mocks.loadHistory).toHaveBeenCalledWith({ restoreActiveTranscript: false });
 
     await user.click(screen.getByRole("button", { name: /^Work$/ }));
-    expect(screen.getByTestId("location")).toHaveTextContent("/work");
+    expect(screen.getByTestId("location")).toHaveTextContent("/work/work-session-1");
   });
 
   it("turns New chat on a secondary route into a visible Ask navigation", async () => {
@@ -182,4 +188,5 @@ function resetStores() {
   useChatStore.getState().setHistorySearch("");
   useChatStore.getState().setMode("single");
   useSidebarStore.getState().setCollapsed(false);
+  useWorkStore.getState().resetWorkspace();
 }

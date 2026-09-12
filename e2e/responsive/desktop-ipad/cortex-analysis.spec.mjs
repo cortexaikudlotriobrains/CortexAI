@@ -24,6 +24,9 @@ test("desktop restores Cortex Analysis below Compare responses and retains every
   await expect(responsePanels.nth(0)).toBeVisible();
   await expect(responsePanels.nth(1)).toBeVisible();
   await expect(analysisHeading).toBeVisible();
+  const analysisCredits = firstTurn.getByText("1.234 credits", { exact: true });
+  await expect(analysisCredits).toBeVisible();
+  await expect(analysisCredits.locator("..").locator("svg")).toHaveCount(1);
   await expect(
     firstTurn.getByText("Use a phased gateway rollout", { exact: false }),
   ).toBeVisible();
@@ -60,6 +63,12 @@ test("desktop restores Cortex Analysis below Compare responses and retains every
       .locator('article[aria-label="Model comparison"]')
       .first()
       .getByRole("heading", { name: "Cortex Analysis" }),
+  ).toBeVisible();
+  await expect(
+    page
+      .locator('article[aria-label="Model comparison"]')
+      .first()
+      .getByText("1.234 credits", { exact: true }),
   ).toBeVisible();
   await expectNoHorizontalOverflow(page);
 });

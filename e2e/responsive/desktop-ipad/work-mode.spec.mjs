@@ -92,6 +92,27 @@ test("desktop Work preserves the earlier result and deliverables after a follow-
     await expectNoHorizontalOverflow(page);
 });
 
+test("desktop returns from Ask to the remembered Work session without showing the landing", async ({ responsiveApp }) => {
+    const { page, state } = responsiveApp;
+    state.subscriptionPlan = "pro";
+    state.workSessions = [workSession("waiting_for_approval")];
+    state.workRun = workRun("waiting_for_approval");
+    state.workRuns = [state.workRun];
+    state.workEvents = [workEvent(1, "progress", "Waiting for approval")];
+    state.workEventsByRun.set(state.workRun.id, state.workEvents);
+
+    await page.goto("/work/work-session-1");
+    await expect(page.getByRole("heading", { name: "Prepare a market report" })).toBeVisible();
+
+    await page.getByRole("navigation", { name: "Workspace mode" }).getByRole("button", { name: "Ask" }).click();
+    await expect(page).toHaveURL(/\/$/);
+
+    await page.getByRole("navigation", { name: "Workspace mode" }).getByRole("button", { name: "Work" }).click();
+    await expect(page).toHaveURL(/\/work\/work-session-1$/);
+    await expect(page.getByRole("heading", { name: "Prepare a market report" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "What should I work on?" })).toHaveCount(0);
+});
+
 function workSession(status) {
     return {
         id: "work-session-1", session_id: "session-work-1", title: "Prepare a market report",

@@ -216,6 +216,33 @@ describe("WorkPage terminal event synchronization", () => {
     expect(askedAt).not.toHaveTextContent("ago");
   });
 
+  it("does not flash the new-work landing while restoring a requested session", async () => {
+    const sessionRequest = deferred<WorkSession>();
+    apiMocks.getWorkSession.mockReturnValue(sessionRequest.promise);
+
+    render(
+      <MemoryRouter initialEntries={["/work/work-session-1"]}>
+        <Routes>
+          <Route path="/work/:workSessionId" element={<WorkPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("Loading Work...")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "What should I work on?" }),
+    ).not.toBeInTheDocument();
+
+    sessionRequest.resolve(workSession());
+
+    expect(
+      await screen.findByRole("heading", { name: "Can you try again" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "What should I work on?" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("shows a starting workspace while the run-start request is pending", async () => {
     const pendingStart = deferred<WorkRun>();
     apiMocks.startWorkRun.mockReturnValue(pendingStart.promise);

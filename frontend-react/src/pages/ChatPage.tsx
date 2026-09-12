@@ -25,6 +25,7 @@ import { useSubscription } from "../hooks/useSubscription";
 import { useTheme } from "../hooks/useTheme";
 import { normalizeSessionId } from "../session/activeSession";
 import { useChatStore } from "../store/chatStore";
+import { useWorkStore } from "../store/workStore";
 import { getAccountMenuSubscriptionPresentation } from "../subscription/accountMenuPresentation";
 import type { ChatMode, HistoryThread, ModelCatalogItem } from "../types";
 import brandMarkUrl from "../assets/brand/brand-mark.svg";
@@ -68,6 +69,10 @@ export function ChatPage() {
   const setMode = useChatStore((s) => s.setMode);
   const startNewChat = useChatStore((s) => s.startNewChat);
   const setHistory = useChatStore((s) => s.setHistory);
+  const rememberedWorkSessionId = useWorkStore((s) => s.session?.id);
+  const workDestination = rememberedWorkSessionId
+    ? `/work/${encodeURIComponent(rememberedWorkSessionId)}`
+    : "/work";
   const setHistorySearch = useChatStore((s) => s.setHistorySearch);
   const hasTurns = useChatStore((s) => s.turns.length > 0);
   const retryTurnId = useChatStore((s) => {
@@ -246,7 +251,7 @@ export function ChatPage() {
               <button
                 type="button"
                 className={styles.tab}
-                onClick={() => navigate("/work")}
+                onClick={() => navigate(workDestination)}
                 aria-label="Work"
                 disabled={signedOut}
               >
@@ -381,7 +386,7 @@ export function ChatPage() {
               <span>Compare</span>
             </button>
             {getRuntimeConfig().workEnabled !== false && (
-              <button type="button" onClick={() => navigate("/work")}>
+              <button type="button" onClick={() => navigate(workDestination)}>
                 <span className={styles.mobileNavIcon}>
                   <CortexIcon name="work" />
                 </span>

@@ -921,6 +921,8 @@ def test_cortex_analysis_runs_persist_and_regeneration_marks_them_stale(
     assert first.status_code == 201
     assert second.status_code == 201
     assert first.json()["analysisId"] != second.json()["analysisId"]
+    assert first.json()["aiCredits"] == 180
+    assert first.json()["creditUsageEstimated"] is False
 
     saved = client.get(
         "/v1/compare/analysis-runs",
@@ -929,6 +931,10 @@ def test_cortex_analysis_runs_persist_and_regeneration_marks_them_stale(
     assert saved.status_code == 200
     assert len(saved.json()) == 2
     assert saved.json()[0]["isStale"] is False
+    assert all(item["aiCredits"] == 180 for item in saved.json())
+    assert all(
+        item["creditUsageEstimated"] is False for item in saved.json()
+    )
 
     source = compare_payload["responses"][0]
     regenerated = client.post(

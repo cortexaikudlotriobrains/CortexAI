@@ -20,6 +20,32 @@ test("desktop uses the sidebar and top mode navigation", async ({ responsiveApp 
     await expectNoHorizontalOverflow(page);
 });
 
+test("desktop keeps workspace action spacing fixed across Ask, Compare, and Work", async ({ responsiveApp }) => {
+    const { page } = responsiveApp;
+    await page.setViewportSize({ width: 1440, height: 900 });
+
+    const workspaceActions = () => page.locator('[aria-label="Workspace actions"]');
+    const modeNavigation = () => page.getByRole("navigation", { name: "Workspace mode" });
+    const expectFixedActionGeometry = async () => {
+        const newActionIcon = workspaceActions()
+            .getByRole("button", { name: /^New (chat|work)$/ })
+            .locator("svg");
+
+        await expect(workspaceActions()).toHaveCSS("column-gap", "24px");
+        await expect(newActionIcon).toHaveCSS("width", "18px");
+        await expect(newActionIcon).toHaveCSS("height", "18px");
+    };
+
+    await expectFixedActionGeometry();
+
+    await modeNavigation().getByRole("button", { name: "Compare" }).click();
+    await expectFixedActionGeometry();
+
+    await modeNavigation().getByRole("button", { name: "Work" }).click();
+    await expect(page).toHaveURL(/\/work$/);
+    await expectFixedActionGeometry();
+});
+
 test("desktop sidebar collapses to an icon rail and expands again", async ({ responsiveApp }) => {
     const { page } = responsiveApp;
     await page.setViewportSize({ width: 1440, height: 900 });

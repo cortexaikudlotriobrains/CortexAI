@@ -94,6 +94,11 @@ Opening a Work session now hydrates every durable run through
 deliverables as one chronological transcript. Submitting a follow-up appends a
 new turn instead of replacing the previous result, so an earlier security
 analysis and its files remain visible and downloadable in the same task.
+Moving to Ask, Compare, or another workspace preserves the remembered Work
+session destination. Returning to Work reuses its visible snapshot while it
+refreshes, and a direct session load shows a loading state instead of briefly
+rendering the new-work landing page. The explicit `New work` action still opens
+the empty landing composer.
 Changing Web or MCP selections updates the existing Managed Agent session so
 its conversational context is retained. A provider session is replaced only
 when its immutable vault-resource set changes; that fallback prepends a bounded
@@ -918,12 +923,12 @@ Cortex Analysis is an on-demand synthesized model call below completed browser C
   remain distinct in insights, differences, confidence, and verification copy.
 - The model uses strict Structured Outputs, and the API validates the result before persistence. Provider failure or invalid output returns `502`; a failed generation does not create a run.
 - Each disagreement is returned as `{ "who": <display name>, "text": <position> }`; optional `disagreementNote` explains the nature of the difference without choosing a winner. Unique insights retain their model attribution.
-- The finished React result is one continuous document: combined answer and inline qualitative confidence first, then always-visible agreement/difference/unique-insight evidence, followed by one verification band. There are no per-section disclosures or saved open/closed preferences. When confidence is `limited` and disagreements exist, the difference column leads visually without changing model ranking or hiding original responses.
+- The finished React result is one continuous document: its header shows the run's customer-facing AI-credit charge, then the combined answer and inline qualitative confidence, always-visible agreement/difference/unique-insight evidence, and one verification band. The API returns raw `aiCredits` plus `creditUsageEstimated`; React applies the shared display-credit formatter and labels fallback-derived historical usage as estimated. There are no per-section disclosures or saved open/closed preferences. When confidence is `limited` and disagreements exist, the difference column leads visually without changing model ranking or hiding original responses.
 - Successful runs are append-only in `cortex_analysis_runs`. Re-running never overwrites an earlier result.
 - While a re-run is processing, the result area temporarily replaces the
   previous combined answer with the analysis progress state. If the re-run
   fails, the saved answer returns below the retry message.
-- `GET /v1/compare/analysis-runs` requires either `session_id` or `request_group_id` and returns every owned run newest-first.
+- `GET /v1/compare/analysis-runs` requires either `session_id` or `request_group_id` and returns every owned run newest-first, including the persisted-token-derived `aiCredits` and `creditUsageEstimated` values used by restored result cards.
 - Each run snapshots exact source `requestId` and `responseVersion` values. If a source response is regenerated later, earlier analyses remain readable and return `isStale: true`; the browser offers an explicit update action.
 - Reloading or reopening a history thread hydrates its Compare transcript and all saved Cortex Analysis runs. The result area defaults to the newest run and exposes older runs through Analysis history.
 - Analysis starts only after a user action and only when at least two Compare responses succeeded. Existing Compare research context is reused without another research charge. Saved runs stay readable after downgrade; a new run can still be denied if its configured model is no longer allowed or the unified wallet has insufficient credits. There is no automatic synthesis, separate Cortex quota, or Cortex-only mobile tab.

@@ -6,6 +6,7 @@ import { loadCompleteHistoryThread } from "../../history/loadHistoryThread";
 import { useChat } from "../../hooks/useChat";
 import { useHistory } from "../../hooks/useHistory";
 import { useChatStore } from "../../store/chatStore";
+import { useWorkStore } from "../../store/workStore";
 import type { ChatMode, HistoryThread, WhoAmIResponse, WorkSession } from "../../types";
 import { Sidebar, type SidebarView } from "./Sidebar";
 
@@ -47,11 +48,16 @@ export function WorkspaceSidebar({
   const setError = useChatStore((state) => state.setError);
   const setMode = useChatStore((state) => state.setMode);
   const startNewChat = useChatStore((state) => state.startNewChat);
+  const rememberedWorkSessionId = useWorkStore((state) => state.session?.id);
   const [loadedWorkSessions, setLoadedWorkSessions] = useState<WorkSession[]>([]);
   const signedOut = !authLoading && authEnabled && !loggedIn;
   const workspaceReady = !authLoading && !signedOut;
   const workEnabled = getRuntimeConfig().workEnabled !== false;
   const usesProvidedWorkSessions = workSessions !== undefined;
+  const workDestinationSessionId = activeWorkSessionId ?? rememberedWorkSessionId;
+  const workDestination = workDestinationSessionId
+    ? `/work/${encodeURIComponent(workDestinationSessionId)}`
+    : "/work";
 
   useEffect(() => {
     if (!workspaceReady) return;
@@ -112,7 +118,7 @@ export function WorkspaceSidebar({
       onSelectThread={(thread) => void handleSelectHistoryThread(thread)}
       activeView={activeView}
       onNavigateChat={openChatMode}
-      onNavigateWork={workEnabled ? () => navigate("/work") : undefined}
+      onNavigateWork={workEnabled ? () => navigate(workDestination) : undefined}
       onNavigateUsage={() => navigate("/usage")}
       onNavigateCredits={() => navigate("/credits")}
       onNavigateModels={() => navigate("/models")}

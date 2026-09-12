@@ -57,5 +57,10 @@ class CortexAnalysisRunDTO(BaseModel):
     )
     combined_response_count: int = Field(alias="combinedResponseCount", ge=2, le=3)
     failed_response_count: int = Field(alias="failedResponseCount", ge=0)
+    ai_credits: int = Field(default=0, alias="aiCredits", ge=0)
+    credit_usage_estimated: bool = Field(
+        default=False,
+        alias="creditUsageEstimated",
+    )
     created_at: str = Field(alias="createdAt")
     is_stale: bool = Field(default=False, alias="isStale")

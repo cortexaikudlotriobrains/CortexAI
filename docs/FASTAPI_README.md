@@ -206,7 +206,11 @@ public event payload.
 `GET /v1/work/sessions/{work_session_id}/runs` returns every owned run in
 chronological order. React hydrates each run's durable events and artifacts and
 renders a session transcript, so sending an instruction appends a turn without
-removing earlier prompts, outcomes, or deliverables. Web/MCP selection changes
+removing earlier prompts, outcomes, or deliverables. Workspace navigation
+remembers the current Work session, returns to that session instead of the
+new-work landing, and suppresses the landing while a direct session URL is
+hydrating. The explicit `New work` action continues to reset to an empty
+composer. Web/MCP selection changes
 are applied to the existing provider session to retain context. When immutable
 provider vault resources require a replacement session, the backend supplies a
 bounded PostgreSQL-backed transcript of prior visible turns with the new
@@ -796,7 +800,7 @@ Notes:
   models from the same provider remain distinguishable.
 - Persists a run only after the provider result passes local schema validation.
 - Returns attributed disagreement positions as `disagreements: [{"who": "ChatGPT (…)", "text": "…"}]` plus nullable `disagreementNote`. The analysis model supplies only anonymous `Response A/B/C` labels; the server resolves `who` before persistence and response serialization.
-- Returns the saved run with `201`; provider/validation failures return `502` and do not add history.
+- Returns the saved run with `201`, including raw `aiCredits` and `creditUsageEstimated`; provider/validation failures return `502` and do not add history.
 - Verifies the Cortex persistence schema before provider work. Missing or
   incomplete migration state returns
   `503 cortex_analysis_schema_unavailable` without calling the model.
@@ -804,7 +808,7 @@ Notes:
 `GET /v1/compare/analysis-runs?session_id=<uuid>` or `?request_group_id=<uuid>`:
 
 - Requires one of the two filters and returns every owned run newest-first.
-- Each run includes `analysisId`, `requestGroupId`, `sessionId`, `model`, the structured result sections, `sourceResponses`, `createdAt`, and `isStale`.
+- Each run includes `analysisId`, `requestGroupId`, `sessionId`, `model`, the structured result sections, `sourceResponses`, raw `aiCredits`, `creditUsageEstimated`, `createdAt`, and `isStale`. Credit usage is reconstructed through the shared billing calculator from the run's persisted model/token/cache/pricing evidence so restored cards match freshly generated cards; legacy rows without provider usage are explicitly marked estimated.
 - The structured result includes attributed `disagreements`, nullable `disagreementNote`, attributed `uniqueInsights`, qualitative confidence, and verification items. Legacy flat-string disagreement rows are restored as readable `One response` entries.
 - `sourceResponses` records the exact `requestId` and `responseVersion` inputs. A later Compare response regeneration changes the current source fingerprint, so earlier runs remain available with `isStale=true`.
 
@@ -814,7 +818,9 @@ through Analysis history. Creation and regeneration are new synthesized model
 calls charged against the unified AI-credit wallet; there is no separate Cortex
 quota. The reservation includes the Compare question and successful source
 responses with a 1,800-token output ceiling. Existing Compare research is reused
-without another Tavily charge. Historical runs remain readable after downgrade.
+without another Tavily charge. React formats `aiCredits` with the shared
+display-credit conversion and shows it in the analysis header. Historical runs
+remain readable after downgrade.
 
 ## Schema Migrations
 
