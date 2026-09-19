@@ -5,9 +5,13 @@
 .tabs button{height:100%;border:0;border-bottom:2px solid transparent;background:none;color:var(--cx-ink-600);cursor:pointer;font:500 16px/24px var(--font-sans);padding:5px 0 0}
 .tabs button:hover{color:var(--cx-ink-900)}
 .tabs .activeTab{border-bottom-color:var(--cx-accent);color:var(--cx-ink-900);font-weight:700}
-.topActions,.mobileHeaderActions,.taskHeaderActions,.composerActions,.approvalActions{display:flex;align-items:center;gap:12px}
+.topActions,.mobileHeaderActions,.taskHeaderActions,.composerActions,.approvalActions{display:flex;align-items:center}
+.topActions{gap:var(--cx-workspace-actions-gap)}
+.mobileHeaderActions{gap:var(--cx-mobile-header-actions-gap)}
+.taskHeaderActions,.composerActions,.approvalActions{gap:12px}
 .iconButton,.settingsButton,.iconOutlineButton{display:inline-flex;align-items:center;justify-content:center;border:0;background:transparent;color:var(--cx-ink-500);cursor:pointer}
 .iconButton{width:32px;height:32px}.settingsButton{width:38px;height:38px;border:1px solid var(--cx-hairline);border-radius:11px;background:var(--cx-surface)}
+.iconButton svg{width:var(--cx-workspace-action-icon-size);height:var(--cx-workspace-action-icon-size)}
 .iconOutlineButton{width:34px;height:34px;border:1px solid var(--cx-hairline);border-radius:9px;background:var(--cx-surface)}
 .iconButton:hover,.settingsButton:hover,.iconOutlineButton:hover{color:var(--cx-accent);border-color:var(--cx-accent-border)}
 .mobileTopbar,.mobileNav,.mobileRail,.mobileStop{display:none}

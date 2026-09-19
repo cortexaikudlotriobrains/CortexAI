@@ -2989,9 +2989,13 @@ def list_cortex_analysis_runs(
                 ),
                 "combined_response_count": int(payload.get("combined_response_count") or 0),
                 "failed_response_count": int(payload.get("failed_response_count") or 0),
+                "prompt_tokens": int(payload.get("prompt_tokens") or 0),
                 "cached_input_tokens": int(payload.get("cached_input_tokens") or 0),
                 "cache_write_tokens": int(payload.get("cache_write_tokens") or 0),
                 "reasoning_tokens": int(payload.get("reasoning_tokens") or 0),
+                "completion_tokens": int(payload.get("completion_tokens") or 0),
+                "total_tokens": int(payload.get("total_tokens") or 0),
+                "estimated_cost": float(payload.get("estimated_cost") or 0.0),
                 "pricing_snapshot": _decode_json_value(
                     payload.get("pricing_snapshot"), {}
                 ),

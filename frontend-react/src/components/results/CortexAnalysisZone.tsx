@@ -4,6 +4,8 @@ import {
   currentSuccessfulResponses,
   isCortexAnalysisRunStale,
 } from "../../analysis/cortexAnalysisStaleness";
+import { formatAiCredits } from "../../utils/aiCredits";
+import { CortexIcon } from "../shared/CortexIcon";
 import styles from "./CortexAnalysisZone.module.css";
 
 interface CortexAnalysisZoneProps {
@@ -278,7 +280,20 @@ function AnalysisResult({
               <h3 id={headingId} ref={headingRef} tabIndex={-1}>
                 Cortex Analysis
               </h3>
-              <p>Combined from your {run.combinedResponseCount} answers · not a fourth model</p>
+              <p className={styles.resultMeta}>
+                <span>
+                  Combined from your {run.combinedResponseCount} answers · not a fourth model
+                </span>
+                {(run.aiCredits ?? 0) > 0 && (
+                  <span className={styles.creditUsage}>
+                    <CortexIcon name="cost" size={14} />
+                    <span>
+                      {formatAiCredits(run.aiCredits)} credits
+                      {run.creditUsageEstimated ? " estimated" : ""}
+                    </span>
+                  </span>
+                )}
+              </p>
             </div>
           </div>
           <div className={styles.resultActions}>

@@ -234,6 +234,27 @@
 }
 
 @media (max-width: 430px) {
+  .tooltipStart {
+    right: auto;
+    left: 0;
+  }
+
+  .tooltipStart::after {
+    right: auto;
+    left: 14px;
+  }
+
+  .tooltipCenter {
+    right: auto;
+    left: 50%;
+    transform: translate(-50%, 3px);
+  }
+
+  .chip:focus-visible + .tooltipCenter,
+  .tooltipVisible.tooltipCenter {
+    transform: translate(-50%, 0);
+  }
+
   .chip {
     height: 30px;
     gap: 5px;
@@ -244,6 +265,12 @@
     width: 14px;
     height: 14px;
     flex-basis: 14px;
+  }
+}
+
+@media (max-width: 430px) and (hover: hover) {
+  .chipWrap:hover .tooltipCenter {
+    transform: translate(-50%, 0);
   }
 }
 

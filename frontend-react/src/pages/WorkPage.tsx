@@ -24,7 +24,7 @@ import {
 } from "../api/work";
 import { ApiClientError, makeRequestId } from "../api/client";
 import { AccountMenu } from "../components/layout/AccountMenu";
-import { Sidebar } from "../components/layout/Sidebar";
+import { WorkspaceSidebar } from "../components/layout/WorkspaceSidebar";
 import { SubscriptionBanner } from "../components/subscription/SubscriptionBanner";
 import { CortexIcon } from "../components/shared/CortexIcon";
 import { WorkApproval } from "../components/work/WorkApproval";
@@ -75,6 +75,7 @@ export function WorkPage() {
   const [approvalBusy, setApprovalBusy] = useState(false);
   const [startPending, setStartPending] = useState(false);
   const [startingInstruction, setStartingInstruction] = useState("");
+  const [hydratedWorkSessionId, setHydratedWorkSessionId] = useState<string | null>(null);
   const streamAbortRef = useRef<AbortController | null>(null);
   const allUploadTasks = useAttachmentUploadStore((state) => state.tasks);
   const uploadTasks = useMemo(
@@ -124,6 +125,7 @@ export function WorkPage() {
     useWorkStore.getState().setError(null);
     void Promise.all([refreshSessions(), refreshTools()])
       .then(async () => {
+        if (cancelled) return;
         if (!workSessionId) {
           useWorkStore.getState().resetWorkspace();
           return;
@@ -150,7 +152,10 @@ export function WorkPage() {
         if (!cancelled) useWorkStore.getState().setError(errorMessage(error));
       })
       .finally(() => {
-        if (!cancelled) useWorkStore.getState().setLoading(false);
+        if (!cancelled) {
+          setHydratedWorkSessionId(workSessionId ?? null);
+          useWorkStore.getState().setLoading(false);
+        }
       });
     return () => { cancelled = true; };
   }, [activateHistoryItem, fetchRunHistoryItem, refreshSessions, refreshTools, runtimeWorkEnabled, workSessionId, workspaceReady]);
@@ -223,6 +228,16 @@ export function WorkPage() {
   }, [maxPlanBudget]);
 
   const active = Boolean(store.run && !TERMINAL_STATUSES.has(store.run.status));
+  const requestedSessionAlreadyVisible = Boolean(
+    workSessionId &&
+    store.session?.id === workSessionId &&
+    store.run?.work_session_id === workSessionId,
+  );
+  const restoringRequestedSession = Boolean(
+    workSessionId &&
+    hydratedWorkSessionId !== workSessionId &&
+    !requestedSessionAlreadyVisible,
+  );
   const resultText = useMemo(() => latestAgentMessage(store.events), [store.events]);
 
   const handleStart = async () => {
@@ -369,14 +384,10 @@ export function WorkPage() {
 
   return (
     <div className={styles.layout} data-theme={theme}>
-      <Sidebar
-        onSelectThread={() => undefined}
+      <WorkspaceSidebar
         activeView="work"
-        onNavigateChat={(mode) => navigate(mode === "compare" ? "/?mode=compare" : "/")}
-        onNavigateWork={runtimeWorkEnabled ? () => navigate("/work") : undefined}
-        onNavigateUsage={() => navigate("/usage")}
-        onNavigateCredits={() => navigate("/credits")}
-        onNavigateModels={() => navigate("/models")}
+        authLoading={authLoading}
+        authEnabled={authEnabled}
         newLabel="New work"
         onNew={handleNewWork}
         workSessions={store.sessions}
@@ -385,7 +396,6 @@ export function WorkPage() {
         whoAmI={whoAmI}
         loggedIn={loggedIn}
         onLogin={authEnabled ? login : undefined}
-        signedOut={signedOut}
       />
       <main className={styles.main}>
         <header className={styles.mobileTopbar}>
@@ -401,7 +411,7 @@ export function WorkPage() {
             <button type="button" onClick={() => navigate("/?mode=compare")}>Compare</button>
             <button type="button" className={styles.activeTab} aria-current="page">Work</button>
           </nav>
-          <div className={styles.topActions}>
+          <div className={styles.topActions} aria-label="Workspace actions">
             <button type="button" className={styles.iconButton} aria-label="New work" onClick={handleNewWork}><CortexIcon name="plus" /></button>
             <AccountMenu authEnabled={authEnabled} loggedIn={loggedIn} onLogin={login} onLogout={handleLogout} planLabel={accountSubscription.planLabel} billingActionLabel={accountSubscription.billingActionLabel} billingPastDue={accountSubscription.billingPastDue} onBilling={accountSubscription.billingDestination ? () => navigate(accountSubscription.billingDestination!) : undefined} onModels={() => navigate("/models")} onUsageInsights={() => navigate("/usage")} onCredits={() => navigate("/credits")} theme={theme} onToggleTheme={toggleTheme} />
           </div>
@@ -415,6 +425,8 @@ export function WorkPage() {
           <CenteredMessage><CortexIcon name="work" size={28} /><strong>Upgrade to use Cortex Work</strong><span>Delegate multi-step tasks, connected tools, and deliverables on Plus or Pro.</span><button className={styles.startButton} onClick={() => navigate("/pricing")}>View plans</button></CenteredMessage>
         ) : startPending && !store.run ? (
           <WorkStartingView instruction={startingInstruction} />
+        ) : restoringRequestedSession ? (
+          <CenteredMessage>Loading Work...</CenteredMessage>
         ) : store.loading && !store.session && !store.run ? <CenteredMessage>Loading Work...</CenteredMessage> : store.run ? (
           <WorkSessionView
             session={store.session}
@@ -472,7 +484,7 @@ function WorkStartingView({ instruction }: { instruction: string }) {
 function WorkSessionView({ session, run, history, resultText, onCancel, approval, artifacts, rail, composer }: { session: WorkSession | null; run: WorkRun; history: WorkRunHistoryItem[]; resultText?: string | null; onCancel: () => void; approval: React.ReactNode; artifacts: WorkArtifact[]; rail: React.ReactNode; composer: React.ReactNode }) {
   const terminal = TERMINAL_STATUSES.has(run.status);
   const previous = history.filter((item) => item.run.id !== run.id);
-  return <div className={styles.workArea}><header className={styles.taskHeader}><div><h1 title={session?.title || run.instruction}>{session?.title || run.instruction}</h1><p>{run.started_at ? `Started ${formatRelative(run.started_at)}` : "Preparing"} · {formatAiCredits(run.actual_credits)} credits</p></div><div className={styles.taskHeaderActions}><WorkStatusPill status={run.status} />{!terminal && <button type="button" className={styles.stopButton} onClick={onCancel}><CortexIcon name="stop" size={15} /> Stop</button>}</div></header><div className={styles.workColumns}><section className={styles.stream}><div className={styles.streamInner}><div className={styles.transcript} aria-label="Work conversation">{previous.map((item) => <WorkTurn key={item.run.id} run={item.run} events={item.events} artifacts={item.artifacts} />)}<WorkTurn run={run} events={[]} artifacts={artifacts} resultText={resultText} current approval={approval} rail={rail} /></div>{!terminal && <button type="button" className={styles.mobileStop} onClick={onCancel}><CortexIcon name="stop" size={15} /> Stop work</button>}</div>{terminal && <div className={styles.composerDock}>{composer}</div>}</section><div className={styles.desktopRail}>{rail}</div></div></div>;
+  return <div className={styles.workArea}><header className={styles.taskHeader}><div><h1 title={session?.title || run.instruction}>{session?.title || run.instruction}</h1><p><time dateTime={run.created_at}>Asked {formatAskedAt(run.created_at)}</time> · {formatAiCredits(run.actual_credits)} credits</p></div><div className={styles.taskHeaderActions}><WorkStatusPill status={run.status} />{!terminal && <button type="button" className={styles.stopButton} onClick={onCancel}><CortexIcon name="stop" size={15} /> Stop</button>}</div></header><div className={styles.workColumns}><section className={styles.stream}><div className={styles.streamInner}><div className={styles.transcript} aria-label="Work conversation">{previous.map((item) => <WorkTurn key={item.run.id} run={item.run} events={item.events} artifacts={item.artifacts} />)}<WorkTurn run={run} events={[]} artifacts={artifacts} resultText={resultText} current approval={approval} rail={rail} /></div>{!terminal && <button type="button" className={styles.mobileStop} onClick={onCancel}><CortexIcon name="stop" size={15} /> Stop work</button>}</div>{terminal && <div className={styles.composerDock}>{composer}</div>}</section><div className={styles.desktopRail}>{rail}</div></div></div>;
 }
 
 function WorkTurn({ run, events, artifacts, resultText, current = false, approval = null, rail = null }: { run: WorkRun; events: WorkEvent[]; artifacts: WorkArtifact[]; resultText?: string | null; current?: boolean; approval?: React.ReactNode; rail?: React.ReactNode }) {
@@ -505,4 +517,17 @@ async function pendingApprovalFromEvents(events: WorkEvent[]) {
 }
 function isTerminalEvent(event: WorkEvent): boolean { return ["run_completed", "run_failed", "run_cancelled", "budget_exhausted", "output_limit_reached"].includes(event.type); }
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : "Cortex Work could not complete that request."; }
-function formatRelative(value: string): string { const seconds = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 1000)); if (seconds < 60) return "moments ago"; const minutes = Math.floor(seconds / 60); return `${minutes} min ago`; }
+function formatAskedAt(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "date unavailable";
+  const dateLabel = new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+  const timeLabel = new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+  return `${dateLabel} at ${timeLabel}`;
+}

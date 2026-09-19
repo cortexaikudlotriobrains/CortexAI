@@ -1,8 +1,9 @@
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Sidebar } from "../components/layout/Sidebar";
 import { useChatStore } from "../store/chatStore";
+import { useSidebarStore } from "../store/sidebarStore";
 import type { HistoryEntry, HistoryThread, WorkSession } from "../types";
 
 describe("Sidebar", () => {
@@ -77,6 +78,76 @@ describe("Sidebar", () => {
     expect(screen.getByText("Quarterly planning")).toBeInTheDocument();
   });
 
+  it("shows a newly submitted chat immediately and replaces the preview after persistence", () => {
+    const prompt = "how should a proper chicken biryani be cooked";
+    const timestamp = new Date().toISOString();
+    const existingTodayEntry = historyEntry({
+      id: 5,
+      sessionId: "existing-today-session",
+      prompt: "How much would an annuity pay",
+      response: "Existing response",
+      mode: "single",
+      provider: "openai",
+      model: "gpt-5.1",
+      timestamp,
+    });
+    useChatStore.setState({
+      history: [...historyEntries(), existingTodayEntry],
+      sessionId: null,
+      pendingNewSession: true,
+      turns: [
+        {
+          id: "pending-biryani",
+          mode: "single",
+          prompt,
+          submittedPrompt: prompt,
+          attachments: [],
+          responses: [],
+          status: "streaming",
+          createdAt: timestamp,
+        },
+      ],
+      activeTurnId: "pending-biryani",
+    });
+
+    render(<Sidebar onSelectThread={vi.fn()} activeView="chat" />);
+
+    const preview = screen.getByRole("button", { name: new RegExp(`${prompt}\\. Ask,`) });
+    expect(preview).toHaveAttribute("aria-current", "page");
+    expect(document.querySelector("[data-current-chat-preview]")).toBeInTheDocument();
+    expect(screen.getAllByText("Today")).toHaveLength(1);
+    expect(screen.queryByText("No recent chats")).not.toBeInTheDocument();
+
+    act(() => {
+      useChatStore.setState({
+        sessionId: "biryani-session",
+        pendingNewSession: false,
+        history: [
+          ...historyEntries(),
+          existingTodayEntry,
+          historyEntry({
+            id: 6,
+            sessionId: "biryani-session",
+            prompt,
+            response: "Persisted recipe",
+            mode: "single",
+            provider: "openai",
+            model: "gpt-5.4-mini",
+            timestamp,
+          }),
+        ],
+      });
+    });
+
+    expect(document.querySelector("[data-current-chat-preview]")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Today")).toHaveLength(1);
+    expect(screen.getAllByText(prompt)).toHaveLength(1);
+    expect(screen.getByRole("button", { name: new RegExp(`${prompt}\\. Ask,`) })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+  });
+
   it("collapses and expands the desktop sidebar while keeping icon actions usable", async () => {
     const user = userEvent.setup();
     useChatStore.setState({
@@ -115,6 +186,19 @@ describe("Sidebar", () => {
       "true",
     );
     expect(screen.getByRole("textbox", { name: "Search chats" })).toBeInTheDocument();
+  });
+
+  it("preserves the collapsed state when the routed sidebar remounts", async () => {
+    const user = userEvent.setup();
+    const firstRender = render(<Sidebar onSelectThread={vi.fn()} activeView="usage" />);
+
+    await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+    expect(screen.getByLabelText("Primary navigation")).toHaveAttribute("data-collapsed", "true");
+
+    firstRender.unmount();
+    render(<Sidebar onSelectThread={vi.fn()} activeView="credits" />);
+
+    expect(screen.getByLabelText("Primary navigation")).toHaveAttribute("data-collapsed", "true");
   });
 
   it("marks Usage active and routes Ask or Compare back to chat", async () => {
@@ -459,6 +543,48 @@ describe("Sidebar", () => {
     const entries = screen.getAllByRole("button", { name: `${title}. Work, completed` });
     expect(entries).toHaveLength(1);
   });
+
+  it("marks history rows current only inside their owning workspace view", () => {
+    useChatStore.setState({ history: historyEntries(), sessionId: "ask-session" });
+    const completedWork = workSession({
+      id: "completed-1",
+      latest_run_status: "completed",
+      status: "completed",
+    });
+
+    const { rerender } = render(
+      <Sidebar
+        onSelectThread={vi.fn()}
+        activeView="credits"
+        workSessions={[completedWork]}
+        activeWorkSessionId="completed-1"
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /Quarterly planning\. Ask,/ })).not.toHaveAttribute(
+      "aria-current",
+    );
+    expect(screen.getByRole("button", { name: /Work task\. Work, completed/ })).not.toHaveAttribute(
+      "aria-current",
+    );
+
+    rerender(
+      <Sidebar
+        onSelectThread={vi.fn()}
+        activeView="work"
+        workSessions={[completedWork]}
+        activeWorkSessionId="completed-1"
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /Quarterly planning\. Ask,/ })).not.toHaveAttribute(
+      "aria-current",
+    );
+    expect(screen.getByRole("button", { name: /Work task\. Work, completed/ })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+  });
 });
 
 function workSession(overrides: Partial<WorkSession> = {}): WorkSession {
@@ -590,4 +716,5 @@ function resetStore() {
   useChatStore.getState().setHistory([]);
   useChatStore.getState().setHistorySearch("");
   useChatStore.getState().setMode("single");
+  useSidebarStore.getState().setCollapsed(false);
 }

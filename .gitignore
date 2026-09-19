@@ -40,7 +40,7 @@ tools/logs/*.log
 tools/logs/*.log.*
 
 # Test coverage
-.coverage
+
 htmlcov/
 .pytest_cache/
 reports/test-results/

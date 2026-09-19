@@ -1125,6 +1125,8 @@
                   "  body.disagreements.forEach(function (item) { pm.expect(item).to.have.all.keys('who', 'text'); });",
                   "  pm.expect(body.disagreementNote === null || typeof body.disagreementNote === 'string').to.eql(true);",
                   "  pm.expect(body.sourceResponses).to.be.an('array');",
+                  "  pm.expect(body.aiCredits).to.be.a('number').and.to.be.at.least(0);",
+                  "  pm.expect(body.creditUsageEstimated).to.be.a('boolean');",
                   "  pm.expect(body.isStale).to.eql(false);",
                   "});"
                 ]
@@ -1157,7 +1159,7 @@
                   "var body = pm.response.json();",
                   "pm.test('all saved runs are returned newest-first', function () {",
                   "  pm.expect(body).to.be.an('array');",
-                  "  body.forEach(function (run) { pm.expect(run.disagreements).to.be.an('array'); pm.expect(run).to.have.property('disagreementNote'); });",
+                  "  body.forEach(function (run) { pm.expect(run.disagreements).to.be.an('array'); pm.expect(run).to.have.property('disagreementNote'); pm.expect(run.aiCredits).to.be.a('number').and.to.be.at.least(0); pm.expect(run.creditUsageEstimated).to.be.a('boolean'); });",
                   "  if (body.length > 1) {",
                   "    pm.expect(Date.parse(body[0].createdAt)).to.be.at.least(Date.parse(body[1].createdAt));",
                   "  }",

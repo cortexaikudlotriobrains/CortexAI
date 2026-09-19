@@ -60,7 +60,7 @@ vi.mock("../subscription/accountMenuPresentation", () => ({
     billingDestination: null,
   }),
 }));
-vi.mock("../components/layout/Sidebar", () => ({ Sidebar: () => null }));
+vi.mock("../components/layout/WorkspaceSidebar", () => ({ WorkspaceSidebar: () => null }));
 vi.mock("../components/layout/AccountMenu", () => ({ AccountMenu: () => null }));
 vi.mock("../components/subscription/SubscriptionBanner", () => ({
   SubscriptionBanner: () => null,
@@ -92,7 +92,11 @@ vi.mock("../components/work/WorkComposer", () => ({
 vi.mock("../components/work/WorkRail", () => ({ WorkRail: () => null }));
 vi.mock("../components/work/WorkArtifacts", () => ({
   WorkArtifacts: ({ artifacts }: { artifacts: WorkArtifact[] }) => (
-    <div>{artifacts.map((artifact) => <span key={artifact.id}>{artifact.filename}</span>)}</div>
+    <div>
+      {artifacts.map((artifact) => (
+        <span key={artifact.id}>{artifact.filename}</span>
+      ))}
+    </div>
   ),
 }));
 vi.mock("../components/work/WorkApproval", () => ({ WorkApproval: () => null }));
@@ -177,6 +181,68 @@ describe("WorkPage terminal event synchronization", () => {
     });
   });
 
+  it("shows the calendar date and time when the current question was asked", async () => {
+    const createdAt = "2026-08-24T12:34:00";
+    const startedAt = "2026-08-24T12:45:00";
+    const completedRun = workRun({
+      status: "completed",
+      created_at: createdAt,
+      started_at: startedAt,
+      completed_at: "2026-08-24T12:50:00",
+    });
+    apiMocks.listWorkRuns.mockResolvedValue([completedRun]);
+
+    render(
+      <MemoryRouter initialEntries={["/work/work-session-1"]}>
+        <Routes>
+          <Route path="/work/:workSessionId" element={<WorkPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const askedAt = await screen.findByText(/^Asked /);
+    const expectedDate = new Intl.DateTimeFormat(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    }).format(new Date(createdAt));
+    const expectedTime = new Intl.DateTimeFormat(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(new Date(createdAt));
+
+    expect(askedAt).toHaveAttribute("datetime", createdAt);
+    expect(askedAt).toHaveTextContent(`Asked ${expectedDate} at ${expectedTime}`);
+    expect(askedAt).not.toHaveTextContent("ago");
+  });
+
+  it("does not flash the new-work landing while restoring a requested session", async () => {
+    const sessionRequest = deferred<WorkSession>();
+    apiMocks.getWorkSession.mockReturnValue(sessionRequest.promise);
+
+    render(
+      <MemoryRouter initialEntries={["/work/work-session-1"]}>
+        <Routes>
+          <Route path="/work/:workSessionId" element={<WorkPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("Loading Work...")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "What should I work on?" }),
+    ).not.toBeInTheDocument();
+
+    sessionRequest.resolve(workSession());
+
+    expect(
+      await screen.findByRole("heading", { name: "Can you try again" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "What should I work on?" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("shows a starting workspace while the run-start request is pending", async () => {
     const pendingStart = deferred<WorkRun>();
     apiMocks.startWorkRun.mockReturnValue(pendingStart.promise);
@@ -199,7 +265,9 @@ describe("WorkPage terminal event synchronization", () => {
     expect(starting).toHaveTextContent("Starting work...");
     expect(screen.getByRole("heading", { name: "Prepare a launch report" })).toBeInTheDocument();
     expect(screen.getByText("Starting", { exact: true })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "What should I work on?" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "What should I work on?" }),
+    ).not.toBeInTheDocument();
 
     pendingStart.resolve(workRun({ instruction: "Prepare a launch report" }));
     await waitFor(() => {
@@ -238,16 +306,15 @@ describe("WorkPage terminal event synchronization", () => {
     );
     apiMocks.listWorkRuns.mockResolvedValue([original, followup]);
     apiMocks.getWorkEvents.mockImplementation(async (runId: string) => ({
-      items: runId === original.id
-        ? [workEvent(10, "agent_message", "Security review complete with six findings.")]
-        : [workEvent(20, "agent_message", "The deliverables remain attached above.")],
+      items:
+        runId === original.id
+          ? [workEvent(10, "agent_message", "Security review complete with six findings.")]
+          : [workEvent(20, "agent_message", "The deliverables remain attached above.")],
       latest_sequence: runId === original.id ? 10 : 20,
     }));
-    apiMocks.listWorkArtifacts.mockImplementation(async (runId: string) => (
-      runId === original.id
-        ? [workArtifact("security-report", "SECURITY_ANALYSIS_REPORT.md")]
-        : []
-    ));
+    apiMocks.listWorkArtifacts.mockImplementation(async (runId: string) =>
+      runId === original.id ? [workArtifact("security-report", "SECURITY_ANALYSIS_REPORT.md")] : [],
+    );
 
     render(
       <MemoryRouter initialEntries={["/work/work-session-1"]}>
@@ -257,7 +324,9 @@ describe("WorkPage terminal event synchronization", () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText("Analyze the application security concerns")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Analyze the application security concerns"),
+    ).toBeInTheDocument();
     expect(screen.getByText("Security review complete with six findings.")).toBeInTheDocument();
     expect(screen.getByText("SECURITY_ANALYSIS_REPORT.md")).toBeInTheDocument();
     expect(screen.getByText("Where are the deliverables? I do not see them.")).toBeInTheDocument();
