@@ -275,36 +275,41 @@ export function PromptComposer({
           }
         />
 
-        <AttachmentStrip entitlements={entitlements} plans={plans} />
+        <div
+          className={styles.composerControls}
+          data-mobile-feature-stack={mode === "single" ? "true" : undefined}
+        >
+          <AttachmentStrip entitlements={entitlements} plans={plans} />
 
-        <div className={styles.featureControls}>
-          <FeatureChips
-            {...featureChipProps}
-            variant={mode === "compare" ? "improveOnly" : "default"}
-          />
-        </div>
+          <div id="promptFeatureControls" className={styles.featureControls}>
+            <FeatureChips
+              {...featureChipProps}
+              variant={mode === "compare" ? "improveOnly" : "default"}
+            />
+          </div>
 
-        <div className={styles.actions}>
-          {uploadsPending ? (
-            <span id="attachmentSubmitStatus" className={styles.screenReaderOnly}>
-              {uploadWaitMessage}
-            </span>
-          ) : null}
-          <button
-            className={`${styles.submitButton} ${streaming ? styles.stopButton : ""}`}
-            type="button"
-            aria-label={streaming ? "Stop" : "Send message"}
-            aria-describedby={uploadsPending ? "attachmentSubmitStatus" : undefined}
-            title={!streaming && uploadsPending ? uploadWaitMessage : undefined}
-            id="submitBtn"
-            onClick={() => (streaming ? cancel() : handleSubmit())}
-            disabled={
-              !streaming &&
-              (uploadsPending || (!prompt.trim() && attachments.length === 0))
-            }
-          >
-            <CortexIcon name={streaming ? "stop" : "send"} />
-          </button>
+          <div className={styles.actions}>
+            {uploadsPending ? (
+              <span id="attachmentSubmitStatus" className={styles.screenReaderOnly}>
+                {uploadWaitMessage}
+              </span>
+            ) : null}
+            <button
+              className={`${styles.submitButton} ${streaming ? styles.stopButton : ""}`}
+              type="button"
+              aria-label={streaming ? "Stop" : "Send message"}
+              aria-describedby={uploadsPending ? "attachmentSubmitStatus" : undefined}
+              title={!streaming && uploadsPending ? uploadWaitMessage : undefined}
+              id="submitBtn"
+              onClick={() => (streaming ? cancel() : handleSubmit())}
+              disabled={
+                !streaming &&
+                (uploadsPending || (!prompt.trim() && attachments.length === 0))
+              }
+            >
+              <CortexIcon name={streaming ? "stop" : "send"} />
+            </button>
+          </div>
         </div>
       </div>
     </div>

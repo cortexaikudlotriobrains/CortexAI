@@ -161,6 +161,7 @@ for (const viewport of [
         expect(metrics.sendVisible).toBe(true);
         expect(metrics.textareaFontSize).toBeGreaterThanOrEqual(16);
         expect(metrics.textareaHeight).toBeGreaterThanOrEqual(44);
+        await expectMobileComposerControlsFullyVisible(page);
         await expectNoHorizontalOverflow(page);
     });
 }
@@ -324,6 +325,34 @@ async function composerMetrics(page) {
             textareaHeight: textareaRect?.height ?? 0,
         };
     });
+}
+
+async function expectMobileComposerControlsFullyVisible(page) {
+    const featureControls = page.locator("#promptFeatureControls");
+    const featureBounds = await featureControls.boundingBox();
+    expect(featureBounds).not.toBeNull();
+
+    for (const name of ["Smart routing", "Research mode", "Prompt optimization"]) {
+        const control = page.getByRole("switch", { name });
+        await expect(control).toBeVisible();
+        const bounds = await control.boundingBox();
+        expect(bounds, `${name} bounds`).not.toBeNull();
+        expect(bounds.x, `${name} left edge`).toBeGreaterThanOrEqual(featureBounds.x - 1);
+        expect(bounds.x + bounds.width, `${name} right edge`).toBeLessThanOrEqual(
+            featureBounds.x + featureBounds.width + 1,
+        );
+    }
+
+    for (const name of ["Attach files", "Send message"]) {
+        const control = page.getByRole("button", { name });
+        await expect(control).toBeVisible();
+        const bounds = await control.boundingBox();
+        expect(bounds, `${name} bounds`).not.toBeNull();
+        expect(bounds.x, `${name} left edge`).toBeGreaterThanOrEqual(0);
+        expect(bounds.x + bounds.width, `${name} right edge`).toBeLessThanOrEqual(
+            page.viewportSize().width,
+        );
+    }
 }
 
 async function expectResponseActionsClearDock(page) {
