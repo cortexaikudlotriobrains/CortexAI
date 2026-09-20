@@ -77,6 +77,21 @@ describe("CortexAnalysisZone", () => {
     expect(screen.getByText("Older recommendation.")).toBeInTheDocument();
   });
 
+  it("shows the saved Cortex Analysis AI-credit charge using display credit units", () => {
+    const run = analysisRun({ aiCredits: 1_234, creditUsageEstimated: true });
+
+    render(
+      <CortexAnalysisZone
+        turn={{ ...compareTurn(), analysisRuns: [run] }}
+        onAnalyze={vi.fn()}
+      />,
+    );
+
+    const creditAmount = screen.getByText("1.234 credits estimated");
+    expect(creditAmount).toBeInTheDocument();
+    expect(creditAmount.parentElement?.querySelector("svg")).toBeInTheDocument();
+  });
+
   it("keeps a stale result readable after a response version changes", () => {
     const run = analysisRun();
     const turn = compareTurn();
@@ -215,6 +230,8 @@ function analysisRun(overrides: Partial<CortexAnalysisRun> = {}): CortexAnalysis
     ],
     combinedResponseCount: 2,
     failedResponseCount: 0,
+    aiCredits: 180,
+    creditUsageEstimated: false,
     createdAt: "2026-07-27T12:00:00Z",
     isStale: false,
     ...overrides,

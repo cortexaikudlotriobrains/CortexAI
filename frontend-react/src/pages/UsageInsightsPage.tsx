@@ -1,43 +1,31 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { fetchCortexAnalysisRuns } from "../api/cortexAnalysis";
-import { fetchHistory } from "../api/history";
 import { exportUsageCsv, type UsageSummaryParams } from "../api/usage";
 import { AccountMenu } from "../components/layout/AccountMenu";
-import { Sidebar } from "../components/layout/Sidebar";
+import { WorkspaceSidebar } from "../components/layout/WorkspaceSidebar";
 import { ProviderLogo } from "../components/shared/ProviderLogo";
 import { CortexIcon, type CortexIconName } from "../components/shared/CortexIcon";
 import { SubscriptionBanner } from "../components/subscription/SubscriptionBanner";
 import { getModelPresentation } from "../config/modelPresentation";
-import { buildHistoryThreads } from "../history/historyThreads";
 import { useAuth } from "../hooks/useAuth";
 import { useChat } from "../hooks/useChat";
-import { useHistory } from "../hooks/useHistory";
 import { useSubscription } from "../hooks/useSubscription";
 import { useTheme } from "../hooks/useTheme";
 import { useUsageSummary } from "../hooks/useUsageSummary";
 import { useChatStore } from "../store/chatStore";
 import { getAccountMenuSubscriptionPresentation } from "../subscription/accountMenuPresentation";
-import type {
-  ChatMode,
-  HistoryThread,
-  UsageSummary,
-  UsageSummaryPeriod,
-} from "../types";
+import type { ChatMode, UsageSummary, UsageSummaryPeriod } from "../types";
 import styles from "./UsageInsightsPage.module.css";
 
 export function UsageInsightsPage() {
   const navigate = useNavigate();
   const { whoAmI, cognitoConfig, loading: authLoading, loggedIn, login, logout } = useAuth();
-  const { load: loadHistory } = useHistory();
   const { cancel } = useChat();
   const { theme, toggleTheme } = useTheme();
-  const hydrateFromHistoryThread = useChatStore((s) => s.hydrateFromHistoryThread);
   const setMode = useChatStore((s) => s.setMode);
   const startNewChat = useChatStore((s) => s.startNewChat);
   const setHistory = useChatStore((s) => s.setHistory);
   const setHistorySearch = useChatStore((s) => s.setHistorySearch);
-  const setError = useChatStore((s) => s.setError);
   const [selectedPeriodKey, setSelectedPeriodKey] = useState<UsagePeriodKey>("last30");
   const [periodMenuOpen, setPeriodMenuOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -45,21 +33,22 @@ export function UsageInsightsPage() {
   const periodControlRef = useRef<HTMLDivElement>(null);
   const selectedPeriod = getUsagePeriodOption(selectedPeriodKey);
   const usageParams = useMemo(() => buildUsagePeriodParams(selectedPeriodKey), [selectedPeriodKey]);
-  const { summary, loading: usageLoading, error: usageError, reload } = useUsageSummary(usageParams);
+  const {
+    summary,
+    loading: usageLoading,
+    error: usageError,
+    reload,
+  } = useUsageSummary(usageParams);
   const authEnabled = cognitoConfig?.enabled ?? false;
   const subscriptionState = useSubscription({ authLoading, loggedIn });
   const accountSubscription = getAccountMenuSubscriptionPresentation(
-      subscriptionState.entitlements,
+    subscriptionState.entitlements,
   );
 
   const accountBillingDestination = accountSubscription.billingDestination;
   const periodLabel = summary?.period.label ?? selectedPeriod.label;
   const periodControlLabel = selectedPeriod.label;
   const empty = summary ? isUsageSummaryEmpty(summary) : false;
-
-  useEffect(() => {
-    if (!authLoading) void loadHistory({ restoreActiveTranscript: false });
-  }, [authLoading, loadHistory]);
 
   useEffect(() => {
     if (!periodMenuOpen) return;
@@ -87,23 +76,6 @@ export function UsageInsightsPage() {
     navigate("/");
   };
 
-  const handleSelectHistoryThread = async (thread: HistoryThread) => {
-    try {
-      const [entries, analysisRuns] = thread.sessionId
-        ? await Promise.all([
-            fetchHistory(500, thread.sessionId),
-            fetchCortexAnalysisRuns({ sessionId: thread.sessionId }),
-          ])
-        : [thread.entries, []];
-      const completeThread = buildHistoryThreads(entries)[0] ?? thread;
-      hydrateFromHistoryThread(completeThread, analysisRuns);
-      navigate("/");
-    } catch (historyError) {
-      setError(historyError instanceof Error ? historyError.message : "Failed to load chat history");
-      navigate("/");
-    }
-  };
-
   const handleLogout = () => {
     cancel();
     startNewChat();
@@ -119,11 +91,7 @@ export function UsageInsightsPage() {
   };
 
   const handleExportUsage = async () => {
-    if (
-      !summary ||
-      exporting ||
-      !subscriptionState.entitlements?.features.usage_export_enabled
-    ) {
+    if (!summary || exporting || !subscriptionState.entitlements?.features.usage_export_enabled) {
       return;
     }
 
@@ -146,13 +114,10 @@ export function UsageInsightsPage() {
 
   return (
     <div className={styles.layout}>
-      <Sidebar
-        onSelectThread={(thread) => void handleSelectHistoryThread(thread)}
+      <WorkspaceSidebar
         activeView="usage"
-        onNavigateChat={openChatMode}
-        onNavigateUsage={() => navigate("/usage")}
-        onNavigateCredits={() => navigate("/credits")}
-        onNavigateModels={() => navigate("/models")}
+        authLoading={authLoading}
+        authEnabled={authEnabled}
         whoAmI={whoAmI}
         loggedIn={loggedIn}
         onLogin={authEnabled ? login : undefined}
@@ -364,7 +329,8 @@ function ModelLeaderboard({ summary, empty }: { summary: UsageSummary; empty: bo
   const rows = [...summary.models].sort((left, right) => right.replies - left.replies);
   const maxReplies = Math.max(1, ...rows.map((row) => row.replies));
   const maxViaSmart = Math.max(0, ...rows.map((row) => row.viaSmart));
-  const topSmartIndex = maxViaSmart > 0 ? rows.findIndex((row) => row.viaSmart === maxViaSmart) : -1;
+  const topSmartIndex =
+    maxViaSmart > 0 ? rows.findIndex((row) => row.viaSmart === maxViaSmart) : -1;
   const topSmartRow = topSmartIndex >= 0 ? rows[topSmartIndex] : null;
 
   return (
@@ -373,12 +339,14 @@ function ModelLeaderboard({ summary, empty }: { summary: UsageSummary; empty: bo
         <div>
           <h2 id="usage-models-title">Models that replied</h2>
           <p>
-            {formatInteger(summary.smartRoutedTotal)} of {formatInteger(summary.totalRequests)} replies
-            auto-routed by Smart
+            {formatInteger(summary.smartRoutedTotal)} of {formatInteger(summary.totalRequests)}{" "}
+            replies auto-routed by Smart
           </p>
         </div>
         <span className={styles.panelTotal}>
-          <span className={styles.modelTotalDesktop}>{formatInteger(summary.totalRequests)} total</span>
+          <span className={styles.modelTotalDesktop}>
+            {formatInteger(summary.totalRequests)} total
+          </span>
           <span className={styles.modelTotalMobile}>
             {formatInteger(summary.smartRoutedTotal)} via Smart
           </span>
@@ -976,10 +944,12 @@ function formatCompactWholeNumber(value: number): string {
 }
 
 function trimNumber(value: number, maximumFractionDigits: number): string {
-  return value.toLocaleString("en-US", {
-    maximumFractionDigits,
-    minimumFractionDigits: maximumFractionDigits,
-  }).replace(/\.0+$/, "");
+  return value
+    .toLocaleString("en-US", {
+      maximumFractionDigits,
+      minimumFractionDigits: maximumFractionDigits,
+    })
+    .replace(/\.0+$/, "");
 }
 
 function formatInteger(value: number): string {

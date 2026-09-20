@@ -47,7 +47,7 @@
 .mobileHeaderActions {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--cx-mobile-header-actions-gap);
 }
 
 .tabs {
@@ -89,7 +89,7 @@
 .topActions {
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: var(--cx-workspace-actions-gap);
 }
 
 .iconButton {
@@ -105,8 +105,8 @@
 }
 
 .iconButton svg {
-  width: 18px;
-  height: 18px;
+  width: var(--cx-workspace-action-icon-size);
+  height: var(--cx-workspace-action-icon-size);
 }
 
 .iconButton:hover {

@@ -423,6 +423,13 @@ def test_create_analysis_route_appends_and_returns_saved_run(monkeypatch):
         "high_stakes_domain": None,
         "combined_response_count": 2,
         "failed_response_count": 0,
+        "prompt_tokens": generated.prompt_tokens,
+        "completion_tokens": generated.completion_tokens,
+        "total_tokens": generated.total_tokens,
+        "cached_input_tokens": 0,
+        "cache_write_tokens": 0,
+        "reasoning_tokens": 0,
+        "pricing_snapshot": {},
         "created_at": "2026-07-27T12:00:00Z",
     }
     created = {}
@@ -496,6 +503,8 @@ def test_create_analysis_route_appends_and_returns_saved_run(monkeypatch):
     assert created["disagreement_note"] == generated.disagreement_note
     assert result.disagreements[0].who == "ChatGPT (GPT-5.1)"
     assert result.disagreement_note == "These are different risk preferences."
+    assert result.ai_credits == 180
+    assert result.credit_usage_estimated is False
     assert created["combined_response_count"] == 2
     assert reserved["operation_type"] == "cortex_analysis"
     assert reserved["research_enabled"] is False

@@ -7,6 +7,7 @@ import os
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from server.frontend_runtime_config import render_frontend_runtime_config_js
 from server.billing.plan_catalog import get_plan_catalog
 from server.billing.stripe_gateway import load_stripe_billing_config
@@ -56,14 +57,27 @@ def _env_bool(name: str, default: bool = False) -> bool:
 
 
 class NoCacheHTMLStaticFiles(StaticFiles):
-    """StaticFiles that forces HTML revalidation.
+    """StaticFiles that forces HTML revalidation and falls back to index.html
+    for client-side (React Router) routes on a fresh/direct navigation.
 
     A heuristically cached index.html can reference hashed assets deleted by
     the next deploy, leaving users on a broken page until a hard refresh.
+
+    Without the fallback, a direct browser navigation to a client-side-only
+    route (e.g. /pricing, /account/billing) 404s instead of loading the SPA,
+    since no such file exists on disk. This affects any full-page redirect
+    into those routes, including Stripe's checkout success/cancel/portal
+    return URLs and external links from the marketing site.
     """
 
     async def get_response(self, path: str, scope):
-        response = await super().get_response(path, scope)
+        try:
+            response = await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code == 404 and "." not in path.rsplit("/", 1)[-1]:
+                response = await super().get_response("index.html", scope)
+            else:
+                raise
         if response.headers.get("content-type", "").startswith("text/html"):
             response.headers["cache-control"] = "no-cache"
         return response

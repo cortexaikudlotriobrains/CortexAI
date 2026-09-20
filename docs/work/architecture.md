@@ -94,6 +94,12 @@ The browser also loads all runs with `GET /v1/work/sessions/{id}/runs` and
 hydrates each run's events and artifacts. The session surface is therefore a
 chronological transcript: a follow-up appends a new prompt/outcome while prior
 results and deliverables remain visible on desktop and mobile.
+When the user visits Ask, Compare, or another workspace, React retains the
+current Work session snapshot. Workspace navigation returns to that session and
+renders the snapshot while refreshing it; a direct session URL without a local
+snapshot renders a loading state until hydration completes, never the new-work
+landing. Only the explicit `New work` action resets the workspace to that
+landing.
 
 A follow-up creates a new Work run under the same Work session and uses the
 same provider session when available. Web/MCP tool changes update that session

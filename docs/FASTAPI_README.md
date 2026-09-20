@@ -102,7 +102,7 @@ If `FRONTEND_DIR` is unset, `server/app.py` serves `frontend-react/dist`. Set th
 - Frontend composer keyboard UX: `Enter` sends prompt, `Shift+Enter` inserts newline.
 - React startup waits for Cognito/local dev-session bootstrap before fetching session-scoped model and history data. Signed-out Cognito users see a workspace sign-in gate instead of the Ask/Compare composer, while authenticated and local dev-session users restore the persisted active `session_id` transcript when the page was reloaded, resumed, or silently reauthenticated in the same browser.
 - React Ask/Compare turns send `context.session_id`, bounded `conversation_history`, and `new_session` to preserve selected-thread continuity while allowing explicit New Chat resets.
-- The React sidebar uses a compact navigation rail with subtle mode/current-session states plus Usage, AI credits, and Models destinations. Desktop has an icon-only top-right control that collapses the sidebar to a narrow action rail and expands it back to the full history view; mobile remains on the separate Ask/Compare/History bottom navigation, with Usage, AI credits, and Models reached from the account menu. The expanded desktop `Recent` list displays up to the 100 newest grouped chat threads by Today, Yesterday, and month/day, with one 36px row per session: compact 11.5px ellipsized title and a narrowed `MODE · time` caption, with no leading mode glyph, to preserve substantially more identifying title text. Hover/focus replaces the caption with a Rename/Delete menu; renamed titles persist in `sessions.title`, Delete retains the short in-row confirmation, and keyboard rows support arrows, Enter, R, D, and Escape. The collapsed desktop rail and the separate mobile History surface remain unchanged.
+- The React sidebar uses a compact navigation rail with subtle mode/current-session states plus Work, Usage, AI credits, and Models destinations. Its shared desktop controller loads chat and run-backed Work history consistently across routed pages, opens a selected item in its owning workspace, sends `New chat` from secondary routes to a clean Ask workspace, preserves the collapsed state across route changes, limits current-row highlighting to the active workspace, and applies the signed-out gate consistently. A submitted chat appears immediately as a UI-only current row before response persistence completes, then yields to the persisted row without duplication. Chat history precedes Work history outside Work mode; Work mode keeps Work history first. Work remains hidden only when its runtime feature flag is disabled. Desktop has an icon-only top-right control that collapses the sidebar to a narrow action rail and expands it back to the full history view; mobile remains on the separate Ask/Compare/History bottom navigation, with Usage, AI credits, and Models reached from the account menu. The expanded desktop `Recent` list displays up to the 100 newest grouped chat threads by Today, Yesterday, and month/day, with one 36px row per session: compact 11.5px ellipsized title and a narrowed `MODE · time` caption, with no leading mode glyph, to preserve substantially more identifying title text. Hover/focus replaces the caption with a Rename/Delete menu; renamed titles persist in `sessions.title`, Delete retains the short in-row confirmation, and keyboard rows support arrows, Enter, R, D, and Escape. The separate mobile History surface remains unchanged.
 - Selecting a React history row reloads the complete session transcript. Ask rows are restored chronologically and Compare target rows are grouped into one turn by `request_group_id`.
 - Explicit frontend fresh sign-in starts an empty new chat session; browser refreshes, Chrome tab reload/resume, same-browser reauth, and explicit History selections continue the selected thread.
 - React posts non-sensitive lifecycle diagnostics to `/v1/client-diagnostics`; backend logs them as `frontend.diagnostic` events so production refresh reports can be separated into reload/navigation, tab discard, back/forward cache restore, long main-thread task, or frontend error cases.
@@ -112,7 +112,7 @@ If `FRONTEND_DIR` is unset, `server/app.py` serves `frontend-react/dist`. Set th
 - React Compare keeps every selected response visible in a responsive grid without horizontal response scrolling on desktop and tablet widths: three columns on wide desktop, two at tablet widths, and stacked tall cards at the app's tablet/mobile shell breakpoint. Phone-sized mobile uses a segmented model switcher, shows one selected response card at a time in natural page flow, and elevates the stuck switcher into a frosted provider-tinted bar without changing model-pill horizontal positions.
 - Model headers and action footers remain fixed inside each desktop/tablet Compare card while only the answer body scrolls. The transcript reserves bottom breathing room above the persistent composer so the input area does not compress the reading workspace.
 - React Compare uses the same right-aligned user-message bubble as Ask mode and keeps aggregate totals in a separate compact row. Model cards show a friendly model name with the exact API model ID, use compact icon actions, and reserve most of the column height for response content.
-- React Ask and Compare use one rounded composer shell with a borderless textarea that starts at one line and auto-grows to a bounded height, attachment chips above a compact action row, routing controls, and a fixed-size send action. Mode changes use the app navigation; the composer does not duplicate the Ask/Compare switch. Compare model selectors remain in a compact options row above the textarea and scroll horizontally on narrow screens when needed.
+- React Ask and Compare use one rounded composer shell with a borderless textarea that starts at one line and auto-grows to a bounded height, attachment chips above compact routing controls, and a fixed-size send action. On narrow phones, Ask reflows Smart, Web, and Improve to a dedicated full-width row while attachment status and Send remain together beneath it, keeping every action visible without horizontal scrolling. Mode changes use the app navigation; the composer does not duplicate the Ask/Compare switch. Compare model selectors remain in a compact options row above the textarea and scroll horizontally on narrow screens when needed.
 - The React composer shell keeps a transparent structural border to prevent layout movement and uses soft elevation rather than a visible rectangular outline. Textarea focus suppresses the browser outline and increases the shell shadow on desktop and mobile.
 - The empty React Ask workspace explains the product value across answers, file analysis, content generation, and model comparison. Its four responsive example actions populate the composer for debugging, summarization, writing refinement, and file-analysis tasks without triggering a request.
 - The empty React Compare workspace explains that one prompt can be reviewed across multiple selected models and frames accuracy, depth, speed, tone, and usefulness as practical comparison dimensions. Its three responsive examples populate the composer without changing model selections or triggering a request.
@@ -187,7 +187,10 @@ first run, reuses that session after a structured start denial, and shows only
 run-backed Work sessions in the sidebar; zero-run shells remain outside visible
 history. While the accepted-run response is pending, React immediately renders
 a `Starting work` workspace with the submitted instruction. Stop remains
-unavailable until the backend returns a durable run ID. The activity rail omits
+unavailable until the backend returns a durable run ID. The active Work heading
+renders the current run's persisted `created_at` value as the local calendar date
+and time when the question was asked; it does not use an accumulating relative-minute
+label. The activity rail omits
 unlabeled internal progress events, animates
 only the latest visible activity while the run is nonterminal, and renders no
 active indicators after a terminal outcome; completed runs show every plan step
@@ -203,7 +206,11 @@ public event payload.
 `GET /v1/work/sessions/{work_session_id}/runs` returns every owned run in
 chronological order. React hydrates each run's durable events and artifacts and
 renders a session transcript, so sending an instruction appends a turn without
-removing earlier prompts, outcomes, or deliverables. Web/MCP selection changes
+removing earlier prompts, outcomes, or deliverables. Workspace navigation
+remembers the current Work session, returns to that session instead of the
+new-work landing, and suppresses the landing while a direct session URL is
+hydrating. The explicit `New work` action continues to reset to an empty
+composer. Web/MCP selection changes
 are applied to the existing provider session to retain context. When immutable
 provider vault resources require a replacement session, the backend supplies a
 bounded PostgreSQL-backed transcript of prior visible turns with the new
@@ -439,7 +446,7 @@ React exposes `/pricing` for the public Free/Plus/Pro catalogue and `/account/bi
 
 The API, database, ledger, reservations, and React state retain raw integer AI-credit units. Customer-facing React surfaces use `frontend-react/src/utils/aiCredits.ts` to display one AI credit per 1,000 raw units: Free/Plus/Pro therefore render 100/1,000/3,000 AI credits while the API contracts remain 100,000/1,000,000/3,000,000. Balances, allowance meters, response/Compare usage, itemized activity, structured insufficient-credit messages, and Work budgets use the same formatter. React still sends raw Work budgets and other credit-bearing request values back to the API.
 
-React model/composer/file locks are user-experience controls only. They consume live `/v1/models` catalogue and billing metadata, show the Pro-only third Compare target, display Web/Improve/file allowances, and open contextual dialogs for structured backend denials. Unknown model billing metadata is unavailable rather than optimistically allowed. Prompt text and attachments are cleared only after a stream is accepted, so a preflight denial remains editable; restored historical responses are not filtered after downgrade. The AI credits route shows the unified allowance separately from the provider token/cost analytics on Usage & insights. Its credit history groups itemized API rows by `activity_id` into one card with the original pre-optimization question and total first; Prompt Optimizer and the following Ask/Compare share that display key. When both exist, the native expandable breakdown presents their combined credits as one `Final optimized ... answer` line and explicitly identifies the included optimizer attempts and final answer generation. Optimizer-only activity remains identifiable, Compare/Cortex Analysis/Web Search charges remain understandable, optimizer retries are aggregated, zero-credit adjustments stay out of the visible breakdown, and an explicit fallback covers legacy or privacy-policy-limited activity with no query.
+React model/composer/file locks are user-experience controls only. They consume live `/v1/models` catalogue and billing metadata, show the Pro-only third Compare target, display Web/Improve/file allowances, and open contextual dialogs for structured backend denials. Unknown model billing metadata is unavailable rather than optimistically allowed. Prompt text and attachments are cleared only after a stream is accepted, so a preflight denial remains editable; restored historical responses are not filtered after downgrade. After an active Ask or Compare stream settles, React reloads `/v1/entitlements` so the Web and Improve tooltip balance reflects the newly settled usage without navigation or a browser refresh. The AI credits route shows the unified allowance separately from the provider token/cost analytics on Usage & insights. Its credit history groups itemized API rows by `activity_id` into one card with the original pre-optimization question and total first; Prompt Optimizer and the following Ask/Compare share that display key. When both exist, the native expandable breakdown presents their combined credits as one `Final optimized ... answer` line and explicitly identifies the included optimizer attempts and final answer generation. Optimizer-only activity remains identifiable, Compare/Cortex Analysis/Web Search charges remain understandable, optimizer retries are aggregated, zero-credit adjustments stay out of the visible breakdown, and an explicit fallback covers legacy or privacy-policy-limited activity with no query.
 
 Session-scoped endpoints are session-scoped:
 - `/v1/chat*`
@@ -793,7 +800,7 @@ Notes:
   models from the same provider remain distinguishable.
 - Persists a run only after the provider result passes local schema validation.
 - Returns attributed disagreement positions as `disagreements: [{"who": "ChatGPT (…)", "text": "…"}]` plus nullable `disagreementNote`. The analysis model supplies only anonymous `Response A/B/C` labels; the server resolves `who` before persistence and response serialization.
-- Returns the saved run with `201`; provider/validation failures return `502` and do not add history.
+- Returns the saved run with `201`, including raw `aiCredits` and `creditUsageEstimated`; provider/validation failures return `502` and do not add history.
 - Verifies the Cortex persistence schema before provider work. Missing or
   incomplete migration state returns
   `503 cortex_analysis_schema_unavailable` without calling the model.
@@ -801,7 +808,7 @@ Notes:
 `GET /v1/compare/analysis-runs?session_id=<uuid>` or `?request_group_id=<uuid>`:
 
 - Requires one of the two filters and returns every owned run newest-first.
-- Each run includes `analysisId`, `requestGroupId`, `sessionId`, `model`, the structured result sections, `sourceResponses`, `createdAt`, and `isStale`.
+- Each run includes `analysisId`, `requestGroupId`, `sessionId`, `model`, the structured result sections, `sourceResponses`, raw `aiCredits`, `creditUsageEstimated`, `createdAt`, and `isStale`. Credit usage is reconstructed through the shared billing calculator from the run's persisted model/token/cache/pricing evidence so restored cards match freshly generated cards; legacy rows without provider usage are explicitly marked estimated.
 - The structured result includes attributed `disagreements`, nullable `disagreementNote`, attributed `uniqueInsights`, qualitative confidence, and verification items. Legacy flat-string disagreement rows are restored as readable `One response` entries.
 - `sourceResponses` records the exact `requestId` and `responseVersion` inputs. A later Compare response regeneration changes the current source fingerprint, so earlier runs remain available with `isStale=true`.
 
@@ -811,7 +818,9 @@ through Analysis history. Creation and regeneration are new synthesized model
 calls charged against the unified AI-credit wallet; there is no separate Cortex
 quota. The reservation includes the Compare question and successful source
 responses with a 1,800-token output ceiling. Existing Compare research is reused
-without another Tavily charge. Historical runs remain readable after downgrade.
+without another Tavily charge. React formats `aiCredits` with the shared
+display-credit conversion and shows it in the analysis header. Historical runs
+remain readable after downgrade.
 
 ## Schema Migrations
 
@@ -934,7 +943,7 @@ Run React responsive browser tests without a backend or database:
 npm run --prefix e2e test:mobile
 npm run --prefix e2e test:desktop-ipad
 ```
-The suites start isolated Vite servers and mock frontend API contracts. Mobile tests cover phone navigation, composer clearance and growth, attachments, Compare model controls, history restoration, and stacked response cards. Desktop/iPad tests cover the desktop shell, iPad breakpoint behavior, model selection, and independent Compare response scrolling.
+The suites start isolated Vite servers and mock frontend API contracts. Mobile tests cover phone navigation, composer clearance and growth, full visibility of narrow-screen feature controls, attachments, Compare model controls, history restoration, and stacked response cards. Desktop/iPad tests cover the desktop shell, iPad breakpoint behavior, model selection, and independent Compare response scrolling.
 
 ---
 

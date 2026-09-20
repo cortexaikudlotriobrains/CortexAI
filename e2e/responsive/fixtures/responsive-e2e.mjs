@@ -609,6 +609,8 @@ function makeResponsiveAnalysisRun({
         })),
         combinedResponseCount: sourceRows.length,
         failedResponseCount: 0,
+        aiCredits: 1_234,
+        creditUsageEstimated: false,
         createdAt,
         isStale: false,
     };

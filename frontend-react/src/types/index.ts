@@ -670,6 +670,8 @@ export interface CortexAnalysisRun {
   sourceResponses: CortexAnalysisSource[];
   combinedResponseCount: number;
   failedResponseCount: number;
+  aiCredits: number;
+  creditUsageEstimated: boolean;
   createdAt: string;
   isStale: boolean;
 }
