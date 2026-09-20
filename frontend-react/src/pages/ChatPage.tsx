@@ -42,7 +42,7 @@ interface MobileHistoryDateGroup {
 export function ChatPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { whoAmI, cognitoConfig, loading: authLoading, loggedIn, login, logout } = useAuth();
+  const { cognitoConfig, loading: authLoading, loggedIn, login, logout } = useAuth();
   const authEnabled = cognitoConfig?.enabled ?? false;
   const signedOut = !authLoading && authEnabled && !loggedIn;
   const workspaceReady = !authLoading && !signedOut;
@@ -184,9 +184,7 @@ export function ChatPage() {
           setMobilePanel("chat");
           setComposerCollapsed(false);
         }}
-        whoAmI={whoAmI}
         loggedIn={loggedIn}
-        onLogin={authEnabled ? login : undefined}
       />
 
       <main className={styles.main}>

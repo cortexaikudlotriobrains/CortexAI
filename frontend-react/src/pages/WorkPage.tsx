@@ -60,7 +60,7 @@ const EXAMPLES = [
 export function WorkPage() {
   const { workSessionId } = useParams();
   const navigate = useNavigate();
-  const { whoAmI, cognitoConfig, loading: authLoading, loggedIn, login, logout } = useAuth();
+  const { cognitoConfig, loading: authLoading, loggedIn, login, logout } = useAuth();
   const authEnabled = cognitoConfig?.enabled ?? false;
   const signedOut = !authLoading && authEnabled && !loggedIn;
   const workspaceReady = !authLoading && !signedOut;
@@ -393,9 +393,7 @@ export function WorkPage() {
         workSessions={store.sessions}
         activeWorkSessionId={store.session?.id}
         onSelectWorkSession={handleSelectWorkSession}
-        whoAmI={whoAmI}
         loggedIn={loggedIn}
-        onLogin={authEnabled ? login : undefined}
       />
       <main className={styles.main}>
         <header className={styles.mobileTopbar}>

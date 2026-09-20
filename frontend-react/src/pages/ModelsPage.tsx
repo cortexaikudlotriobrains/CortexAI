@@ -56,7 +56,7 @@ interface CatalogModelAccess {
 
 export function ModelsPage() {
   const navigate = useNavigate();
-  const { whoAmI, cognitoConfig, loading: authLoading, loggedIn, login, logout } = useAuth();
+  const { cognitoConfig, loading: authLoading, loggedIn, login, logout } = useAuth();
   const { cancel } = useChat();
   const { theme, toggleTheme } = useTheme();
   const startNewChat = useChatStore((s) => s.startNewChat);
@@ -101,9 +101,7 @@ export function ModelsPage() {
         activeView="models"
         authLoading={authLoading}
         authEnabled={authEnabled}
-        whoAmI={whoAmI}
         loggedIn={loggedIn}
-        onLogin={authEnabled ? login : undefined}
       />
 
       <main className={styles.main}>

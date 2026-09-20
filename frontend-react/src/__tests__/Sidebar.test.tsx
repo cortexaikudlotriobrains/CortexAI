@@ -276,52 +276,36 @@ describe("Sidebar", () => {
     expect(onNavigateCredits).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the signed-in session footer as status instead of a sign-out action", async () => {
-    const user = userEvent.setup();
+  it("leaves the history block as the final flex child without an account footer", () => {
     useChatStore.setState({
       history: historyEntries(),
       sessionId: "ask-session",
       pendingNewSession: false,
     });
 
-    render(<Sidebar onSelectThread={vi.fn()} loggedIn whoAmI={whoAmI()} />);
+    render(<Sidebar onSelectThread={vi.fn()} />);
 
-    expect(screen.queryByRole("button", { name: /Sign out/i })).not.toBeInTheDocument();
-    expect(screen.getByText("Session active").closest("button")).toBeNull();
-    await user.click(screen.getByText("Session active"));
+    const sidebar = screen.getByLabelText("Primary navigation");
+    const historyBlock = sidebar.querySelector("[data-sidebar-history]");
+    expect(sidebar.lastElementChild).toBe(historyBlock);
+    expect(screen.queryByText("Session active")).not.toBeInTheDocument();
   });
 
-  it("keeps the sidebar footer sign-in action for signed-out users", async () => {
-    const user = userEvent.setup();
-    const onLogin = vi.fn();
-
-    render(<Sidebar onSelectThread={vi.fn()} loggedIn={false} onLogin={onLogin} />);
-
-    await user.click(screen.getByRole("button", { name: "Sign in" }));
-    expect(onLogin).toHaveBeenCalledTimes(1);
-  });
-
-  it("shows a signed-out sidebar state without interactive workspace history", async () => {
-    const user = userEvent.setup();
-    const onLogin = vi.fn();
+  it("shows a signed-out sidebar state without interactive workspace history", () => {
     useChatStore.setState({
       history: historyEntries(),
       sessionId: "ask-session",
       pendingNewSession: false,
     });
 
-    render(<Sidebar onSelectThread={vi.fn()} loggedIn={false} onLogin={onLogin} signedOut />);
+    render(<Sidebar onSelectThread={vi.fn()} signedOut />);
 
-    expect(screen.getByText("Sign in")).toBeInTheDocument();
-    expect(screen.getByText("Access your workspace")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sign in" })).not.toBeInTheDocument();
     expect(screen.getByText("Sign in to view history.")).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Search chats" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "New chat" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Ask" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Compare" })).toBeDisabled();
-
-    await user.click(screen.getByRole("button", { name: "Sign in" }));
-    expect(onLogin).toHaveBeenCalledTimes(1);
   });
 
   it("deletes every persisted entry in a history thread", async () => {
@@ -683,31 +667,6 @@ function historyEntry({
     tokens: 40,
     cost: 0.001,
     web_source_items: [],
-  };
-}
-
-function whoAmI() {
-  return {
-    api_key_id: "test-key",
-    user_id: "signed-in-user",
-    plan_tier: "Pro",
-    storage_policy: "full",
-    redact_pii: false,
-    baseline: {
-      provider: "openai",
-      model: "gpt-5.1",
-      source: "test",
-    },
-    rate_limits: {
-      requests_per_minute: 60,
-      daily_cap_scope: "user",
-    },
-    breakers: {
-      failure_threshold: 5,
-      window_seconds: 60,
-      cooldown_seconds: 120,
-      scope: "provider_model",
-    },
   };
 }
 

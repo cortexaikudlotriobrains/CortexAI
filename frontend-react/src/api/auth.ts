@@ -1,5 +1,5 @@
 import { get } from "./client";
-import type { CognitoConfig, WhoAmIResponse } from "../types";
+import type { AuthenticatedUser, CognitoConfig, WhoAmIResponse } from "../types";
 
 export async function fetchCognitoConfig(): Promise<CognitoConfig> {
   return get<CognitoConfig>("/v1/auth/cognito-config");
@@ -7,6 +7,10 @@ export async function fetchCognitoConfig(): Promise<CognitoConfig> {
 
 export async function fetchWhoAmI(): Promise<WhoAmIResponse> {
   return get<WhoAmIResponse>("/v1/whoami");
+}
+
+export async function fetchAuthenticatedUser(): Promise<AuthenticatedUser> {
+  return get<AuthenticatedUser>("/v1/auth/me");
 }
 
 export async function devLogin(token?: string): Promise<{ session_id: string }> {

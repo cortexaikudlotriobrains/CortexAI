@@ -13,7 +13,17 @@ test("desktop uses the sidebar and top mode navigation", async ({ responsiveApp 
     const { page } = responsiveApp;
     await page.setViewportSize({ width: 1440, height: 900 });
 
-    await expect(page.locator("aside[aria-label='Primary navigation']")).toBeVisible();
+    const sidebar = page.locator("aside[aria-label='Primary navigation']");
+    await expect(sidebar).toBeVisible();
+    await expect(sidebar).not.toContainText("responsive-test-user");
+    await expect(sidebar).not.toContainText("Session active");
+    const sidebarBounds = await sidebar.boundingBox();
+    const historyBounds = await sidebar.locator("[data-sidebar-history]").boundingBox();
+    expect(sidebarBounds).not.toBeNull();
+    expect(historyBounds).not.toBeNull();
+    expect(Math.abs(
+        sidebarBounds.y + sidebarBounds.height - (historyBounds.y + historyBounds.height),
+    )).toBeLessThanOrEqual(1);
     await expect(page.getByRole("navigation", { name: "Mobile navigation" })).toBeHidden();
     await expect(page.locator("#btnSingleMode")).toBeVisible();
     await expect(page.locator("#promptInput")).toBeVisible();

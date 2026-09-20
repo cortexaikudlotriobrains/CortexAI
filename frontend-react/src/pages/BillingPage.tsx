@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { fetchAuthenticatedUser } from "../api/auth";
 import { SubscriptionPageShell } from "../components/subscription/SubscriptionPageShell";
 import { CortexIcon } from "../components/shared/CortexIcon";
 import { useAuth } from "../hooks/useAuth";
@@ -11,6 +13,7 @@ import type { SubscriptionError } from "../subscription/subscriptionErrors";
 import { getAccountMenuSubscriptionPresentation } from "../subscription/accountMenuPresentation";
 import type {
   AllowanceCounter,
+  AuthenticatedUser,
   BillingPlansResponse,
   BillingSubscriptionResponse,
   EntitlementsResponse,
@@ -21,6 +24,7 @@ import { formatAiCredits, toDisplayAiCredits } from "../utils/aiCredits";
 import styles from "./BillingPage.module.css";
 
 interface BillingPageContentProps {
+  accountEmail?: string | null;
   plans: BillingPlansResponse | null;
   subscription: BillingSubscriptionResponse | null;
   entitlements: EntitlementsResponse | null;
@@ -43,11 +47,35 @@ const USAGE_ROWS: Array<{ key: SubscriptionMeterKey; label: string }> = [
 export function BillingPage() {
   const navigate = useNavigate();
   const { whoAmI, cognitoConfig, loading: authLoading, loggedIn, login, logout } = useAuth();
+  const [accountUser, setAccountUser] = useState<AuthenticatedUser | null>(null);
   const subscriptionState = useSubscription({ authLoading, loggedIn });
   const authEnabled = cognitoConfig?.enabled ?? false;
   const accountSubscription = getAccountMenuSubscriptionPresentation(
     subscriptionState.entitlements,
   );
+
+  useEffect(() => {
+    let active = true;
+    setAccountUser(null);
+
+    if (authLoading || !loggedIn || !whoAmI?.user_id) {
+      return () => {
+        active = false;
+      };
+    }
+
+    void fetchAuthenticatedUser()
+      .then((user) => {
+        if (active && user.user_id === whoAmI.user_id) {
+          setAccountUser(user);
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      active = false;
+    };
+  }, [authLoading, loggedIn, whoAmI?.user_id]);
 
   return (
     <SubscriptionPageShell
@@ -56,7 +84,6 @@ export function BillingPage() {
       authLoading={authLoading}
       authEnabled={authEnabled}
       loggedIn={loggedIn}
-      whoAmI={whoAmI}
       onLogin={login}
       onLogout={logout}
       planLabel={loggedIn ? accountSubscription.planLabel : undefined}
@@ -65,6 +92,9 @@ export function BillingPage() {
       billingDestination={accountSubscription.billingDestination}
     >
       <BillingPageContent
+        accountEmail={
+          accountUser && accountUser.user_id === whoAmI?.user_id ? accountUser.email : null
+        }
         plans={subscriptionState.plans}
         subscription={subscriptionState.subscription}
         entitlements={subscriptionState.entitlements}
@@ -84,6 +114,7 @@ export function BillingPage() {
 }
 
 export function BillingPageContent({
+  accountEmail,
   plans,
   subscription,
   entitlements,
@@ -107,6 +138,7 @@ export function BillingPageContent({
   const cortexGrant = plan?.source === "cortex_grant";
   const canManage = Boolean(!cortexGrant && subscription?.can_manage);
   const periodEnd = plan?.renews_at ?? subscription?.current_period_end ?? null;
+  const visibleAccountEmail = accountEmail?.trim() || null;
 
   return (
     <div className={styles.page}>
@@ -193,7 +225,7 @@ export function BillingPageContent({
                 <strong className={statusClass(status)}>{formatStatus(status)}</strong>
               </div>
               <div className={styles.planMain}>
-                <div>
+                <div className={styles.planCopy}>
                   <h2>{plan.display_name}</h2>
                   <p>
                     {cortexGrant
@@ -205,6 +237,12 @@ export function BillingPageContent({
                           periodEnd,
                         })}
                   </p>
+                  {visibleAccountEmail ? (
+                    <div className={styles.accountEmail}>
+                      <span>Account email</span>
+                      <strong title={visibleAccountEmail}>{visibleAccountEmail}</strong>
+                    </div>
+                  ) : null}
                 </div>
                 <div className={styles.planMark}>
                   <CortexIcon name="cost" size={25} />

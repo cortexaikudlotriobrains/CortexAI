@@ -15,7 +15,7 @@ import styles from "./CreditsPage.module.css";
 
 export function CreditsPage() {
   const navigate = useNavigate();
-  const { whoAmI, cognitoConfig, loading: authLoading, loggedIn, login, logout } = useAuth();
+  const { cognitoConfig, loading: authLoading, loggedIn, login, logout } = useAuth();
   const subscriptionState = useSubscription({ authLoading, loggedIn });
   const accountSubscription = getAccountMenuSubscriptionPresentation(
     subscriptionState.entitlements,
@@ -54,7 +54,6 @@ export function CreditsPage() {
       authLoading={authLoading}
       authEnabled={authEnabled}
       loggedIn={loggedIn}
-      whoAmI={whoAmI}
       onLogin={login}
       onLogout={logout}
       planLabel={loggedIn ? accountSubscription.planLabel : undefined}

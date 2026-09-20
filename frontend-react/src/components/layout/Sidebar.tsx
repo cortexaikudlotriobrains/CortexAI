@@ -12,7 +12,7 @@ import { normalizeSessionId } from "../../session/activeSession";
 import { useChatStore } from "../../store/chatStore";
 import { useSidebarStore } from "../../store/sidebarStore";
 import { useHistory } from "../../hooks/useHistory";
-import type { ChatMode, HistoryThread, WhoAmIResponse, WorkSession } from "../../types";
+import type { ChatMode, HistoryThread, WorkSession } from "../../types";
 import { CortexIcon } from "../shared/CortexIcon";
 import brandMarkUrl from "../../assets/brand/brand-mark.svg";
 import styles from "./Sidebar.module.css";
@@ -27,9 +27,6 @@ interface SidebarProps {
   onNavigateUsage?: () => void;
   onNavigateCredits?: () => void;
   onNavigateModels?: () => void;
-  whoAmI?: WhoAmIResponse | null;
-  loggedIn?: boolean;
-  onLogin?: () => void;
   signedOut?: boolean;
   newLabel?: "New chat" | "New work";
   onNew?: () => void;
@@ -62,9 +59,6 @@ export function Sidebar({
   onNavigateUsage,
   onNavigateCredits,
   onNavigateModels,
-  whoAmI,
-  loggedIn,
-  onLogin,
   signedOut = false,
   newLabel = "New chat",
   onNew,
@@ -105,14 +99,6 @@ export function Sidebar({
     () => groupHistoryThreads(filteredThreads, activeChatPreview),
     [activeChatPreview, filteredThreads],
   );
-
-  const userLabel = signedOut ? "Sign in" : (whoAmI?.user_id ?? (loggedIn ? "Signed in" : "Guest"));
-  const planLabel = signedOut
-    ? "Access your workspace"
-    : (whoAmI?.plan_tier ?? (loggedIn ? "Session active" : "Local session"));
-  const sessionLabel = sessionId && !signedOut ? formatSessionId(sessionId) : userLabel;
-  const sessionStatus = sessionId && !signedOut ? "Session active" : planLabel;
-  const canSignInFromProfile = !loggedIn && !!onLogin;
 
   useEffect(() => {
     return () => {
@@ -395,7 +381,7 @@ export function Sidebar({
         </button>
       </nav>
 
-      <div className={styles.historyBlock} hidden={isCollapsed}>
+      <div className={styles.historyBlock} data-sidebar-history hidden={isCollapsed}>
         <div className={styles.historyHeader}>
           <span>Recent</span>
           {!signedOut && (
@@ -681,47 +667,7 @@ export function Sidebar({
           </>
         )}
       </div>
-
-      {canSignInFromProfile ? (
-        <button
-          type="button"
-          className={`${styles.profile} ${styles.profileInteractive}`}
-          onClick={onLogin}
-          aria-label="Sign in"
-          title={isCollapsed ? userLabel : undefined}
-        >
-          <SessionProfileContent sessionLabel={sessionLabel} sessionStatus={sessionStatus} />
-        </button>
-      ) : (
-        <div
-          className={styles.profile}
-          aria-label={`${sessionLabel}. ${sessionStatus}`}
-          title={isCollapsed ? userLabel : undefined}
-        >
-          <SessionProfileContent sessionLabel={sessionLabel} sessionStatus={sessionStatus} />
-        </div>
-      )}
     </aside>
-  );
-}
-
-function SessionProfileContent({
-  sessionLabel,
-  sessionStatus,
-}: {
-  sessionLabel: string;
-  sessionStatus: string;
-}) {
-  return (
-    <>
-      <span className={styles.sessionDot} aria-hidden="true">
-        <span />
-      </span>
-      <span className={styles.profileText}>
-        <strong>{sessionLabel}</strong>
-        <span>{sessionStatus}</span>
-      </span>
-    </>
   );
 }
 
@@ -825,12 +771,6 @@ function isSameLocalDate(left: Date, right: Date): boolean {
     left.getMonth() === right.getMonth() &&
     left.getDate() === right.getDate()
   );
-}
-
-function formatSessionId(value: string): string {
-  const normalized = value.trim();
-  if (normalized.length <= 14) return normalized;
-  return `${normalized.slice(0, 8)}...${normalized.slice(-4)}`;
 }
 
 function FilterIcon() {

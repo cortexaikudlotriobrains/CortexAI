@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 import brandMarkUrl from "../../assets/brand/brand-mark.svg";
 import { useTheme } from "../../hooks/useTheme";
 import { useChatStore } from "../../store/chatStore";
-import type { WhoAmIResponse } from "../../types";
 import { AccountMenu } from "../layout/AccountMenu";
 import { WorkspaceSidebar } from "../layout/WorkspaceSidebar";
 import { CortexIcon } from "../shared/CortexIcon";
@@ -16,7 +15,6 @@ interface SubscriptionPageShellProps {
   authLoading: boolean;
   authEnabled: boolean;
   loggedIn: boolean;
-  whoAmI: WhoAmIResponse | null;
   onLogin?: () => void;
   onLogout: () => void | Promise<void>;
   planLabel?: string;
@@ -33,7 +31,6 @@ export function SubscriptionPageShell({
   authLoading,
   authEnabled,
   loggedIn,
-  whoAmI,
   onLogin,
   onLogout,
   planLabel,
@@ -79,9 +76,7 @@ export function SubscriptionPageShell({
         activeView={activeView}
         authLoading={authLoading}
         authEnabled={authEnabled}
-        whoAmI={whoAmI}
         loggedIn={loggedIn}
-        onLogin={authEnabled ? onLogin : undefined}
       />
 
       <main className={styles.main}>
