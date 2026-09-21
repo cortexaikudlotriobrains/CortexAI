@@ -57,6 +57,9 @@
 }
 
 .tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   border: 0;
   border-bottom: 2px solid transparent;
   background: transparent;
@@ -64,6 +67,17 @@
   cursor: pointer;
   font: 500 16px/24px var(--font-sans);
   padding: 20px 0 14px;
+}
+
+.tabIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tabIcon svg {
+  width: 18px;
+  height: 18px;
 }
 
 .tab:hover {
@@ -127,6 +141,12 @@
   min-height: 0;
   overflow: hidden;
   padding: 24px;
+}
+
+@media (max-width: 1024px) {
+  .tabIcon {
+    display: none;
+  }
 }
 
 .canvasEmpty {

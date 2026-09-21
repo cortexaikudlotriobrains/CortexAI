@@ -307,7 +307,7 @@ export function Sidebar({
       <nav className={styles.nav} aria-label="Workspace">
         <button
           type="button"
-          className={askActive ? styles.navItemActive : styles.navItem}
+          className={`${askActive ? styles.navItemActive : styles.navItem} ${styles.workspaceModeItem}`}
           onClick={() => handleModeNavigation("single")}
           aria-current={askActive ? "page" : undefined}
           aria-label="Ask"
@@ -319,7 +319,7 @@ export function Sidebar({
         </button>
         <button
           type="button"
-          className={compareActive ? styles.navItemActive : styles.navItem}
+          className={`${compareActive ? styles.navItemActive : styles.navItem} ${styles.workspaceModeItem}`}
           onClick={() => handleModeNavigation("compare")}
           aria-current={compareActive ? "page" : undefined}
           aria-label="Compare"
@@ -332,7 +332,7 @@ export function Sidebar({
         {onNavigateWork && (
           <button
             type="button"
-            className={workActive ? styles.navItemActive : styles.navItem}
+            className={`${workActive ? styles.navItemActive : styles.navItem} ${styles.workspaceModeItem}`}
             onClick={onNavigateWork}
             aria-current={workActive ? "page" : undefined}
             aria-label="Work"

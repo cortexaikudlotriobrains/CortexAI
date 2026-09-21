@@ -235,7 +235,10 @@ export function ChatPage() {
               aria-pressed={mode === "single"}
               disabled={signedOut}
             >
-              Ask
+              <span className={styles.tabIcon}>
+                <CortexIcon name="ask" />
+              </span>
+              <span>Ask</span>
             </button>
             <button
               id="btnCompareMode"
@@ -245,7 +248,10 @@ export function ChatPage() {
               aria-pressed={mode === "compare"}
               disabled={signedOut}
             >
-              Compare
+              <span className={styles.tabIcon}>
+                <CortexIcon name="compare" />
+              </span>
+              <span>Compare</span>
             </button>
             {getRuntimeConfig().workEnabled !== false && (
               <button
@@ -255,7 +261,10 @@ export function ChatPage() {
                 aria-label="Work"
                 disabled={signedOut}
               >
-                Work
+                <span className={styles.tabIcon}>
+                  <CortexIcon name="work" />
+                </span>
+                <span>Work</span>
               </button>
             )}
           </nav>

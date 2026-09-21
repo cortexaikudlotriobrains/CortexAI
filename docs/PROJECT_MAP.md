@@ -94,7 +94,7 @@ This map is the quick "where do I change X?" reference for the current API-first
   - Transcript/session state: `frontend-react/src/store/chatStore.ts`
   - Main shell and responsive navigation: `frontend-react/src/pages/ChatPage.tsx`
   - Top-right Cognito account menu and summary plan/billing action: `frontend-react/src/components/layout/AccountMenu.tsx`
-  - Desktop sidebar navigation, shared route/history controller, Models/Usage/AI credits/Work route entries, history list, and route-persistent collapse rail: `frontend-react/src/components/layout/WorkspaceSidebar.tsx`, `frontend-react/src/components/layout/Sidebar.tsx`, `frontend-react/src/store/sidebarStore.ts`
+  - Responsive desktop/iPad sidebar navigation, shared route/history controller, desktop utility destinations, iPad workspace destinations, history list, and route-persistent collapse rail: `frontend-react/src/components/layout/WorkspaceSidebar.tsx`, `frontend-react/src/components/layout/Sidebar.tsx`, `frontend-react/src/store/sidebarStore.ts`
   - Ask/Compare result rendering: `frontend-react/src/components/results/`
   - Deterministic assistant-offered follow-up extraction and response-level chip row: `frontend-react/src/followups/suggestedFollowups.ts`, `frontend-react/src/components/results/SuggestedFollowUps.tsx`, `frontend-react/src/components/results/ResponseCard.tsx`
   - Composer, attachments, model selection, and routing toggles: `frontend-react/src/components/composer/`

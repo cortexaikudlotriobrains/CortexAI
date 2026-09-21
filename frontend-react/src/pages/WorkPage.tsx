@@ -405,9 +405,18 @@ export function WorkPage() {
         </header>
         <header className={styles.topbar}>
           <nav className={styles.tabs} aria-label="Workspace mode">
-            <button type="button" onClick={() => navigate("/")}>Ask</button>
-            <button type="button" onClick={() => navigate("/?mode=compare")}>Compare</button>
-            <button type="button" className={styles.activeTab} aria-current="page">Work</button>
+            <button type="button" onClick={() => navigate("/")}>
+              <span className={styles.tabIcon}><CortexIcon name="ask" /></span>
+              <span>Ask</span>
+            </button>
+            <button type="button" onClick={() => navigate("/?mode=compare")}>
+              <span className={styles.tabIcon}><CortexIcon name="compare" /></span>
+              <span>Compare</span>
+            </button>
+            <button type="button" className={styles.activeTab} aria-current="page">
+              <span className={styles.tabIcon}><CortexIcon name="work" /></span>
+              <span>Work</span>
+            </button>
           </nav>
           <div className={styles.topActions} aria-label="Workspace actions">
             <button type="button" className={styles.iconButton} aria-label="New work" onClick={handleNewWork}><CortexIcon name="plus" /></button>

@@ -7,7 +7,16 @@ test("desktop Work empty state starts a real mocked run and renders its delivera
     await page.goto("/work");
 
     await expect(page.getByRole("heading", { name: "Start a task" })).toBeVisible();
-    await expect(page.locator("aside[aria-label='Primary navigation']").getByRole("button", { name: "Work", exact: true })).toBeVisible();
+    await expect(
+        page
+            .locator("aside[aria-label='Primary navigation']")
+            .getByRole("button", { name: "Work", exact: true }),
+    ).toBeHidden();
+    const workTab = page
+        .getByRole("navigation", { name: "Workspace mode" })
+        .getByRole("button", { name: "Work", exact: true });
+    await expect(workTab).toHaveAttribute("aria-current", "page");
+    await expect(workTab.locator("svg")).toBeVisible();
     await expect(page.getByRole("textbox", { name: "Work goal" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Web access: Auto" })).toBeVisible();
     await expectNoHorizontalOverflow(page);

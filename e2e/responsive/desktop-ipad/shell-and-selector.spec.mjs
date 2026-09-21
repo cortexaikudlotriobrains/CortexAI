@@ -24,8 +24,12 @@ test("desktop uses the sidebar and top mode navigation", async ({ responsiveApp 
     expect(Math.abs(
         sidebarBounds.y + sidebarBounds.height - (historyBounds.y + historyBounds.height),
     )).toBeLessThanOrEqual(1);
+    await expect(sidebar.getByRole("button", { name: "Ask", exact: true })).toBeHidden();
+    await expect(sidebar.getByRole("button", { name: "Compare", exact: true })).toBeHidden();
+    await expect(sidebar.getByRole("button", { name: "Work", exact: true })).toBeHidden();
     await expect(page.getByRole("navigation", { name: "Mobile navigation" })).toBeHidden();
     await expect(page.locator("#btnSingleMode")).toBeVisible();
+    await expect(page.locator("#btnSingleMode svg")).toBeVisible();
     await expect(page.locator("#promptInput")).toBeVisible();
     await expectNoHorizontalOverflow(page);
 });
@@ -75,7 +79,10 @@ test("desktop sidebar collapses to an icon rail and expands again", async ({ res
     const collapsedWidth = await sidebar.evaluate(element => element.getBoundingClientRect().width);
     expect(collapsedWidth).toBeLessThan(expandedWidth);
 
-    await sidebar.getByRole("button", { name: "Compare" }).click();
+    await page
+        .getByRole("navigation", { name: "Workspace mode" })
+        .getByRole("button", { name: "Compare" })
+        .click();
     await expect(page.locator("#btnCompareMode")).toHaveClass(/activeTab/);
 
     await page.getByRole("button", { name: "Expand sidebar" }).click();
@@ -204,7 +211,7 @@ test("desktop sidebar stays consistent across Chat, Work, Usage, and AI credits"
     await sidebar.getByRole("button", { name: "AI credits" }).click();
     await expect(page).toHaveURL(/\/credits$/);
     await expect(sidebar).toHaveAttribute("data-collapsed", "true");
-    await expect(sidebar.getByRole("button", { name: "Work", exact: true })).toBeVisible();
+    await expect(sidebar.getByRole("button", { name: "Work", exact: true })).toBeHidden();
 
     await sidebar.getByRole("button", { name: "Expand sidebar" }).click();
     await expect(
@@ -215,16 +222,24 @@ test("desktop sidebar stays consistent across Chat, Work, Usage, and AI credits"
 
     await sidebar.getByRole("button", { name: "New chat" }).click();
     await expect(page).toHaveURL(/\/$/);
-    await expect(sidebar.getByRole("button", { name: "Ask", exact: true })).toHaveAttribute(
-        "aria-current",
-        "page",
+    await expect(
+        page
+            .getByRole("navigation", { name: "Workspace mode" })
+            .getByRole("button", { name: "Ask", exact: true }),
+    ).toHaveAttribute(
+        "aria-pressed",
+        "true",
     );
 
     await sidebar.getByRole("button", { name: "Usage" }).click();
     await expect(page).toHaveURL(/\/usage$/);
-    await expect(sidebar.getByRole("button", { name: "Work", exact: true })).toBeVisible();
+    await expect(sidebar.getByRole("button", { name: "Work", exact: true })).toBeHidden();
 
-    await sidebar.getByRole("button", { name: "Work", exact: true }).click();
+    await sidebar.getByRole("button", { name: "New chat" }).click();
+    await page
+        .getByRole("navigation", { name: "Workspace mode" })
+        .getByRole("button", { name: "Work", exact: true })
+        .click();
     await expect(page).toHaveURL(/\/work$/);
     const chatHistory = sidebar.getByRole("button", {
         name: /Plan a multi-region platform migration.*Ask,/,
@@ -403,7 +418,7 @@ test("dark theme gives enabled Ask feature chips a distinct accent state", async
         if ((await featureSwitch.getAttribute("aria-checked")) !== "true") {
             await featureSwitch.click();
         }
-        await page.getByRole("heading", { level: 2 }).hover();
+        await page.getByRole("navigation", { name: "Workspace mode" }).hover();
         await expect(featureSwitch).toHaveCSS("background-color", "rgb(52, 52, 103)");
         await expect(featureSwitch).toHaveCSS("color", "rgb(255, 255, 255)");
         await expect(featureSwitch).toHaveCSS("box-shadow", /rgb\(139, 139, 240\)/);
@@ -692,8 +707,13 @@ test("iPad landscape keeps the desktop workspace usable", async ({ responsiveApp
     const { page } = responsiveApp;
     await page.setViewportSize({ width: 1024, height: 768 });
 
-    await expect(page.locator("aside[aria-label='Primary navigation']")).toBeVisible();
+    const sidebar = page.locator("aside[aria-label='Primary navigation']");
+    await expect(sidebar).toBeVisible();
+    await expect(sidebar.getByRole("button", { name: "Ask", exact: true })).toBeVisible();
+    await expect(sidebar.getByRole("button", { name: "Compare", exact: true })).toBeVisible();
+    await expect(sidebar.getByRole("button", { name: "Work", exact: true })).toBeVisible();
     await expect(page.locator("#btnSingleMode")).toBeVisible();
+    await expect(page.locator("#btnSingleMode svg")).toBeHidden();
     await expect(page.getByRole("navigation", { name: "Mobile navigation" })).toBeHidden();
     const composerWidth = await page.locator("#promptInput").evaluate(element => {
         return element.parentElement?.parentElement?.getBoundingClientRect().width ?? 0;

@@ -760,6 +760,12 @@
   }
 }
 
+@media (min-width: 1025px) {
+  .workspaceModeItem {
+    display: none;
+  }
+}
+
 @media (hover: none) {
   .historyMoreButton {
     opacity: 0.55;

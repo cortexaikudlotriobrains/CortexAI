@@ -2,9 +2,10 @@
 .main{display:flex;flex:1;min-width:0;flex-direction:column;background:var(--cx-canvas)}
 .topbar{display:flex;height:64px;flex:none;align-items:center;justify-content:space-between;border-bottom:1px solid var(--cx-hairline-soft);background:var(--cx-surface);padding:0 64px}
 .tabs{display:flex;height:100%;align-items:center;gap:32px}
-.tabs button{height:100%;border:0;border-bottom:2px solid transparent;background:none;color:var(--cx-ink-600);cursor:pointer;font:500 16px/24px var(--font-sans);padding:5px 0 0}
+.tabs button{display:inline-flex;height:100%;align-items:center;justify-content:center;gap:8px;border:0;border-bottom:2px solid transparent;background:none;color:var(--cx-ink-600);cursor:pointer;font:500 16px/24px var(--font-sans);padding:5px 0 0}
 .tabs button:hover{color:var(--cx-ink-900)}
 .tabs .activeTab{border-bottom-color:var(--cx-accent);color:var(--cx-ink-900);font-weight:700}
+.tabIcon{display:inline-flex;align-items:center;justify-content:center}.tabIcon svg{width:18px;height:18px}
 .topActions,.mobileHeaderActions,.taskHeaderActions,.composerActions,.approvalActions{display:flex;align-items:center}
 .topActions{gap:var(--cx-workspace-actions-gap)}
 .mobileHeaderActions{gap:var(--cx-mobile-header-actions-gap)}
@@ -99,6 +100,7 @@
 .errorBanner{position:fixed;z-index:60;right:22px;bottom:22px;display:flex;max-width:440px;align-items:center;gap:12px;border:1px solid color-mix(in srgb,var(--cx-danger) 25%,var(--cx-hairline));border-radius:12px;background:var(--cx-surface);box-shadow:var(--cx-shadow-pop);color:var(--cx-ink-700);font:600 12px/18px var(--font-sans);padding:11px 13px}.errorBanner button{border:0;background:none;color:var(--cx-accent);cursor:pointer;font:700 11px/1 var(--font-sans)}
 @keyframes workPulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,currentColor 30%,transparent)}80%,100%{box-shadow:0 0 0 6px color-mix(in srgb,currentColor 0%,transparent)}}
 @keyframes workSpin{to{transform:rotate(360deg)}}
+@media(max-width:1024px){.tabIcon{display:none}}
 @media(max-width:900px){
   .layout{height:100dvh}.layout>aside{display:none}.topbar{display:none}.mobileTopbar{display:flex;height:56px;flex:none;align-items:center;justify-content:space-between;border-bottom:1px solid var(--cx-hairline-soft);background:color-mix(in srgb,var(--cx-canvas) 94%,transparent);padding:0 16px;backdrop-filter:blur(16px)}
   .taskHeader{position:sticky;z-index:10;top:0;min-height:60px;background:color-mix(in srgb,var(--cx-canvas) 94%,transparent);padding:10px 16px;backdrop-filter:blur(16px)}.taskHeader h1{display:-webkit-box;max-width:58vw;overflow:hidden;font-size:16px;line-height:20px;white-space:normal;-webkit-box-orient:vertical;-webkit-line-clamp:2}.taskHeader p{display:none}.taskHeaderActions{gap:6px}.taskHeaderActions .stopButton{display:none}.statusPill{height:22px;font-size:8.5px;padding:0 7px}.statusDot{width:6px;height:6px}
