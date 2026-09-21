@@ -311,10 +311,20 @@ test("desktop sidebar shows a new chat before the response is persisted", async 
 
     const sidebar = page.locator("aside[aria-label='Primary navigation']");
     const preview = sidebar.locator("[data-current-chat-preview]");
+    const sourcesEnabled = await page
+        .getByRole("switch", { name: "Research mode" })
+        .getAttribute("aria-checked") === "true";
+    const loadingOrb = page.locator("canvas.response-loading-orb");
     const workRow = sidebar.getByRole("button", {
         name: "Older Work history. Work, completed",
     });
     try {
+        await expect(loadingOrb).toBeVisible();
+        await expect(loadingOrb).toHaveAttribute(
+            "data-loading-state",
+            sourcesEnabled ? "searching" : "working",
+        );
+        await expect(loadingOrb).toHaveAttribute("aria-hidden", "true");
         await expect(
             preview.getByRole("button", { name: new RegExp(`${prompt}\\. Ask,`) }),
         ).toBeVisible();

@@ -259,15 +259,18 @@ describe("ResponseCard", () => {
     expect(screen.queryByText("CortexAI documentation")).not.toBeInTheDocument();
   });
 
-  it("replaces the loading state as soon as streamed text arrives", () => {
+  it("renders a neutral working orb and replaces the loading state on first text", () => {
     const pending = response(false, "");
-    const { rerender } = render(
+    const { container, rerender } = render(
       <ResponseCard response={pending} isStreaming loadingMode="ask" />,
     );
 
     expect(screen.getByRole("status")).toHaveTextContent(
       "Thinking through your request\u2026",
     );
+    expect(
+      container.querySelector('canvas[data-loading-state="working"]'),
+    ).toHaveAttribute("aria-hidden", "true");
     expect(screen.queryByText("Waiting for response...")).not.toBeInTheDocument();
 
     rerender(
@@ -279,12 +282,13 @@ describe("ResponseCard", () => {
     );
 
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(container.querySelector("canvas[data-loading-state]")).not.toBeInTheDocument();
     expect(screen.getByText("The first streamed token")).toBeInTheDocument();
   });
 
   it("uses request-aware loading copy for sources and prompt improvement", () => {
     const pending = response(false, "");
-    const { rerender } = render(
+    const { container, rerender } = render(
       <ResponseCard
         response={pending}
         isStreaming
@@ -296,6 +300,7 @@ describe("ResponseCard", () => {
     expect(screen.getByRole("status")).toHaveTextContent(
       "Checking sources and preparing an answer\u2026",
     );
+    expect(container.querySelector('canvas[data-loading-state="searching"]')).toBeInTheDocument();
 
     rerender(
       <ResponseCard
@@ -310,6 +315,7 @@ describe("ResponseCard", () => {
     expect(screen.getByRole("status")).toHaveTextContent(
       "Refining prompt and preparing response\u2026",
     );
+    expect(container.querySelector('canvas[data-loading-state="searching"]')).toBeInTheDocument();
   });
 
   it("groups consecutive numeric citations into one publisher pill", () => {
