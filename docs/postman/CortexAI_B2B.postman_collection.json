@@ -594,7 +594,7 @@
               }
             ],
             "url": "{{base_url}}/v1/models?provider={{provider_filter}}&enabled_only=true",
-            "description": "Returns selectable catalogue rows from config/model_registry.yaml. Each row includes its subscription billing class, lifecycle, current effective prices, pricing rule/version, and official provider evidence; use enabled_only=false to inspect retained compatibility/history identities. Claude Sonnet 4.6 is advanced (Plus/Pro), while Claude Opus 4.5 and 4.6 are premium (Pro)."
+            "description": "Disabled by default: returns 404 unless ENABLE_MODELS_CATALOG=true. When enabled, returns selectable catalogue rows from config/model_registry.yaml; use enabled_only=false to inspect retained compatibility/history identities."
           },
           "event": [
             {

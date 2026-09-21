@@ -6,7 +6,7 @@ test("desktop Work empty state starts a real mocked run and renders its delivera
     state.workStartDelayMs = 900;
     await page.goto("/work");
 
-    await expect(page.getByRole("heading", { name: "What should I work on?" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Start a task" })).toBeVisible();
     await expect(page.locator("aside[aria-label='Primary navigation']").getByRole("button", { name: "Work", exact: true })).toBeVisible();
     await expect(page.getByRole("textbox", { name: "Work goal" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Web access: Auto" })).toBeVisible();
@@ -110,7 +110,7 @@ test("desktop returns from Ask to the remembered Work session without showing th
     await page.getByRole("navigation", { name: "Workspace mode" }).getByRole("button", { name: "Work" }).click();
     await expect(page).toHaveURL(/\/work\/work-session-1$/);
     await expect(page.getByRole("heading", { name: "Prepare a market report" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "What should I work on?" })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Start a task" })).toHaveCount(0);
 });
 
 function workSession(status) {

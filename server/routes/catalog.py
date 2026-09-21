@@ -1,5 +1,6 @@
 """Provider and model discovery endpoints."""
 
+import os
 from datetime import datetime
 from uuid import uuid4
 
@@ -28,6 +29,18 @@ _SESSION_AUTH_GUARD = SessionScopedAuthGuard(
 
 def _utc_now_iso() -> str:
     return datetime.utcnow().isoformat() + "Z"
+
+
+def _models_catalog_enabled() -> bool:
+    raw = os.getenv("ENABLE_MODELS_CATALOG")
+    if raw is None:
+        return False
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _ensure_models_catalog_enabled() -> None:
+    if not _models_catalog_enabled():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
 
 
 def _normalize_provider(value: str | None) -> str | None:
@@ -139,7 +152,11 @@ async def list_providers(
     )
 
 
-@router.get("/models", response_model=ModelsCatalogResponseDTO)
+@router.get(
+    "/models",
+    response_model=ModelsCatalogResponseDTO,
+    dependencies=[Depends(_ensure_models_catalog_enabled)],
+)
 async def list_models(
     request: Request,
     provider: str | None = Query(default=None),

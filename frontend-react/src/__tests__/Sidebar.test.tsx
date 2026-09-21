@@ -254,6 +254,12 @@ describe("Sidebar", () => {
     expect(onNavigateModels).toHaveBeenCalledTimes(1);
   });
 
+  it("hides Models when the catalogue destination is not wired", () => {
+    render(<Sidebar onSelectThread={vi.fn()} activeView="chat" />);
+
+    expect(screen.queryByRole("button", { name: "Models" })).not.toBeInTheDocument();
+  });
+
   it("marks AI credits active and routes the sidebar AI credits item", async () => {
     const user = userEvent.setup();
     const onNavigateCredits = vi.fn();

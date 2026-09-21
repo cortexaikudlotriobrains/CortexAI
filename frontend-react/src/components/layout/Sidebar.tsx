@@ -367,18 +367,20 @@ export function Sidebar({
           <CortexIcon name="cost" />
           <span>AI credits</span>
         </button>
-        <button
-          type="button"
-          className={modelsActive ? styles.navItemActive : styles.navItem}
-          onClick={onNavigateModels}
-          aria-current={modelsActive ? "page" : undefined}
-          aria-label="Models"
-          title={isCollapsed ? "Models" : undefined}
-          disabled={signedOut}
-        >
-          <CortexIcon name="models" />
-          <span>Models</span>
-        </button>
+        {onNavigateModels && (
+          <button
+            type="button"
+            className={modelsActive ? styles.navItemActive : styles.navItem}
+            onClick={onNavigateModels}
+            aria-current={modelsActive ? "page" : undefined}
+            aria-label="Models"
+            title={isCollapsed ? "Models" : undefined}
+            disabled={signedOut}
+          >
+            <CortexIcon name="models" />
+            <span>Models</span>
+          </button>
+        )}
       </nav>
 
       <div className={styles.historyBlock} data-sidebar-history hidden={isCollapsed}>

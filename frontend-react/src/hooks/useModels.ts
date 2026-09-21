@@ -15,7 +15,12 @@ export function useModels(enabled = true): UseModelsResult {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      setModels(DEFAULT_MODELS);
+      setLoading(false);
+      setError(null);
+      return;
+    }
     let cancelled = false;
     setLoading(true);
     fetchModels(true)

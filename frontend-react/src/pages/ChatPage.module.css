@@ -129,6 +129,10 @@
   padding: 24px;
 }
 
+.canvasEmpty {
+  display: none;
+}
+
 .workspaceLoading,
 .signInGate {
   display: grid;
@@ -231,6 +235,24 @@
   flex-shrink: 0;
   padding: 0 24px 24px;
   background: var(--cx-canvas);
+}
+
+.composerWrapCentered {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 14px;
+  padding: 24px;
+}
+
+.composerGreeting {
+  margin: 0;
+  color: var(--cx-ink-900);
+  font: 650 20px/28px var(--font-sans);
+  letter-spacing: -0.01em;
+  text-align: center;
 }
 
 /* Mobile-only elements — hidden on desktop */
@@ -613,6 +635,10 @@
     scroll-padding-bottom: var(--mobile-response-actions-clearance);
   }
 
+  .canvasEmpty {
+    display: block;
+  }
+
   .signInGate {
     min-height: calc(100dvh - 138px);
     padding: 18px 0 28px;
@@ -646,6 +672,15 @@
       transform 220ms ease,
       visibility 0s linear;
     visibility: visible;
+  }
+
+  .composerWrapCentered {
+    display: block;
+    flex: none;
+  }
+
+  .composerGreeting {
+    display: none;
   }
 
   /* Collapsed: park the sheet off-canvas; the dock pill remains visible. */

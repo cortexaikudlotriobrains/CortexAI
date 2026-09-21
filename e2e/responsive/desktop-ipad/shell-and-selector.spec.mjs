@@ -426,41 +426,28 @@ test("dark theme keeps the top Ask and Compare tabs legible", async ({ responsiv
     await expect(askTab).toHaveCSS("color", "rgb(174, 182, 194)");
 });
 
-test("dark theme keeps the landing starter copy legible", async ({ responsiveApp }) => {
+test("desktop centers the empty Ask and Compare composer, then docks it after submit", async ({ responsiveApp }) => {
     const { page } = responsiveApp;
     await page.setViewportSize({ width: 1440, height: 900 });
 
-    await page.getByRole("button", { name: "Account" }).click();
-    await page.getByRole("menuitem", { name: "Switch to dark theme" }).click();
-    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    const composer = page.locator("[data-composer-placement]");
+    await expect(composer).toHaveAttribute("data-composer-placement", "center");
+    await expectCenteredComposer(page);
+    await expect(page.getByRole("heading", { name: "Ask anything" })).toHaveCount(0);
+    await expect(page.getByText("Hi, how can I help?", { exact: true })).toBeVisible();
 
-    const eyebrow = page.getByText("Your AI workspace", { exact: true });
-    const heading = page.getByRole("heading", {
-        name: "Your AI workspace for answers, analysis, and model comparison",
-    });
-    const description = page.getByText(/Ask questions, analyze files, generate content/);
+    await page.locator("#btnCompareMode").click();
+    await expect(composer).toHaveAttribute("data-composer-placement", "center");
+    await expectCenteredComposer(page);
+    await expect(page.getByRole("heading", { name: "Compare answers" })).toHaveCount(0);
+    await expect(
+        page.getByText("Hi, what would you like to compare?", { exact: true }),
+    ).toBeVisible();
 
-    await expect(eyebrow).toHaveCSS(
-        "color",
-        "rgb(248, 250, 252)",
-    );
-    await expect(eyebrow).toHaveCSS("font-weight", "800");
-    await expect(heading).toHaveCSS("color", "rgb(255, 255, 255)");
-    await expect(heading).toHaveCSS("font-weight", "800");
-    await expect(description).toHaveCSS("color", "rgb(248, 250, 252)");
-    await expect(description).toHaveCSS("font-weight", "700");
-    for (const textBlock of [eyebrow, heading, description]) {
-        await expect(textBlock).not.toHaveCSS("text-shadow", "none");
-    }
-
-    const example = page.getByRole("button", {
-        name: "Help me debug a failing FastAPI stream",
-    });
-    await expect(example).toHaveCSS("color", "rgb(255, 255, 255)");
-    await expect(example).toHaveCSS("font-weight", "700");
-    await expect(example).not.toHaveCSS("text-shadow", "none");
-    await expect(example).toHaveCSS("border-top-color", "rgb(58, 70, 84)");
-    await expect(example.locator("span").first()).toHaveCSS("color", "rgb(255, 255, 255)");
+    await page.locator("#promptInput").fill("Compare two rollout strategies");
+    await page.locator("#submitBtn").click();
+    await expect(composer).toHaveAttribute("data-composer-placement", "bottom");
+    await expect(page.getByText("Hi, what would you like to compare?", { exact: true })).toHaveCount(0);
 });
 
 test("Compare sources and Improve use the same styling for matching states", async ({ responsiveApp }) => {
@@ -712,6 +699,21 @@ async function expectChipTooltip(page, switchName, tooltipText) {
     await chip.hover();
     await expect(tooltip).toBeVisible();
     await expect(tooltip).toHaveCSS("opacity", "1");
+}
+
+async function expectCenteredComposer(page) {
+    const composer = page.locator("[data-composer-placement='center']");
+    const greeting = composer.locator("p");
+    const card = page.locator("#promptInput").locator("xpath=../..");
+    await expect.poll(async () => {
+        const composerBounds = await composer.boundingBox();
+        const greetingBounds = await greeting.boundingBox();
+        const cardBounds = await card.boundingBox();
+        if (!composerBounds || !greetingBounds || !cardBounds) return Number.POSITIVE_INFINITY;
+        const composerCenter = composerBounds.y + composerBounds.height / 2;
+        const groupCenter = (greetingBounds.y + cardBounds.y + cardBounds.height) / 2;
+        return Math.abs(composerCenter - groupCenter);
+    }).toBeLessThanOrEqual(1);
 }
 
 async function chipVisualStyle(chip) {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CortexIcon, type CortexIconName } from "../shared/CortexIcon";
 import type { AppTheme } from "../../hooks/useTheme";
+import { getRuntimeConfig } from "../../config/runtimeConfig";
 import styles from "./AccountMenu.module.css";
 
 interface AccountMenuProps {
@@ -59,7 +60,7 @@ export function AccountMenu({
   const canLogin = authEnabled && !!onLogin;
   const canLogout = !!onLogout;
   const canOpenBilling = !!planLabel && !!billingActionLabel && !!onBilling;
-  const canOpenModels = !!onModels;
+  const canOpenModels = getRuntimeConfig().modelsCatalogEnabled === true && !!onModels;
   const canOpenUsage = !!onUsageInsights;
   const canOpenCredits = !!onCredits;
   const canToggleTheme = !!theme && !!onToggleTheme;

@@ -14,7 +14,12 @@ import { App } from "../App";
 
 describe("subscription routes", () => {
   beforeEach(() => window.history.replaceState({}, "", "/"));
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    delete (
+      window as unknown as { CORTEX_RUNTIME_CONFIG?: Record<string, unknown> }
+    ).CORTEX_RUNTIME_CONFIG;
+  });
 
   it("routes /pricing to the consumer plan catalogue", () => {
     window.history.replaceState({}, "", "/pricing");
@@ -32,5 +37,23 @@ describe("subscription routes", () => {
     window.history.replaceState({}, "", "/credits");
     render(<App />);
     expect(screen.getByText("Credits route")).toBeInTheDocument();
+  });
+
+  it("redirects /models to Ask when the catalogue is disabled", () => {
+    window.history.replaceState({}, "", "/models");
+    render(<App />);
+
+    expect(screen.getByText("Chat route")).toBeInTheDocument();
+    expect(screen.queryByText("Models route")).not.toBeInTheDocument();
+  });
+
+  it("keeps /models available behind the runtime flag", () => {
+    (
+      window as unknown as { CORTEX_RUNTIME_CONFIG?: Record<string, unknown> }
+    ).CORTEX_RUNTIME_CONFIG = { modelsCatalogEnabled: true };
+    window.history.replaceState({}, "", "/models");
+    render(<App />);
+
+    expect(screen.getByText("Models route")).toBeInTheDocument();
   });
 });

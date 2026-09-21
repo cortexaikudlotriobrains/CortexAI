@@ -283,22 +283,26 @@ test("mobile attachment chips stay inside the composer without narrowing input",
     await expect(fileName).toHaveCount(0);
 });
 
-test("mobile Ask examples stack and populate the composer", async ({ responsiveApp }) => {
+test("mobile Ask and Compare empty states keep only the existing composer", async ({ responsiveApp }) => {
     const { page } = responsiveApp;
     await page.setViewportSize({ width: 320, height: 568 });
 
-    const examples = page.getByLabel("Prompt examples").getByRole("button");
-    await expect(examples).toHaveCount(4);
-    const rects = await examples.evaluateAll(buttons =>
-        buttons.map(button => {
-            const rect = button.getBoundingClientRect();
-            return { left: rect.left, top: rect.top, bottom: rect.bottom };
-        }),
-    );
-    expect(rects[1].top).toBeGreaterThan(rects[0].bottom);
+    const promptInput = page.locator("#promptInput");
+    await expect(promptInput).toBeVisible();
+    await expect(promptInput).toHaveAttribute("placeholder", "Ask anything…");
+    await expect(page.locator('[aria-label="Prompt examples"]')).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Ask anything" })).toHaveCount(0);
 
-    await examples.first().click();
-    await expect(page.locator("#promptInput")).not.toHaveValue("");
+    await page
+        .getByRole("navigation", { name: "Mobile navigation" })
+        .getByRole("button", { name: "Compare" })
+        .click();
+    await expect(promptInput).toBeVisible();
+    await expect(promptInput).toHaveAttribute(
+        "placeholder",
+        "Ask once and compare model responses",
+    );
+    await expect(page.getByRole("heading", { name: "Compare answers" })).toHaveCount(0);
     await expectNoHorizontalOverflow(page);
 });
 

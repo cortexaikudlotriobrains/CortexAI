@@ -77,6 +77,7 @@ def discovery_client(monkeypatch):
     monkeypatch.setenv("API_KEYS", "dev-key-1")
     monkeypatch.setenv("DATABASE_URL", "sqlite+pysqlite:///:memory:")
     monkeypatch.setenv("ALLOW_NON_POSTGRES_DATABASE_URL", "true")
+    monkeypatch.setenv("ENABLE_MODELS_CATALOG", "true")
     app = create_app()
     from server import dependencies as deps
 

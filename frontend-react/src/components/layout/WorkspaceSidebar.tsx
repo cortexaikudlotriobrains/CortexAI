@@ -49,6 +49,7 @@ export function WorkspaceSidebar({
   const signedOut = !authLoading && authEnabled && !loggedIn;
   const workspaceReady = !authLoading && !signedOut;
   const workEnabled = getRuntimeConfig().workEnabled !== false;
+  const modelsCatalogEnabled = getRuntimeConfig().modelsCatalogEnabled === true;
   const usesProvidedWorkSessions = workSessions !== undefined;
   const workDestinationSessionId = activeWorkSessionId ?? rememberedWorkSessionId;
   const workDestination = workDestinationSessionId
@@ -117,7 +118,7 @@ export function WorkspaceSidebar({
       onNavigateWork={workEnabled ? () => navigate(workDestination) : undefined}
       onNavigateUsage={() => navigate("/usage")}
       onNavigateCredits={() => navigate("/credits")}
-      onNavigateModels={() => navigate("/models")}
+      onNavigateModels={modelsCatalogEnabled ? () => navigate("/models") : undefined}
       signedOut={signedOut}
       newLabel={newLabel}
       onNew={handleNew}
