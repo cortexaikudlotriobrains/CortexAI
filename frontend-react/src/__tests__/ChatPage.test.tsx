@@ -84,10 +84,6 @@ vi.mock("../components/results/ResultsSection", () => ({
   ResultsSection: () => <div data-testid="results-section" />,
 }));
 
-vi.mock("../components/shared/ExampleChips", () => ({
-  ExampleChips: () => <div data-testid="example-chips" />,
-}));
-
 describe("ChatPage authentication gate", () => {
   beforeEach(() => {
     Object.assign(mocks.authState, {
@@ -108,6 +104,9 @@ describe("ChatPage authentication gate", () => {
     cleanup();
     vi.clearAllMocks();
     resetStore();
+    delete (
+      window as unknown as { CORTEX_RUNTIME_CONFIG?: Record<string, unknown> }
+    ).CORTEX_RUNTIME_CONFIG;
   });
 
   it("shows a sign-in gate instead of the workspace for signed-out Cognito users", async () => {
@@ -123,7 +122,6 @@ describe("ChatPage authentication gate", () => {
     expect(screen.queryByText(/Backend not connected/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/port 8000/i)).not.toBeInTheDocument();
     expect(screen.queryByTestId("prompt-composer")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("example-chips")).not.toBeInTheDocument();
     expect(screen.getByText("Sign in to view history.")).toBeInTheDocument();
     expect(mocks.useModels).toHaveBeenCalledWith(false);
     expect(mocks.loadHistory).not.toHaveBeenCalled();
@@ -148,12 +146,17 @@ describe("ChatPage authentication gate", () => {
     mocks.subscriptionEntitlements.current = {
       plan: { code: "plus", display_name: "Plus", status: "active" },
     };
+    (
+      window as unknown as { CORTEX_RUNTIME_CONFIG?: Record<string, unknown> }
+    ).CORTEX_RUNTIME_CONFIG = { modelsCatalogEnabled: true };
 
     renderChatPage();
 
     expect(screen.queryByRole("region", { name: "Sign in to use CortexAI" })).not.toBeInTheDocument();
-    expect(screen.getByTestId("prompt-composer")).toBeInTheDocument();
-    expect(screen.getByTestId("example-chips")).toBeInTheDocument();
+    const composer = screen.getByTestId("prompt-composer");
+    expect(composer).toBeInTheDocument();
+    expect(composer.parentElement).toHaveAttribute("data-composer-placement", "center");
+    expect(screen.getByText("Hi, how can I help?")).toBeInTheDocument();
     expect(mocks.useModels).toHaveBeenCalledWith(true);
     await waitFor(() => {
       expect(mocks.loadHistory).toHaveBeenCalledWith({ restoreActiveTranscript: true });
@@ -163,6 +166,23 @@ describe("ChatPage authentication gate", () => {
     expect(
       screen.getByRole("menuitem", { name: "Plus plan, Manage subscription" }),
     ).toBeInTheDocument();
+
+    act(() => useChatStore.getState().setMode("compare"));
+    expect(screen.getByText("Hi, what would you like to compare?")).toBeInTheDocument();
+    expect(screen.queryByText("Hi, how can I help?")).not.toBeInTheDocument();
+
+    act(() => {
+      useChatStore.getState().beginTurn({
+        mode: "compare",
+        prompt: "Explain this",
+        submittedPrompt: "Explain this",
+        attachments: [],
+        responses: [],
+        status: "streaming",
+      });
+    });
+    expect(composer.parentElement).toHaveAttribute("data-composer-placement", "bottom");
+    expect(screen.queryByText("Hi, what would you like to compare?")).not.toBeInTheDocument();
   });
 
   it("retries the latest failed turn through regeneration", async () => {

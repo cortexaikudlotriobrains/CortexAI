@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   fetchHistory: vi.fn(),
   listWorkSessions: vi.fn(),
   loadHistory: vi.fn(),
+  runtimeConfig: { workEnabled: true, modelsCatalogEnabled: false },
   removeThread: vi.fn(),
   renameThread: vi.fn(),
 }));
@@ -31,7 +32,7 @@ vi.mock("../api/work", () => ({
 }));
 
 vi.mock("../config/runtimeConfig", () => ({
-  getRuntimeConfig: () => ({ workEnabled: true }),
+  getRuntimeConfig: () => mocks.runtimeConfig,
 }));
 
 vi.mock("../hooks/useChat", () => ({
@@ -52,6 +53,8 @@ describe("WorkspaceSidebar", () => {
     mocks.listWorkSessions.mockResolvedValue([workSession()]);
     mocks.fetchHistory.mockResolvedValue(historyEntries());
     mocks.fetchAnalysisRuns.mockResolvedValue([]);
+    mocks.runtimeConfig.workEnabled = true;
+    mocks.runtimeConfig.modelsCatalogEnabled = false;
     resetStores();
   });
 
@@ -123,6 +126,21 @@ describe("WorkspaceSidebar", () => {
     expect(screen.getByRole("button", { name: "Ask" })).toBeDisabled();
     expect(mocks.loadHistory).not.toHaveBeenCalled();
     expect(mocks.listWorkSessions).not.toHaveBeenCalled();
+  });
+
+  it("hides the Models destination while the runtime catalogue is disabled", () => {
+    renderSidebar("chat", "/", []);
+
+    expect(screen.queryByRole("button", { name: "Models" })).not.toBeInTheDocument();
+  });
+
+  it("restores the Models destination when the runtime catalogue is enabled", async () => {
+    const user = userEvent.setup();
+    mocks.runtimeConfig.modelsCatalogEnabled = true;
+    renderSidebar("chat", "/", []);
+
+    await user.click(screen.getByRole("button", { name: "Models" }));
+    expect(screen.getByTestId("location")).toHaveTextContent("/models");
   });
 });
 

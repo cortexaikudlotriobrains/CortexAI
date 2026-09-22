@@ -113,7 +113,7 @@ async function installResponsiveRoutes(page, state) {
         route.fulfill({
             status: 200,
             contentType: "application/javascript",
-            body: "window.CORTEX_RUNTIME_CONFIG = { enableDevSessionLogin: false, directAttachmentUploads: true, legacyAttachmentUploads: true, workEnabled: true };",
+            body: "window.CORTEX_RUNTIME_CONFIG = { enableDevSessionLogin: false, directAttachmentUploads: true, legacyAttachmentUploads: true, workEnabled: true, modelsCatalogEnabled: true };",
         }),
     );
 
@@ -165,6 +165,9 @@ async function installResponsiveRoutes(page, state) {
         }
         if (url.pathname === "/v1/whoami") {
             return json(route, whoAmI());
+        }
+        if (url.pathname === "/v1/auth/me") {
+            return json(route, authenticatedUser());
         }
         if (url.pathname === "/v1/models") {
             return json(route, {
@@ -772,6 +775,14 @@ function whoAmI() {
             cooldown_seconds: 120,
             scope: "provider_model",
         },
+    };
+}
+
+function authenticatedUser() {
+    return {
+        user_id: "responsive-test-user",
+        email: "responsive.user@example.com",
+        display_name: "Responsive User",
     };
 }
 

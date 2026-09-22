@@ -8,6 +8,9 @@ describe("AccountMenu", () => {
     cleanup();
     vi.useRealTimers();
     vi.restoreAllMocks();
+    delete (
+      window as unknown as { CORTEX_RUNTIME_CONFIG?: Record<string, unknown> }
+    ).CORTEX_RUNTIME_CONFIG;
   });
 
   it("shows Log off from the account icon for signed-in Cognito users", async () => {
@@ -185,6 +188,7 @@ describe("AccountMenu", () => {
   it("shows Models as the first account menu tile when wired", async () => {
     const user = userEvent.setup();
     const onModels = vi.fn();
+    setRuntimeConfig({ modelsCatalogEnabled: true });
 
     render(
       <AccountMenu
@@ -205,6 +209,23 @@ describe("AccountMenu", () => {
     await user.click(within(menu).getByRole("menuitem", { name: /Models/ }));
 
     expect(onModels).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides Models when the runtime catalogue is disabled", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <AccountMenu
+        authEnabled={false}
+        loggedIn={false}
+        onModels={vi.fn()}
+        onUsageInsights={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Guest account" }));
+
+    expect(screen.queryByRole("menuitem", { name: /Models/ })).not.toBeInTheDocument();
   });
 
   it("shows the current plan and opens billing before other account destinations", async () => {
@@ -308,3 +329,9 @@ describe("AccountMenu", () => {
     expect(screen.queryByRole("menuitem", { name: "Sign in" })).not.toBeInTheDocument();
   });
 });
+
+function setRuntimeConfig(value: Record<string, unknown>): void {
+  (
+    window as unknown as { CORTEX_RUNTIME_CONFIG?: Record<string, unknown> }
+  ).CORTEX_RUNTIME_CONFIG = value;
+}

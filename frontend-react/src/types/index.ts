@@ -522,6 +522,12 @@ export interface CognitoConfig {
   logoutUrl?: string;
 }
 
+export interface AuthenticatedUser {
+  user_id: string;
+  email: string | null;
+  display_name: string | null;
+}
+
 export interface WhoAmIBaseline {
   provider: string;
   model: string;

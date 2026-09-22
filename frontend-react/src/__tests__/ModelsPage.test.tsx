@@ -70,12 +70,18 @@ describe("ModelsPage", () => {
   beforeEach(() => {
     resetStore();
     hookMocks.subscriptionState.current = { entitlements: null, plans: null };
+    (
+      window as unknown as { CORTEX_RUNTIME_CONFIG?: Record<string, unknown> }
+    ).CORTEX_RUNTIME_CONFIG = { modelsCatalogEnabled: true };
   });
 
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
     resetStore();
+    delete (
+      window as unknown as { CORTEX_RUNTIME_CONFIG?: Record<string, unknown> }
+    ).CORTEX_RUNTIME_CONFIG;
   });
 
   it("renders the Models route with the compact task-first catalog", () => {

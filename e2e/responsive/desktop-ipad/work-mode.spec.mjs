@@ -1,13 +1,53 @@
 import { expect, expectNoHorizontalOverflow, test } from "../fixtures/responsive-e2e.mjs";
 
+test("desktop and iPad empty Ask, Compare, and Work composers share one vertical center", async ({ responsiveApp }) => {
+    const { page, state } = responsiveApp;
+    state.subscriptionPlan = "pro";
+
+    for (const viewport of [
+        { width: 1440, height: 900 },
+        { width: 1024, height: 768 },
+    ]) {
+        await page.setViewportSize(viewport);
+        await page.goto("/");
+
+        await expect(page.getByText("Hi, how can I help?", { exact: true })).toBeVisible();
+        const chatComposer = page.locator("#promptInput").locator("xpath=../..");
+        const askCenter = await verticalCenter(chatComposer);
+
+        const modeNavigation = page.getByRole("navigation", { name: "Workspace mode" });
+        await modeNavigation.getByRole("button", { name: "Compare", exact: true }).click();
+        await expect(page.getByText("Hi, what would you like to compare?", { exact: true })).toBeVisible();
+        const compareCenter = await verticalCenter(chatComposer);
+
+        await modeNavigation.getByRole("button", { name: "Work", exact: true }).click();
+        await expect(page).toHaveURL(/\/work$/);
+        const workComposer = page.getByRole("textbox", { name: "Work goal" }).locator("..");
+        await expect(workComposer).toBeVisible();
+        const workCenter = await verticalCenter(workComposer);
+
+        expect(Math.abs(compareCenter - askCenter)).toBeLessThanOrEqual(1);
+        expect(Math.abs(workCenter - askCenter)).toBeLessThanOrEqual(1);
+    }
+});
+
 test("desktop Work empty state starts a real mocked run and renders its deliverable", async ({ responsiveApp }) => {
     const { page, state } = responsiveApp;
     state.subscriptionPlan = "pro";
     state.workStartDelayMs = 900;
     await page.goto("/work");
 
-    await expect(page.getByRole("heading", { name: "What should I work on?" })).toBeVisible();
-    await expect(page.locator("aside[aria-label='Primary navigation']").getByRole("button", { name: "Work", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Start a task" })).toBeVisible();
+    await expect(
+        page
+            .locator("aside[aria-label='Primary navigation']")
+            .getByRole("button", { name: "Work", exact: true }),
+    ).toBeHidden();
+    const workTab = page
+        .getByRole("navigation", { name: "Workspace mode" })
+        .getByRole("button", { name: "Work", exact: true });
+    await expect(workTab).toHaveAttribute("aria-current", "page");
+    await expect(workTab.locator("svg")).toBeVisible();
     await expect(page.getByRole("textbox", { name: "Work goal" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Web access: Auto" })).toBeVisible();
     await expectNoHorizontalOverflow(page);
@@ -110,7 +150,7 @@ test("desktop returns from Ask to the remembered Work session without showing th
     await page.getByRole("navigation", { name: "Workspace mode" }).getByRole("button", { name: "Work" }).click();
     await expect(page).toHaveURL(/\/work\/work-session-1$/);
     await expect(page.getByRole("heading", { name: "Prepare a market report" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "What should I work on?" })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Start a task" })).toHaveCount(0);
 });
 
 function workSession(status) {
@@ -140,6 +180,12 @@ function workRun(status) {
 
 function workEvent(sequence, type, message, payload = {}) {
     return { id: `event-${sequence}`, sequence, type, display_message: message, payload, created_at: "2026-08-20T12:03:00Z" };
+}
+
+async function verticalCenter(locator) {
+    const bounds = await locator.boundingBox();
+    expect(bounds).not.toBeNull();
+    return bounds.y + bounds.height / 2;
 }
 
 function seedWorkHistory(state) {

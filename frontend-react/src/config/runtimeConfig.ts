@@ -5,6 +5,7 @@ export interface CortexRuntimeConfig {
   directAttachmentUploads?: boolean;
   legacyAttachmentUploads?: boolean;
   workEnabled?: boolean;
+  modelsCatalogEnabled?: boolean;
 }
 
 export type AttachmentUploadMode = "direct" | "legacy" | "disabled";

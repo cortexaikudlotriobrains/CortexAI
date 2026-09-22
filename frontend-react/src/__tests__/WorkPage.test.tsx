@@ -160,6 +160,27 @@ describe("WorkPage terminal event synchronization", () => {
     useWorkStore.getState().resetWorkspace();
   });
 
+  it("keeps the new-work introduction concise while preserving detailed prompts", async () => {
+    render(
+      <MemoryRouter initialEntries={["/work"]}>
+        <Routes>
+          <Route path="/work" element={<WorkPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("heading", { name: "Start a task" })).toBeInTheDocument();
+    expect(
+      screen.getByText("Research, analyze files, and create deliverables."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Work mode")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Create a report" }));
+    expect(screen.getByRole("textbox", { name: "Work goal" })).toHaveValue(
+      "Analyze these files and create a report",
+    );
+  });
+
   it("loads remaining events before stopping when the refreshed run is already complete", async () => {
     render(
       <MemoryRouter initialEntries={["/work/work-session-1"]}>
@@ -230,7 +251,7 @@ describe("WorkPage terminal event synchronization", () => {
 
     expect(screen.getByText("Loading Work...")).toBeInTheDocument();
     expect(
-      screen.queryByRole("heading", { name: "What should I work on?" }),
+      screen.queryByRole("heading", { name: "Start a task" }),
     ).not.toBeInTheDocument();
 
     sessionRequest.resolve(workSession());
@@ -239,7 +260,7 @@ describe("WorkPage terminal event synchronization", () => {
       await screen.findByRole("heading", { name: "Can you try again" }),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("heading", { name: "What should I work on?" }),
+      screen.queryByRole("heading", { name: "Start a task" }),
     ).not.toBeInTheDocument();
   });
 
@@ -266,7 +287,7 @@ describe("WorkPage terminal event synchronization", () => {
     expect(screen.getByRole("heading", { name: "Prepare a launch report" })).toBeInTheDocument();
     expect(screen.getByText("Starting", { exact: true })).toBeInTheDocument();
     expect(
-      screen.queryByRole("heading", { name: "What should I work on?" }),
+      screen.queryByRole("heading", { name: "Start a task" }),
     ).not.toBeInTheDocument();
 
     pendingStart.resolve(workRun({ instruction: "Prepare a launch report" }));

@@ -44,7 +44,7 @@ interface PlanAction {
 }
 
 export function PricingPage() {
-  const { whoAmI, cognitoConfig, loading: authLoading, loggedIn, login, logout } = useAuth();
+  const { cognitoConfig, loading: authLoading, loggedIn, login, logout } = useAuth();
   const subscriptionState = useSubscription({ authLoading, loggedIn });
   const authEnabled = cognitoConfig?.enabled ?? false;
   const accountSubscription = getAccountMenuSubscriptionPresentation(
@@ -58,7 +58,6 @@ export function PricingPage() {
       authLoading={authLoading}
       authEnabled={authEnabled}
       loggedIn={loggedIn}
-      whoAmI={whoAmI}
       onLogin={login}
       onLogout={logout}
       planLabel={loggedIn ? accountSubscription.planLabel : undefined}

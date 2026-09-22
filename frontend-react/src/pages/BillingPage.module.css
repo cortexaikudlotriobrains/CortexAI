@@ -221,6 +221,32 @@
   font: 500 12px/1.5 var(--font-sans);
 }
 
+.planCopy {
+  min-width: 0;
+}
+
+.accountEmail {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+  margin-top: 20px;
+}
+
+.accountEmail span {
+  color: var(--cx-ink-400);
+  font: 700 9px/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.accountEmail strong {
+  overflow: hidden;
+  color: var(--cx-ink-700);
+  font: 600 11.5px/1.35 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .planMark {
   width: 48px;
   height: 48px;

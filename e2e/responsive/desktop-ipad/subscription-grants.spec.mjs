@@ -28,6 +28,8 @@ for (const width of [1440, 390]) {
             await page.goto("/account/billing");
             await expect(page.getByText(/Your plan access is provided by CortexAI/)).toBeVisible();
             await expect(page.getByText("Usage resets August 1, 2026", { exact: true })).toBeVisible();
+            await expect(page.getByText("Account email", { exact: true })).toBeVisible();
+            await expect(page.getByText("responsive.user@example.com", { exact: true })).toBeVisible();
             await expect(page.getByRole("button", { name: /Manage subscription|Update payment method/ })).toHaveCount(0);
             await expect(page.getByText(/Free allowances|Renews/)).toHaveCount(0);
             await expectNoHorizontalOverflow(page);

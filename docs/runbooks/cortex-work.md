@@ -151,7 +151,7 @@ requires a reviewed Secrets Manager ARN plus a Managed Agent provider vault ID.
 
 Use a signed internal account. Never use the fake provider in production.
 
-1. Open `/work`; confirm the exact empty headline `What should I work on?`.
+1. Open `/work`; confirm the concise empty headline `Start a task`.
 2. Upload a small owned file, set a 25k budget, and start a run.
 3. Record session/run IDs and confirm `run_created`, planning/progress, and SSE
    heartbeats. Disconnect the browser for at least one edge timeout, reconnect,

@@ -304,6 +304,7 @@ def app(monkeypatch):
     monkeypatch.setenv("ALLOW_NON_POSTGRES_DATABASE_URL", "true")
     monkeypatch.setenv("DB_SCHEMA", "main")
     monkeypatch.setenv("ENABLE_DEV_SESSION_LOGIN", "false")
+    monkeypatch.setenv("ENABLE_MODELS_CATALOG", "true")
     monkeypatch.delenv("APP_ENV", raising=False)
     monkeypatch.delenv("ENVIRONMENT", raising=False)
     monkeypatch.delenv("ENV", raising=False)
@@ -466,7 +467,8 @@ def test_auth_success_redirect_marks_fresh_login():
     )
 
 
-def test_runtime_config_js_defaults_to_request_origin(client):
+def test_runtime_config_js_defaults_to_request_origin(client, monkeypatch):
+    monkeypatch.delenv("ENABLE_MODELS_CATALOG", raising=False)
     r = client.get("/runtime-config.js")
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("application/javascript")
@@ -476,6 +478,7 @@ def test_runtime_config_js_defaults_to_request_origin(client):
     assert payload["enableDevSessionLogin"] is False
     assert payload["directAttachmentUploads"] is False
     assert payload["legacyAttachmentUploads"] is True
+    assert payload["modelsCatalogEnabled"] is False
 
 
 def test_runtime_config_js_honors_frontend_env_overrides(client, monkeypatch):
@@ -485,6 +488,7 @@ def test_runtime_config_js_honors_frontend_env_overrides(client, monkeypatch):
     monkeypatch.setenv("FRONTEND_RUNTIME_DEV_SESSION_LOGIN_TOKEN", "local-token")
     monkeypatch.setenv("ATTACHMENTS_DIRECT_UPLOAD_ENABLED", "true")
     monkeypatch.setenv("ATTACHMENTS_LEGACY_PROXY_UPLOAD_ENABLED", "false")
+    monkeypatch.setenv("ENABLE_MODELS_CATALOG", "true")
 
     r = client.get("/runtime-config.js")
     assert r.status_code == 200
@@ -494,6 +498,7 @@ def test_runtime_config_js_honors_frontend_env_overrides(client, monkeypatch):
     assert payload["devSessionLoginToken"] == "local-token"
     assert payload["directAttachmentUploads"] is True
     assert payload["legacyAttachmentUploads"] is False
+    assert payload["modelsCatalogEnabled"] is True
 
 
 def test_runtime_config_js_disables_dev_session_login_in_production(client, monkeypatch):
@@ -598,6 +603,21 @@ def test_models_catalog_rejects_api_key_only_auth(client):
     r = client.get("/v1/models", headers={"X-API-Key": "dev-key-1"})
     assert r.status_code == 403
     assert r.json()["detail"]["code"] == "session_auth_required"
+
+
+def test_models_catalog_returns_not_found_when_disabled(client, monkeypatch):
+    monkeypatch.setenv("ENABLE_MODELS_CATALOG", "false")
+
+    authenticated = client.get(
+        "/v1/models?enabled_only=true",
+        cookies={"cortex_session": "test-session-cookie"},
+    )
+    unauthenticated = client.get("/v1/models?enabled_only=true")
+
+    assert authenticated.status_code == 404
+    assert authenticated.json()["detail"] == "Not Found"
+    assert unauthenticated.status_code == 404
+    assert unauthenticated.json()["detail"] == "Not Found"
 
 
 def test_providers_catalog_returns_catalog_and_model_counts(client):

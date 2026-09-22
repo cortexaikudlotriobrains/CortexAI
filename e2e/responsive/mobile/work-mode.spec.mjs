@@ -9,7 +9,7 @@ test("mobile Work keeps the four-item navigation and compact empty composer", as
     await expect(nav).toBeVisible();
     await expect(nav.getByRole("button")).toHaveCount(4);
     await expect(nav.getByRole("button", { name: "Work" })).toHaveAttribute("aria-current", "page");
-    await expect(page.getByRole("heading", { name: "What should I work on?" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Start a task" })).toBeVisible();
     await expect(page.getByRole("textbox", { name: "Work goal" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Web access: Auto" })).toBeVisible();
     await expect(page.locator("aside[aria-label='Primary navigation']")).toBeHidden();

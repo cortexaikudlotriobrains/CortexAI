@@ -186,6 +186,8 @@ describe("BillingPageContent", () => {
     expect(screen.getByText("PLUS PLAN")).toBeInTheDocument();
     expect(screen.getByText("Active")).toBeInTheDocument();
     expect(screen.getByText("Renews August 18, 2026")).toBeInTheDocument();
+    expect(screen.getByText("Account email")).toBeInTheDocument();
+    expect(screen.getByText("account.owner@example.com")).toBeInTheDocument();
     expect(screen.getByText("124 / 1,000")).toBeInTheDocument();
     expect(screen.getByRole("progressbar", { name: "AI credits" })).toHaveAttribute(
       "aria-valuenow",
@@ -335,6 +337,7 @@ function billingElement(overrides: Partial<React.ComponentProps<typeof BillingPa
 
 function billingProps(overrides: Partial<React.ComponentProps<typeof BillingPageContent>> = {}) {
   return {
+    accountEmail: "account.owner@example.com",
     plans: plansResponse(),
     subscription: null,
     entitlements: null,

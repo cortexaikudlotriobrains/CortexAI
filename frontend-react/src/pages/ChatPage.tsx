@@ -4,7 +4,6 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { PromptComposer } from "../components/composer/PromptComposer";
 import { ResultsSection } from "../components/results/ResultsSection";
 import { ErrorBanner } from "../components/shared/ErrorBanner";
-import { ExampleChips } from "../components/shared/ExampleChips";
 import { CortexIcon } from "../components/shared/CortexIcon";
 import { ProviderLogo } from "../components/shared/ProviderLogo";
 import { AccountMenu } from "../components/layout/AccountMenu";
@@ -42,7 +41,7 @@ interface MobileHistoryDateGroup {
 export function ChatPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { whoAmI, cognitoConfig, loading: authLoading, loggedIn, login, logout } = useAuth();
+  const { cognitoConfig, loading: authLoading, loggedIn, login, logout } = useAuth();
   const authEnabled = cognitoConfig?.enabled ?? false;
   const signedOut = !authLoading && authEnabled && !loggedIn;
   const workspaceReady = !authLoading && !signedOut;
@@ -52,7 +51,8 @@ export function ChatPage() {
     subscriptionState.entitlements,
   );
   const accountBillingDestination = accountSubscription.billingDestination;
-  const { models, loading: modelsLoading } = useModels(workspaceReady);
+  const modelsCatalogEnabled = getRuntimeConfig().modelsCatalogEnabled === true;
+  const { models, loading: modelsLoading } = useModels(workspaceReady && modelsCatalogEnabled);
   const { removeThread } = useHistory();
   const { submit, regenerate, cancel } = useChat();
   const { theme, toggleTheme } = useTheme();
@@ -83,6 +83,8 @@ export function ChatPage() {
   });
   const showComposerSheet = !composerCollapsed;
   const showComposerBackdrop = showComposerSheet && hasTurns;
+  const centerComposer =
+    workspaceReady && mobilePanel === "chat" && !hasTurns && !streaming && !error;
 
   useEffect(() => {
     const requestedMode = new URLSearchParams(location.search).get("mode");
@@ -184,9 +186,7 @@ export function ChatPage() {
           setMobilePanel("chat");
           setComposerCollapsed(false);
         }}
-        whoAmI={whoAmI}
         loggedIn={loggedIn}
-        onLogin={authEnabled ? login : undefined}
       />
 
       <main className={styles.main}>
@@ -235,7 +235,10 @@ export function ChatPage() {
               aria-pressed={mode === "single"}
               disabled={signedOut}
             >
-              Ask
+              <span className={styles.tabIcon}>
+                <CortexIcon name="ask" />
+              </span>
+              <span>Ask</span>
             </button>
             <button
               id="btnCompareMode"
@@ -245,7 +248,10 @@ export function ChatPage() {
               aria-pressed={mode === "compare"}
               disabled={signedOut}
             >
-              Compare
+              <span className={styles.tabIcon}>
+                <CortexIcon name="compare" />
+              </span>
+              <span>Compare</span>
             </button>
             {getRuntimeConfig().workEnabled !== false && (
               <button
@@ -255,7 +261,10 @@ export function ChatPage() {
                 aria-label="Work"
                 disabled={signedOut}
               >
-                Work
+                <span className={styles.tabIcon}>
+                  <CortexIcon name="work" />
+                </span>
+                <span>Work</span>
               </button>
             )}
           </nav>
@@ -294,7 +303,7 @@ export function ChatPage() {
           onManageBilling={() => navigate("/account/billing")}
         />
 
-        <div className={styles.canvas}>
+        <div className={`${styles.canvas} ${centerComposer ? styles.canvasEmpty : ""}`}>
           {authLoading ? (
             <WorkspaceLoading />
           ) : signedOut ? (
@@ -321,7 +330,6 @@ export function ChatPage() {
                   onDismiss={() => setError(null)}
                 />
               )}
-              <ExampleChips />
             </>
           )}
         </div>
@@ -336,7 +344,20 @@ export function ChatPage() {
             />
 
             {/* Composer: inline on desktop, fixed sheet overlay on mobile */}
-            <div className={styles.composerWrap} data-collapsed={composerCollapsed}>
+            <div
+              className={`${styles.composerWrap} ${
+                centerComposer ? styles.composerWrapCentered : ""
+              }`}
+              data-collapsed={composerCollapsed}
+              data-composer-placement={centerComposer ? "center" : "bottom"}
+            >
+              {centerComposer && (
+                <p className={styles.composerGreeting}>
+                  {mode === "compare"
+                    ? "Hi, what would you like to compare?"
+                    : "Hi, how can I help?"}
+                </p>
+              )}
               {/* Handle + collapse chevron — mobile sheet header */}
               <div className={styles.composerSheetHeader} aria-hidden="true">
                 <div className={styles.composerSheetHandle} />

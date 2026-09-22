@@ -6,8 +6,11 @@ import { ModelsPage } from "./pages/ModelsPage";
 import { PricingPage } from "./pages/PricingPage";
 import { UsageInsightsPage } from "./pages/UsageInsightsPage";
 import { WorkPage } from "./pages/WorkPage";
+import { getRuntimeConfig } from "./config/runtimeConfig";
 
 export function App() {
+  const modelsCatalogEnabled = getRuntimeConfig().modelsCatalogEnabled === true;
+
   return (
     <BrowserRouter>
       <Routes>
@@ -16,7 +19,10 @@ export function App() {
         <Route path="/work" element={<WorkPage />} />
         <Route path="/work/:workSessionId" element={<WorkPage />} />
         <Route path="/credits" element={<CreditsPage />} />
-        <Route path="/models" element={<ModelsPage />} />
+        <Route
+          path="/models"
+          element={modelsCatalogEnabled ? <ModelsPage /> : <Navigate to="/" replace />}
+        />
         <Route path="/pricing" element={<PricingPage />} />
         <Route path="/account/billing" element={<BillingPage />} />
         {/* Cognito redirects back to /auth?code=...; the backend handles OAuth exchange. */}

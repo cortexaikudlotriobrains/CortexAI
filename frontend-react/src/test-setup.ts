@@ -13,3 +13,6 @@ if (!window.matchMedia) {
       dispatchEvent: () => false,
     }) as unknown as MediaQueryList;
 }
+
+type CanvasGetContext = HTMLCanvasElement["getContext"];
+HTMLCanvasElement.prototype.getContext = (() => null) as CanvasGetContext;

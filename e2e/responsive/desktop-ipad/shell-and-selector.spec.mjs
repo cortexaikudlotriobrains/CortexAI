@@ -13,9 +13,23 @@ test("desktop uses the sidebar and top mode navigation", async ({ responsiveApp 
     const { page } = responsiveApp;
     await page.setViewportSize({ width: 1440, height: 900 });
 
-    await expect(page.locator("aside[aria-label='Primary navigation']")).toBeVisible();
+    const sidebar = page.locator("aside[aria-label='Primary navigation']");
+    await expect(sidebar).toBeVisible();
+    await expect(sidebar).not.toContainText("responsive-test-user");
+    await expect(sidebar).not.toContainText("Session active");
+    const sidebarBounds = await sidebar.boundingBox();
+    const historyBounds = await sidebar.locator("[data-sidebar-history]").boundingBox();
+    expect(sidebarBounds).not.toBeNull();
+    expect(historyBounds).not.toBeNull();
+    expect(Math.abs(
+        sidebarBounds.y + sidebarBounds.height - (historyBounds.y + historyBounds.height),
+    )).toBeLessThanOrEqual(1);
+    await expect(sidebar.getByRole("button", { name: "Ask", exact: true })).toBeHidden();
+    await expect(sidebar.getByRole("button", { name: "Compare", exact: true })).toBeHidden();
+    await expect(sidebar.getByRole("button", { name: "Work", exact: true })).toBeHidden();
     await expect(page.getByRole("navigation", { name: "Mobile navigation" })).toBeHidden();
     await expect(page.locator("#btnSingleMode")).toBeVisible();
+    await expect(page.locator("#btnSingleMode svg")).toBeVisible();
     await expect(page.locator("#promptInput")).toBeVisible();
     await expectNoHorizontalOverflow(page);
 });
@@ -65,7 +79,10 @@ test("desktop sidebar collapses to an icon rail and expands again", async ({ res
     const collapsedWidth = await sidebar.evaluate(element => element.getBoundingClientRect().width);
     expect(collapsedWidth).toBeLessThan(expandedWidth);
 
-    await sidebar.getByRole("button", { name: "Compare" }).click();
+    await page
+        .getByRole("navigation", { name: "Workspace mode" })
+        .getByRole("button", { name: "Compare" })
+        .click();
     await expect(page.locator("#btnCompareMode")).toHaveClass(/activeTab/);
 
     await page.getByRole("button", { name: "Expand sidebar" }).click();
@@ -194,7 +211,7 @@ test("desktop sidebar stays consistent across Chat, Work, Usage, and AI credits"
     await sidebar.getByRole("button", { name: "AI credits" }).click();
     await expect(page).toHaveURL(/\/credits$/);
     await expect(sidebar).toHaveAttribute("data-collapsed", "true");
-    await expect(sidebar.getByRole("button", { name: "Work", exact: true })).toBeVisible();
+    await expect(sidebar.getByRole("button", { name: "Work", exact: true })).toBeHidden();
 
     await sidebar.getByRole("button", { name: "Expand sidebar" }).click();
     await expect(
@@ -205,16 +222,24 @@ test("desktop sidebar stays consistent across Chat, Work, Usage, and AI credits"
 
     await sidebar.getByRole("button", { name: "New chat" }).click();
     await expect(page).toHaveURL(/\/$/);
-    await expect(sidebar.getByRole("button", { name: "Ask", exact: true })).toHaveAttribute(
-        "aria-current",
-        "page",
+    await expect(
+        page
+            .getByRole("navigation", { name: "Workspace mode" })
+            .getByRole("button", { name: "Ask", exact: true }),
+    ).toHaveAttribute(
+        "aria-pressed",
+        "true",
     );
 
     await sidebar.getByRole("button", { name: "Usage" }).click();
     await expect(page).toHaveURL(/\/usage$/);
-    await expect(sidebar.getByRole("button", { name: "Work", exact: true })).toBeVisible();
+    await expect(sidebar.getByRole("button", { name: "Work", exact: true })).toBeHidden();
 
-    await sidebar.getByRole("button", { name: "Work", exact: true }).click();
+    await sidebar.getByRole("button", { name: "New chat" }).click();
+    await page
+        .getByRole("navigation", { name: "Workspace mode" })
+        .getByRole("button", { name: "Work", exact: true })
+        .click();
     await expect(page).toHaveURL(/\/work$/);
     const chatHistory = sidebar.getByRole("button", {
         name: /Plan a multi-region platform migration.*Ask,/,
@@ -301,10 +326,20 @@ test("desktop sidebar shows a new chat before the response is persisted", async 
 
     const sidebar = page.locator("aside[aria-label='Primary navigation']");
     const preview = sidebar.locator("[data-current-chat-preview]");
+    const sourcesEnabled = await page
+        .getByRole("switch", { name: "Research mode" })
+        .getAttribute("aria-checked") === "true";
+    const loadingOrb = page.locator("canvas.response-loading-orb");
     const workRow = sidebar.getByRole("button", {
         name: "Older Work history. Work, completed",
     });
     try {
+        await expect(loadingOrb).toBeVisible();
+        await expect(loadingOrb).toHaveAttribute(
+            "data-loading-state",
+            sourcesEnabled ? "searching" : "working",
+        );
+        await expect(loadingOrb).toHaveAttribute("aria-hidden", "true");
         await expect(
             preview.getByRole("button", { name: new RegExp(`${prompt}\\. Ask,`) }),
         ).toBeVisible();
@@ -383,7 +418,7 @@ test("dark theme gives enabled Ask feature chips a distinct accent state", async
         if ((await featureSwitch.getAttribute("aria-checked")) !== "true") {
             await featureSwitch.click();
         }
-        await page.getByRole("heading", { level: 2 }).hover();
+        await page.getByRole("navigation", { name: "Workspace mode" }).hover();
         await expect(featureSwitch).toHaveCSS("background-color", "rgb(52, 52, 103)");
         await expect(featureSwitch).toHaveCSS("color", "rgb(255, 255, 255)");
         await expect(featureSwitch).toHaveCSS("box-shadow", /rgb\(139, 139, 240\)/);
@@ -416,41 +451,28 @@ test("dark theme keeps the top Ask and Compare tabs legible", async ({ responsiv
     await expect(askTab).toHaveCSS("color", "rgb(174, 182, 194)");
 });
 
-test("dark theme keeps the landing starter copy legible", async ({ responsiveApp }) => {
+test("desktop centers the empty Ask and Compare composer, then docks it after submit", async ({ responsiveApp }) => {
     const { page } = responsiveApp;
     await page.setViewportSize({ width: 1440, height: 900 });
 
-    await page.getByRole("button", { name: "Account" }).click();
-    await page.getByRole("menuitem", { name: "Switch to dark theme" }).click();
-    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    const composer = page.locator("[data-composer-placement]");
+    await expect(composer).toHaveAttribute("data-composer-placement", "center");
+    await expectCenteredComposer(page);
+    await expect(page.getByRole("heading", { name: "Ask anything" })).toHaveCount(0);
+    await expect(page.getByText("Hi, how can I help?", { exact: true })).toBeVisible();
 
-    const eyebrow = page.getByText("Your AI workspace", { exact: true });
-    const heading = page.getByRole("heading", {
-        name: "Your AI workspace for answers, analysis, and model comparison",
-    });
-    const description = page.getByText(/Ask questions, analyze files, generate content/);
+    await page.locator("#btnCompareMode").click();
+    await expect(composer).toHaveAttribute("data-composer-placement", "center");
+    await expectCenteredComposer(page);
+    await expect(page.getByRole("heading", { name: "Compare answers" })).toHaveCount(0);
+    await expect(
+        page.getByText("Hi, what would you like to compare?", { exact: true }),
+    ).toBeVisible();
 
-    await expect(eyebrow).toHaveCSS(
-        "color",
-        "rgb(248, 250, 252)",
-    );
-    await expect(eyebrow).toHaveCSS("font-weight", "800");
-    await expect(heading).toHaveCSS("color", "rgb(255, 255, 255)");
-    await expect(heading).toHaveCSS("font-weight", "800");
-    await expect(description).toHaveCSS("color", "rgb(248, 250, 252)");
-    await expect(description).toHaveCSS("font-weight", "700");
-    for (const textBlock of [eyebrow, heading, description]) {
-        await expect(textBlock).not.toHaveCSS("text-shadow", "none");
-    }
-
-    const example = page.getByRole("button", {
-        name: "Help me debug a failing FastAPI stream",
-    });
-    await expect(example).toHaveCSS("color", "rgb(255, 255, 255)");
-    await expect(example).toHaveCSS("font-weight", "700");
-    await expect(example).not.toHaveCSS("text-shadow", "none");
-    await expect(example).toHaveCSS("border-top-color", "rgb(58, 70, 84)");
-    await expect(example.locator("span").first()).toHaveCSS("color", "rgb(255, 255, 255)");
+    await page.locator("#promptInput").fill("Compare two rollout strategies");
+    await page.locator("#submitBtn").click();
+    await expect(composer).toHaveAttribute("data-composer-placement", "bottom");
+    await expect(page.getByText("Hi, what would you like to compare?", { exact: true })).toHaveCount(0);
 });
 
 test("Compare sources and Improve use the same styling for matching states", async ({ responsiveApp }) => {
@@ -685,8 +707,13 @@ test("iPad landscape keeps the desktop workspace usable", async ({ responsiveApp
     const { page } = responsiveApp;
     await page.setViewportSize({ width: 1024, height: 768 });
 
-    await expect(page.locator("aside[aria-label='Primary navigation']")).toBeVisible();
+    const sidebar = page.locator("aside[aria-label='Primary navigation']");
+    await expect(sidebar).toBeVisible();
+    await expect(sidebar.getByRole("button", { name: "Ask", exact: true })).toBeVisible();
+    await expect(sidebar.getByRole("button", { name: "Compare", exact: true })).toBeVisible();
+    await expect(sidebar.getByRole("button", { name: "Work", exact: true })).toBeVisible();
     await expect(page.locator("#btnSingleMode")).toBeVisible();
+    await expect(page.locator("#btnSingleMode svg")).toBeHidden();
     await expect(page.getByRole("navigation", { name: "Mobile navigation" })).toBeHidden();
     const composerWidth = await page.locator("#promptInput").evaluate(element => {
         return element.parentElement?.parentElement?.getBoundingClientRect().width ?? 0;
@@ -702,6 +729,19 @@ async function expectChipTooltip(page, switchName, tooltipText) {
     await chip.hover();
     await expect(tooltip).toBeVisible();
     await expect(tooltip).toHaveCSS("opacity", "1");
+}
+
+async function expectCenteredComposer(page) {
+    const composer = page.locator("[data-composer-placement='center']");
+    const card = page.locator("#promptInput").locator("xpath=../..");
+    await expect.poll(async () => {
+        const composerBounds = await composer.boundingBox();
+        const cardBounds = await card.boundingBox();
+        if (!composerBounds || !cardBounds) return Number.POSITIVE_INFINITY;
+        const composerCenter = composerBounds.y + composerBounds.height / 2;
+        const cardCenter = cardBounds.y + cardBounds.height / 2;
+        return Math.abs(composerCenter - cardCenter);
+    }).toBeLessThanOrEqual(1);
 }
 
 async function chipVisualStyle(chip) {

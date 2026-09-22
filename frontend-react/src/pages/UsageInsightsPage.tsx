@@ -19,7 +19,7 @@ import styles from "./UsageInsightsPage.module.css";
 
 export function UsageInsightsPage() {
   const navigate = useNavigate();
-  const { whoAmI, cognitoConfig, loading: authLoading, loggedIn, login, logout } = useAuth();
+  const { cognitoConfig, loading: authLoading, loggedIn, login, logout } = useAuth();
   const { cancel } = useChat();
   const { theme, toggleTheme } = useTheme();
   const setMode = useChatStore((s) => s.setMode);
@@ -118,9 +118,7 @@ export function UsageInsightsPage() {
         activeView="usage"
         authLoading={authLoading}
         authEnabled={authEnabled}
-        whoAmI={whoAmI}
         loggedIn={loggedIn}
-        onLogin={authEnabled ? login : undefined}
       />
 
       <main className={styles.main}>

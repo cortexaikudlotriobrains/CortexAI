@@ -7,7 +7,7 @@ import { useChat } from "../../hooks/useChat";
 import { useHistory } from "../../hooks/useHistory";
 import { useChatStore } from "../../store/chatStore";
 import { useWorkStore } from "../../store/workStore";
-import type { ChatMode, HistoryThread, WhoAmIResponse, WorkSession } from "../../types";
+import type { ChatMode, HistoryThread, WorkSession } from "../../types";
 import { Sidebar, type SidebarView } from "./Sidebar";
 
 interface WorkspaceSidebarProps {
@@ -15,8 +15,6 @@ interface WorkspaceSidebarProps {
   authLoading: boolean;
   authEnabled: boolean;
   loggedIn: boolean;
-  whoAmI?: WhoAmIResponse | null;
-  onLogin?: () => void;
   restoreActiveTranscript?: boolean;
   onChatThreadSelected?: () => void;
   newLabel?: "New chat" | "New work";
@@ -31,8 +29,6 @@ export function WorkspaceSidebar({
   authLoading,
   authEnabled,
   loggedIn,
-  whoAmI,
-  onLogin,
   restoreActiveTranscript = false,
   onChatThreadSelected,
   newLabel = "New chat",
@@ -53,6 +49,7 @@ export function WorkspaceSidebar({
   const signedOut = !authLoading && authEnabled && !loggedIn;
   const workspaceReady = !authLoading && !signedOut;
   const workEnabled = getRuntimeConfig().workEnabled !== false;
+  const modelsCatalogEnabled = getRuntimeConfig().modelsCatalogEnabled === true;
   const usesProvidedWorkSessions = workSessions !== undefined;
   const workDestinationSessionId = activeWorkSessionId ?? rememberedWorkSessionId;
   const workDestination = workDestinationSessionId
@@ -121,10 +118,7 @@ export function WorkspaceSidebar({
       onNavigateWork={workEnabled ? () => navigate(workDestination) : undefined}
       onNavigateUsage={() => navigate("/usage")}
       onNavigateCredits={() => navigate("/credits")}
-      onNavigateModels={() => navigate("/models")}
-      whoAmI={whoAmI}
-      loggedIn={loggedIn}
-      onLogin={authEnabled ? onLogin : undefined}
+      onNavigateModels={modelsCatalogEnabled ? () => navigate("/models") : undefined}
       signedOut={signedOut}
       newLabel={newLabel}
       onNew={handleNew}

@@ -70,6 +70,7 @@ def build_frontend_runtime_config(request: Request) -> dict[str, Any]:
             "ATTACHMENTS_LEGACY_PROXY_UPLOAD_ENABLED", default=True
         ),
         "workEnabled": _env_bool("CORTEX_WORK_ENABLED", default=False),
+        "modelsCatalogEnabled": _env_bool("ENABLE_MODELS_CATALOG", default=False),
     }
 
     frontend_dev_login_token = str(

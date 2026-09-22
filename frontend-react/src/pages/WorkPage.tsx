@@ -51,16 +51,16 @@ import styles from "../components/work/Work.module.css";
 
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled", "budget_exhausted", "output_limit_reached"]);
 const EXAMPLES = [
-  "Analyze these files and create a report",
-  "Research this topic and prepare a summary",
-  "Review this GitHub repository and identify problems",
-  "Turn these files into an Excel analysis",
+  { label: "Create a report", prompt: "Analyze these files and create a report" },
+  { label: "Research a topic", prompt: "Research this topic and prepare a summary" },
+  { label: "Review a repository", prompt: "Review this GitHub repository and identify problems" },
+  { label: "Analyze in Excel", prompt: "Turn these files into an Excel analysis" },
 ];
 
 export function WorkPage() {
   const { workSessionId } = useParams();
   const navigate = useNavigate();
-  const { whoAmI, cognitoConfig, loading: authLoading, loggedIn, login, logout } = useAuth();
+  const { cognitoConfig, loading: authLoading, loggedIn, login, logout } = useAuth();
   const authEnabled = cognitoConfig?.enabled ?? false;
   const signedOut = !authLoading && authEnabled && !loggedIn;
   const workspaceReady = !authLoading && !signedOut;
@@ -393,9 +393,7 @@ export function WorkPage() {
         workSessions={store.sessions}
         activeWorkSessionId={store.session?.id}
         onSelectWorkSession={handleSelectWorkSession}
-        whoAmI={whoAmI}
         loggedIn={loggedIn}
-        onLogin={authEnabled ? login : undefined}
       />
       <main className={styles.main}>
         <header className={styles.mobileTopbar}>
@@ -407,9 +405,18 @@ export function WorkPage() {
         </header>
         <header className={styles.topbar}>
           <nav className={styles.tabs} aria-label="Workspace mode">
-            <button type="button" onClick={() => navigate("/")}>Ask</button>
-            <button type="button" onClick={() => navigate("/?mode=compare")}>Compare</button>
-            <button type="button" className={styles.activeTab} aria-current="page">Work</button>
+            <button type="button" onClick={() => navigate("/")}>
+              <span className={styles.tabIcon}><CortexIcon name="ask" /></span>
+              <span>Ask</span>
+            </button>
+            <button type="button" onClick={() => navigate("/?mode=compare")}>
+              <span className={styles.tabIcon}><CortexIcon name="compare" /></span>
+              <span>Compare</span>
+            </button>
+            <button type="button" className={styles.activeTab} aria-current="page">
+              <span className={styles.tabIcon}><CortexIcon name="work" /></span>
+              <span>Work</span>
+            </button>
           </nav>
           <div className={styles.topActions} aria-label="Workspace actions">
             <button type="button" className={styles.iconButton} aria-label="New work" onClick={handleNewWork}><CortexIcon name="plus" /></button>
@@ -441,8 +448,6 @@ export function WorkPage() {
           />
         ) : (
           <WorkLanding
-            instruction={instruction}
-            onInstruction={setInstruction}
             onExample={setInstruction}
             composer={<WorkComposer value={instruction} onChange={setInstruction} onSubmit={() => void handleStart()} onFiles={(files) => void handleFiles(files)} onRemoveFile={(id) => void removeAttachmentUpload(id).then(() => setWorkUploadIds((items) => items.filter((item) => item !== id)))} onRetryFile={(id) => void retryAttachmentUpload(id)} tasks={uploadTasks} connections={store.connections} catalog={store.toolCatalog} enabledConnectionIds={store.enabledConnectionIds} onToggleConnection={store.toggleConnection} onConnect={(key) => void handleConnect(key)} onAddMcp={handleAddMcp} webMode={store.webMode} onWebModeChange={store.setWebMode} maxCreditBudget={store.maxCreditBudget} maxPlanBudget={maxPlanBudget} onBudgetChange={store.setMaxCreditBudget} busy={store.loading} />}
           />
@@ -454,10 +459,27 @@ export function WorkPage() {
   );
 }
 
-function WorkLanding({ instruction, onInstruction, onExample, composer }: { instruction: string; onInstruction: (value: string) => void; onExample: (value: string) => void; composer: React.ReactNode }) {
-  void instruction;
-  void onInstruction;
-  return <section className={styles.landing}><span className={styles.landingMark}><CortexIcon name="sparkle" size={22} /></span><p className={styles.eyebrow}>Work mode</p><h1>What should I work on?</h1><p className={styles.landingCopy}>Give Cortex a task and it can research, analyze your files, use connected tools and create deliverables.</p><div className={styles.exampleList}>{EXAMPLES.map((example) => <button type="button" key={example} onClick={() => onExample(example)}>{example}</button>)}</div><div className={styles.landingComposer}>{composer}</div></section>;
+function WorkLanding({ onExample, composer }: { onExample: (value: string) => void; composer: React.ReactNode }) {
+  return (
+    <section className={styles.landing}>
+      <div className={styles.landingIntro}>
+        <h1>Start a task</h1>
+        <p className={styles.landingCopy}>Research, analyze files, and create deliverables.</p>
+        <div className={styles.exampleList}>
+          {EXAMPLES.map((example) => (
+            <button
+              type="button"
+              key={example.label}
+              onClick={() => onExample(example.prompt)}
+            >
+              {example.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className={styles.landingComposer}>{composer}</div>
+    </section>
+  );
 }
 
 function WorkStartingView({ instruction }: { instruction: string }) {
