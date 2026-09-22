@@ -148,6 +148,13 @@ test("mobile composer uses the refresh hairline shell with a soft focus state", 
     }
 });
 
+test("mobile hides the attachment count and file-size hint", async ({ responsiveApp }) => {
+    const { page } = responsiveApp;
+
+    await expect(page.locator("#attachmentPlanLimit")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Attach files" })).toBeVisible();
+});
+
 for (const viewport of [
     { width: 320, height: 568 },
     { width: 390, height: 844 },

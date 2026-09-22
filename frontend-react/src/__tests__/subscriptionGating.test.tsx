@@ -384,7 +384,7 @@ describe("subscription feature gating", () => {
     });
 
     render(<AttachmentStrip entitlements={entitlements} plans={plansFixture()} />);
-    expect(screen.getByText("Up to 1 file · 10 MB each")).toBeInTheDocument();
+    expect(screen.queryByText("Up to 1 file · 10 MB each")).not.toBeInTheDocument();
 
     fireEvent.change(document.querySelector("#attachmentInput")!, {
       target: { files: [oversized] },

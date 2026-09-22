@@ -28,20 +28,6 @@
   gap: 7px;
 }
 
-.planLimit {
-  overflow: hidden;
-  color: var(--cx-ink-400);
-  font: 650 10px/1.25 var(--font-sans);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-@media (max-width: 520px) {
-  .planLimit {
-    max-width: 130px;
-  }
-}
-
 .addBtn:hover {
   border-color: var(--cx-accent-border);
   background: var(--cx-surface-2);

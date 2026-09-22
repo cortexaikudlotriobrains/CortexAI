@@ -146,19 +146,10 @@ export function AttachmentStrip({
           type="button"
           className={styles.addBtn}
           aria-label="Attach files"
-          aria-describedby={entitlements ? "attachmentPlanLimit" : undefined}
           onClick={() => fileInputRef.current?.click()}
         >
           <CortexIcon name="attach" />
         </button>
-        {entitlements ? (
-          <span id="attachmentPlanLimit" className={styles.planLimit}>
-            Up to {entitlements.limits.max_files_per_request}{" "}
-            {entitlements.limits.max_files_per_request === 1 ? "file" : "files"}
-            {" · "}
-            {formatPlanFileSize(entitlements.limits.max_file_bytes)} each
-          </span>
-        ) : null}
       </div>
 
       <input
@@ -302,10 +293,4 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatPlanFileSize(bytes: number): string {
-  if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(0)} MB`;
-  if (bytes >= 1_000) return `${(bytes / 1_000).toFixed(0)} KB`;
-  return `${bytes} B`;
 }
