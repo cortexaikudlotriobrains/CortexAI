@@ -733,16 +733,14 @@ async function expectChipTooltip(page, switchName, tooltipText) {
 
 async function expectCenteredComposer(page) {
     const composer = page.locator("[data-composer-placement='center']");
-    const greeting = composer.locator("p");
     const card = page.locator("#promptInput").locator("xpath=../..");
     await expect.poll(async () => {
         const composerBounds = await composer.boundingBox();
-        const greetingBounds = await greeting.boundingBox();
         const cardBounds = await card.boundingBox();
-        if (!composerBounds || !greetingBounds || !cardBounds) return Number.POSITIVE_INFINITY;
+        if (!composerBounds || !cardBounds) return Number.POSITIVE_INFINITY;
         const composerCenter = composerBounds.y + composerBounds.height / 2;
-        const groupCenter = (greetingBounds.y + cardBounds.y + cardBounds.height) / 2;
-        return Math.abs(composerCenter - groupCenter);
+        const cardCenter = cardBounds.y + cardBounds.height / 2;
+        return Math.abs(composerCenter - cardCenter);
     }).toBeLessThanOrEqual(1);
 }
 

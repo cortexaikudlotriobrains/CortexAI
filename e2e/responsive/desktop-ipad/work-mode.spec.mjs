@@ -1,5 +1,36 @@
 import { expect, expectNoHorizontalOverflow, test } from "../fixtures/responsive-e2e.mjs";
 
+test("desktop and iPad empty Ask, Compare, and Work composers share one vertical center", async ({ responsiveApp }) => {
+    const { page, state } = responsiveApp;
+    state.subscriptionPlan = "pro";
+
+    for (const viewport of [
+        { width: 1440, height: 900 },
+        { width: 1024, height: 768 },
+    ]) {
+        await page.setViewportSize(viewport);
+        await page.goto("/");
+
+        await expect(page.getByText("Hi, how can I help?", { exact: true })).toBeVisible();
+        const chatComposer = page.locator("#promptInput").locator("xpath=../..");
+        const askCenter = await verticalCenter(chatComposer);
+
+        const modeNavigation = page.getByRole("navigation", { name: "Workspace mode" });
+        await modeNavigation.getByRole("button", { name: "Compare", exact: true }).click();
+        await expect(page.getByText("Hi, what would you like to compare?", { exact: true })).toBeVisible();
+        const compareCenter = await verticalCenter(chatComposer);
+
+        await modeNavigation.getByRole("button", { name: "Work", exact: true }).click();
+        await expect(page).toHaveURL(/\/work$/);
+        const workComposer = page.getByRole("textbox", { name: "Work goal" }).locator("..");
+        await expect(workComposer).toBeVisible();
+        const workCenter = await verticalCenter(workComposer);
+
+        expect(Math.abs(compareCenter - askCenter)).toBeLessThanOrEqual(1);
+        expect(Math.abs(workCenter - askCenter)).toBeLessThanOrEqual(1);
+    }
+});
+
 test("desktop Work empty state starts a real mocked run and renders its deliverable", async ({ responsiveApp }) => {
     const { page, state } = responsiveApp;
     state.subscriptionPlan = "pro";
@@ -149,6 +180,12 @@ function workRun(status) {
 
 function workEvent(sequence, type, message, payload = {}) {
     return { id: `event-${sequence}`, sequence, type, display_message: message, payload, created_at: "2026-08-20T12:03:00Z" };
+}
+
+async function verticalCenter(locator) {
+    const bounds = await locator.boundingBox();
+    expect(bounds).not.toBeNull();
+    return bounds.y + bounds.height / 2;
 }
 
 function seedWorkHistory(state) {

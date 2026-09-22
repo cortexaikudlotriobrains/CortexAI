@@ -462,18 +462,20 @@ export function WorkPage() {
 function WorkLanding({ onExample, composer }: { onExample: (value: string) => void; composer: React.ReactNode }) {
   return (
     <section className={styles.landing}>
-      <h1>Start a task</h1>
-      <p className={styles.landingCopy}>Research, analyze files, and create deliverables.</p>
-      <div className={styles.exampleList}>
-        {EXAMPLES.map((example) => (
-          <button
-            type="button"
-            key={example.label}
-            onClick={() => onExample(example.prompt)}
-          >
-            {example.label}
-          </button>
-        ))}
+      <div className={styles.landingIntro}>
+        <h1>Start a task</h1>
+        <p className={styles.landingCopy}>Research, analyze files, and create deliverables.</p>
+        <div className={styles.exampleList}>
+          {EXAMPLES.map((example) => (
+            <button
+              type="button"
+              key={example.label}
+              onClick={() => onExample(example.prompt)}
+            >
+              {example.label}
+            </button>
+          ))}
+        </div>
       </div>
       <div className={styles.landingComposer}>{composer}</div>
     </section>

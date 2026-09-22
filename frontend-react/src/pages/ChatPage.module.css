@@ -258,17 +258,21 @@
 }
 
 .composerWrapCentered {
-  display: flex;
+  display: grid;
   flex: 1 1 auto;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  gap: 14px;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(max-content, 1fr) auto minmax(0, 1fr);
   padding: 24px;
 }
 
+.composerWrapCentered > :last-child {
+  grid-row: 2;
+  width: 100%;
+}
+
 .composerGreeting {
-  margin: 0;
+  align-self: end;
+  margin: 0 0 14px;
   color: var(--cx-ink-900);
   font: 650 20px/28px var(--font-sans);
   letter-spacing: -0.01em;
