@@ -701,10 +701,18 @@
   .composerWrapCentered {
     display: block;
     flex: none;
+    transform: none;
   }
 
-  .composerGreeting {
-    display: none;
+  .composerWrapCentered .composerGreeting {
+    position: fixed;
+    top: 50dvh;
+    right: 16px;
+    left: 16px;
+    display: block;
+    margin: 0;
+    pointer-events: none;
+    transform: translateY(-50%);
   }
 
   /* Collapsed: park the sheet off-canvas; the dock pill remains visible. */
@@ -969,6 +977,15 @@
   .mobileNav {
     padding-right: 0;
     padding-left: 0;
+  }
+}
+
+@media (max-width: 900px) and (max-height: 650px) {
+  .composerWrapCentered .composerGreeting {
+    position: absolute;
+    top: auto;
+    bottom: calc(100% + 24px);
+    transform: none;
   }
 }
 

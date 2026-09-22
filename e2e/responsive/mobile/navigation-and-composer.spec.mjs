@@ -283,13 +283,14 @@ test("mobile attachment chips stay inside the composer without narrowing input",
     await expect(fileName).toHaveCount(0);
 });
 
-test("mobile Ask and Compare empty states keep only the existing composer", async ({ responsiveApp }) => {
+test("mobile Ask and Compare empty states center their mode greeting", async ({ responsiveApp }) => {
     const { page } = responsiveApp;
-    await page.setViewportSize({ width: 320, height: 568 });
+    await page.setViewportSize({ width: 390, height: 844 });
 
     const promptInput = page.locator("#promptInput");
     await expect(promptInput).toBeVisible();
     await expect(promptInput).toHaveAttribute("placeholder", "Ask anything…");
+    await expectGreetingCentered(page, "Hi, how can I help?");
     await expect(page.locator('[aria-label="Prompt examples"]')).toHaveCount(0);
     await expect(page.getByRole("heading", { name: "Ask anything" })).toHaveCount(0);
 
@@ -302,9 +303,38 @@ test("mobile Ask and Compare empty states keep only the existing composer", asyn
         "placeholder",
         "Ask once and compare model responses",
     );
+    await expect(page.getByText("Hi, how can I help?", { exact: true })).toHaveCount(0);
+    await expectGreetingCentered(page, "Hi, what would you like to compare?");
     await expect(page.getByRole("heading", { name: "Compare answers" })).toHaveCount(0);
+
+    await page.setViewportSize({ width: 320, height: 568 });
+    await expectGreetingClearOfComposer(page, "Hi, what would you like to compare?");
     await expectNoHorizontalOverflow(page);
 });
+
+async function expectGreetingCentered(page, text) {
+    const greeting = page.getByText(text, { exact: true });
+    await expect(greeting).toBeVisible();
+    const bounds = await greeting.boundingBox();
+    const composerBounds = await page.locator("#promptInput").locator("xpath=../..").boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(composerBounds).not.toBeNull();
+    const viewport = page.viewportSize();
+    expect(viewport).not.toBeNull();
+    expect(Math.abs(bounds.x + bounds.width / 2 - viewport.width / 2)).toBeLessThanOrEqual(1);
+    expect(Math.abs(bounds.y + bounds.height / 2 - viewport.height / 2)).toBeLessThanOrEqual(1);
+    expect(bounds.y + bounds.height).toBeLessThanOrEqual(composerBounds.y - 12);
+}
+
+async function expectGreetingClearOfComposer(page, text) {
+    const greeting = page.getByText(text, { exact: true });
+    await expect(greeting).toBeVisible();
+    const bounds = await greeting.boundingBox();
+    const composerBounds = await page.locator("#promptInput").locator("xpath=../..").boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(composerBounds).not.toBeNull();
+    expect(bounds.y + bounds.height).toBeLessThanOrEqual(composerBounds.y - 12);
+}
 
 async function composerMetrics(page) {
     return page.evaluate(() => {
