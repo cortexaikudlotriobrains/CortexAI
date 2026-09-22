@@ -169,9 +169,12 @@ describe("PromptComposer", () => {
     expect(useChatStore.getState().mode).toBe("compare");
     expect(screen.getByLabelText("Compare model selectors")).toBeInTheDocument();
     expect(screen.queryByRole("switch", { name: "Smart routing" })).not.toBeInTheDocument();
-    const sourcesSwitch = screen.getByRole("switch", { name: "Compare with sources" });
+    const webSwitch = screen.getByRole("switch", { name: "Research mode" });
     const improveSwitch = screen.getByRole("switch", { name: "Prompt optimization" });
-    expect(sourcesSwitch).toHaveAttribute(
+    expect(webSwitch).toHaveTextContent("Web");
+    expect(webSwitch).not.toHaveTextContent("With sources");
+    expect(webSwitch.querySelector("svg circle")).not.toBeNull();
+    expect(webSwitch).toHaveAttribute(
       "aria-describedby",
       screen.getByRole("tooltip", {
         name: "Uses latest information from the web",

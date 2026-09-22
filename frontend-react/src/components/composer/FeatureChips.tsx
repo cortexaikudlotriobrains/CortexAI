@@ -91,12 +91,12 @@ export function FeatureChips({
     <Chip
       id="routeResearchBtn"
       active={researchMode}
-      label={compareMode ? "With sources" : "Web"}
-      icon={compareMode ? "sources" : "web"}
+      label="Web"
+      icon="web"
       tooltip={`Uses latest information from the web${researchAllowanceLabel ? ` · ${researchAllowanceLabel}` : ""}`}
       tooltipAlign={compareMode ? "start" : "center"}
       onToggle={onResearchToggle}
-      ariaLabel={compareMode ? "Compare with sources" : "Research mode"}
+      ariaLabel="Research mode"
       touchTooltipId={touchTooltipId}
       onTouchTooltip={showTouchTooltip}
       tone={variant === "sourcesOnly" ? "ghost" : "segment"}
@@ -173,6 +173,7 @@ function Chip({
   const chipClass = [
     styles.chip,
     styles[`${tone}Chip`],
+    id === "routeResearchBtn" ? styles.keepIcon : "",
     active ? styles.active : "",
     blocked ? styles.blocked : "",
   ]

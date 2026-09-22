@@ -390,7 +390,7 @@ test("desktop feature chips show accessible tooltips in Ask and Compare", async 
     await page.locator("#btnCompareMode").click();
     await expectChipTooltip(
         page,
-        "Compare with sources",
+        "Research mode",
         "Uses latest information from the web",
     );
     await expectChipTooltip(
@@ -475,33 +475,35 @@ test("desktop centers the empty Ask and Compare composer, then docks it after su
     await expect(page.getByText("Hi, what would you like to compare?", { exact: true })).toHaveCount(0);
 });
 
-test("Compare sources and Improve use the same styling for matching states", async ({ responsiveApp }) => {
+test("Compare Web and Improve use the same styling for matching states", async ({ responsiveApp }) => {
     const { page } = responsiveApp;
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.locator("#btnCompareMode").click();
 
-    const sources = page.getByRole("switch", { name: "Compare with sources" });
+    const web = page.getByRole("switch", { name: "Research mode" });
     const improve = page.getByRole("switch", { name: "Prompt optimization" });
     const promptInput = page.locator("#promptInput");
 
-    await sources.click();
+    await expect(web).toContainText("Web");
+    await expect(web.locator("svg circle")).toBeVisible();
+    await web.click();
     await promptInput.hover();
-    await expectMatchingChipStyles(sources, improve);
+    await expectMatchingChipStyles(web, improve);
 
-    await sources.click();
+    await web.click();
     await improve.click();
     await promptInput.hover();
-    await expectMatchingChipStyles(sources, improve);
+    await expectMatchingChipStyles(web, improve);
 
     await page.getByRole("button", { name: "Account" }).click();
     await page.getByRole("menuitem", { name: "Switch to dark theme" }).click();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-    await expectMatchingChipStyles(sources, improve);
+    await expectMatchingChipStyles(web, improve);
 
-    await sources.click();
+    await web.click();
     await improve.click();
     await promptInput.hover();
-    await expectMatchingChipStyles(sources, improve);
+    await expectMatchingChipStyles(web, improve);
 });
 
 test("Improve keeps response cards hidden until optimization resolves", async ({ responsiveApp }) => {

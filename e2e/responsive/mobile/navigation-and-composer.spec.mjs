@@ -235,13 +235,15 @@ test("small mobile keeps focused feature tooltips inside the viewport", async ({
     }
 
     await openMobilePanel(page, "Compare");
-    const sources = page.getByRole("switch", { name: "Compare with sources" });
-    const sourcesTooltip = page
+    const web = page.getByRole("switch", { name: "Research mode" });
+    const webTooltip = page
         .locator('[role="tooltip"]')
         .filter({ hasText: "Uses latest information from the web" });
-    await expect(sources).toHaveAttribute(
+    await expect(web).toContainText("Web");
+    await expect(web.locator("svg circle")).toBeVisible();
+    await expect(web).toHaveAttribute(
         "aria-describedby",
-        await sourcesTooltip.getAttribute("id"),
+        await webTooltip.getAttribute("id"),
     );
     await expectNoHorizontalOverflow(page);
 });

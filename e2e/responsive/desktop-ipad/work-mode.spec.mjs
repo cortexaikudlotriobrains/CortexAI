@@ -49,7 +49,9 @@ test("desktop Work empty state starts a real mocked run and renders its delivera
     await expect(workTab).toHaveAttribute("aria-current", "page");
     await expect(workTab.locator("svg")).toBeVisible();
     await expect(page.getByRole("textbox", { name: "Work goal" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Web access: Auto" })).toBeVisible();
+    const workWeb = page.getByRole("button", { name: "Web access: Auto" });
+    await expect(workWeb).toContainText("Web · Auto");
+    await expect(workWeb.locator("svg circle")).toBeVisible();
     await expectNoHorizontalOverflow(page);
 
     await page.getByRole("textbox", { name: "Work goal" }).fill("Analyze these files and create a report");
