@@ -33,6 +33,8 @@ interface PromptComposerProps {
     Partial<Pick<UseSubscriptionResult, "loading">>;
 }
 
+const MOBILE_COMPOSER_MEDIA_QUERY = "(max-width: 900px)";
+
 export function PromptComposer({
   models,
   modelsLoading = false,
@@ -184,6 +186,11 @@ export function PromptComposer({
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
+      const usesMobileComposer =
+        typeof window !== "undefined" &&
+        Boolean(window.matchMedia?.(MOBILE_COMPOSER_MEDIA_QUERY).matches);
+      if (usesMobileComposer) return;
+
       event.preventDefault();
       if (!streaming && uploadsPending) {
         setError(uploadWaitMessage);

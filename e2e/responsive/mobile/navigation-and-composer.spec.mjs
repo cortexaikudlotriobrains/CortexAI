@@ -187,6 +187,19 @@ test("mobile composer auto-grows and keeps Send accessible", async ({ responsive
     await expectNoHorizontalOverflow(page);
 });
 
+test("mobile Enter inserts a newline instead of sending", async ({ responsiveApp }) => {
+    const { page } = responsiveApp;
+    const textarea = page.locator("#promptInput");
+
+    await textarea.fill("First line");
+    await textarea.press("Enter");
+    await page.keyboard.type("Second line");
+
+    await expect(textarea).toHaveValue("First line\nSecond line");
+    await expect(page.getByText("First line", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Send message" })).toBeEnabled();
+});
+
 test("small mobile keeps focused feature tooltips inside the viewport", async ({ responsiveApp }) => {
     const { page } = responsiveApp;
     await page.setViewportSize({ width: 320, height: 568 });

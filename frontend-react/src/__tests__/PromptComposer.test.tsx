@@ -15,6 +15,15 @@ import { useAttachmentUploadStore } from "../store/attachmentUploadStore";
 import type { AttachmentUploadState } from "../store/attachmentUploadStore";
 import type { FileUploadResponse } from "../types";
 
+const chatActions = vi.hoisted(() => ({
+  submit: vi.fn(),
+  cancel: vi.fn(),
+}));
+
+vi.mock("../hooks/useChat", () => ({
+  useChat: () => chatActions,
+}));
+
 vi.mock("../api/files", () => ({
   uploadFiles: vi.fn(),
   deleteFile: vi.fn().mockResolvedValue(undefined),
@@ -51,6 +60,36 @@ describe("PromptComposer", () => {
     cleanup();
     vi.clearAllMocks();
     vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("inserts a newline with Enter on mobile and sends from the arrow", async () => {
+    stubMobileViewport(true);
+    const user = userEvent.setup();
+
+    render(<PromptComposer models={DEFAULT_MODELS} />);
+
+    const textarea = screen.getByRole("textbox", { name: "Prompt input" });
+    await user.type(textarea, "First line{Enter}Second line");
+
+    expect(textarea).toHaveValue("First line\nSecond line");
+    expect(chatActions.submit).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    expect(chatActions.submit).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves Enter-to-send on desktop", async () => {
+    stubMobileViewport(false);
+    const user = userEvent.setup();
+
+    render(<PromptComposer models={DEFAULT_MODELS} />);
+
+    const textarea = screen.getByRole("textbox", { name: "Prompt input" });
+    await user.type(textarea, "Desktop prompt{Enter}");
+
+    expect(textarea).toHaveValue("Desktop prompt");
+    expect(chatActions.submit).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the compact Ask composer controls in one shell", async () => {
@@ -266,6 +305,22 @@ function uploadTask(
     uploadMode: "direct" as const,
     serverFile,
   };
+}
+
+function stubMobileViewport(matches: boolean) {
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn().mockImplementation((query: string) => ({
+      matches: query === "(max-width: 900px)" ? matches : false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  );
 }
 
 function attachment(): FileUploadResponse {
