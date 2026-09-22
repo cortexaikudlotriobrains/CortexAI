@@ -18,6 +18,44 @@ test("mobile Work keeps the four-item navigation and compact empty composer", as
     await expectNoHorizontalOverflow(page);
 });
 
+for (const viewport of [
+    { width: 390, height: 844 },
+    { width: 390, height: 700 },
+    { width: 320, height: 568 },
+]) {
+    test(
+        `mobile Work shares the empty-state heading line at ${viewport.width}x${viewport.height}`,
+        async ({ responsiveApp }) => {
+            const { page, state } = responsiveApp;
+            state.subscriptionPlan = "plus";
+            await page.setViewportSize(viewport);
+            await page.goto("/work");
+
+            const heading = page.getByRole("heading", { name: "Start a task" });
+            const composer = page.getByRole("textbox", { name: "Work goal" }).locator("xpath=..");
+            const navigation = page.getByRole("navigation", { name: "Mobile navigation" });
+            await expect(heading).toBeVisible();
+            await expect(composer).toBeVisible();
+            const headingBounds = await heading.boundingBox();
+            const composerBounds = await composer.boundingBox();
+            const navigationBounds = await navigation.boundingBox();
+            expect(headingBounds).not.toBeNull();
+            expect(composerBounds).not.toBeNull();
+            expect(navigationBounds).not.toBeNull();
+            expect(
+                Math.abs(headingBounds.y + headingBounds.height / 2 - viewport.height * 0.25),
+            ).toBeLessThanOrEqual(1);
+            expect(headingBounds.y + headingBounds.height).toBeLessThanOrEqual(
+                composerBounds.y - 12,
+            );
+            expect(composerBounds.y + composerBounds.height).toBeLessThanOrEqual(
+                navigationBounds.y - 12,
+            );
+            await expectNoHorizontalOverflow(page);
+        },
+    );
+}
+
 test("mobile Work shows immediate progress while the run start is pending", async ({ responsiveApp }) => {
     const { page, state } = responsiveApp;
     state.subscriptionPlan = "pro";

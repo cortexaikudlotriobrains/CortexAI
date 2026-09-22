@@ -54,6 +54,7 @@
   --cx-workspace-actions-gap: 24px;
   --cx-workspace-action-icon-size: 18px;
   --cx-mobile-header-actions-gap: 4px;
+  --cx-mobile-empty-heading-center-y: 25dvh;
 
   --cx-shadow-sm: 0 1px 2px rgba(15,23,42,.06);
   --cx-shadow-card: 0 1px 3px rgba(15,23,42,.08), 0 14px 34px -16px rgba(15,23,42,.18);
