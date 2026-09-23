@@ -15,6 +15,15 @@ import { useAttachmentUploadStore } from "../store/attachmentUploadStore";
 import type { AttachmentUploadState } from "../store/attachmentUploadStore";
 import type { FileUploadResponse } from "../types";
 
+const chatActions = vi.hoisted(() => ({
+  submit: vi.fn(),
+  cancel: vi.fn(),
+}));
+
+vi.mock("../hooks/useChat", () => ({
+  useChat: () => chatActions,
+}));
+
 vi.mock("../api/files", () => ({
   uploadFiles: vi.fn(),
   deleteFile: vi.fn().mockResolvedValue(undefined),
@@ -51,6 +60,36 @@ describe("PromptComposer", () => {
     cleanup();
     vi.clearAllMocks();
     vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("inserts a newline with Enter on mobile and sends from the arrow", async () => {
+    stubMobileViewport(true);
+    const user = userEvent.setup();
+
+    render(<PromptComposer models={DEFAULT_MODELS} />);
+
+    const textarea = screen.getByRole("textbox", { name: "Prompt input" });
+    await user.type(textarea, "First line{Enter}Second line");
+
+    expect(textarea).toHaveValue("First line\nSecond line");
+    expect(chatActions.submit).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    expect(chatActions.submit).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves Enter-to-send on desktop", async () => {
+    stubMobileViewport(false);
+    const user = userEvent.setup();
+
+    render(<PromptComposer models={DEFAULT_MODELS} />);
+
+    const textarea = screen.getByRole("textbox", { name: "Prompt input" });
+    await user.type(textarea, "Desktop prompt{Enter}");
+
+    expect(textarea).toHaveValue("Desktop prompt");
+    expect(chatActions.submit).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the compact Ask composer controls in one shell", async () => {
@@ -75,6 +114,8 @@ describe("PromptComposer", () => {
       name: "Helps you ask better for better results",
     });
     const sendButton = screen.getByRole("button", { name: "Send message" });
+    const controls = card?.querySelector('[data-composer-mode="single"]');
+    const featureControls = card?.querySelector("#promptFeatureControls");
 
     expect(textarea).toHaveAttribute("rows", "1");
     expect(textarea).toHaveAttribute(
@@ -84,6 +125,9 @@ describe("PromptComposer", () => {
     expect(card).toContainElement(fileName);
     expect(card).toContainElement(attachButton);
     expect(card).toContainElement(smartSwitch);
+    expect(controls).toContainElement(attachButton);
+    expect(featureControls).toContainElement(smartSwitch);
+    expect(featureControls).toContainElement(researchSwitch);
     expect(smartSwitch).toHaveAttribute("aria-describedby", smartTooltip.id);
     expect(researchSwitch).toHaveAttribute("aria-checked", "true");
     expect(researchSwitch).toHaveAttribute("aria-describedby", researchTooltip.id);
@@ -130,9 +174,14 @@ describe("PromptComposer", () => {
     expect(useChatStore.getState().mode).toBe("compare");
     expect(screen.getByLabelText("Compare model selectors")).toBeInTheDocument();
     expect(screen.queryByRole("switch", { name: "Smart routing" })).not.toBeInTheDocument();
-    const sourcesSwitch = screen.getByRole("switch", { name: "Compare with sources" });
+    const webSwitch = screen.getByRole("switch", { name: "Research mode" });
     const improveSwitch = screen.getByRole("switch", { name: "Prompt optimization" });
-    expect(sourcesSwitch).toHaveAttribute(
+    const compareSelectors = screen.getByLabelText("Compare model selectors");
+    const featureControls = document.querySelector("#promptFeatureControls");
+    expect(webSwitch).toHaveTextContent("Web");
+    expect(webSwitch).not.toHaveTextContent("With sources");
+    expect(webSwitch.querySelector("svg circle")).not.toBeNull();
+    expect(webSwitch).toHaveAttribute(
       "aria-describedby",
       screen.getByRole("tooltip", {
         name: "Uses latest information from the web",
@@ -144,6 +193,9 @@ describe("PromptComposer", () => {
         name: "Helps you ask better for better results",
       }).id,
     );
+    expect(compareSelectors).not.toContainElement(webSwitch);
+    expect(featureControls).toContainElement(webSwitch);
+    expect(featureControls).toContainElement(improveSwitch);
     expect(screen.queryByRole("checkbox", { name: "Compare" })).not.toBeInTheDocument();
 
     const textarea = screen.getByRole("textbox", { name: "Prompt input" });
@@ -266,6 +318,22 @@ function uploadTask(
     uploadMode: "direct" as const,
     serverFile,
   };
+}
+
+function stubMobileViewport(matches: boolean) {
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn().mockImplementation((query: string) => ({
+      matches: query === "(max-width: 900px)" ? matches : false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  );
 }
 
 function attachment(): FileUploadResponse {

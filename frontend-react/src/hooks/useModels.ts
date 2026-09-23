@@ -1,7 +1,9 @@
 import { useState, useEffect } from "react";
-import { fetchModels } from "../api/catalog";
+import { fetchModelOptions, fetchModels } from "../api/catalog";
 import type { ModelCatalogItem } from "../types";
 import { DEFAULT_MODELS } from "../config/defaultModels";
+
+export type ModelCollectionSource = "options" | "catalog";
 
 interface UseModelsResult {
   models: ModelCatalogItem[];
@@ -9,7 +11,10 @@ interface UseModelsResult {
   error: string | null;
 }
 
-export function useModels(enabled = true): UseModelsResult {
+export function useModels(
+  enabled = true,
+  source: ModelCollectionSource = "options",
+): UseModelsResult {
   const [models, setModels] = useState<ModelCatalogItem[]>(DEFAULT_MODELS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -23,7 +28,8 @@ export function useModels(enabled = true): UseModelsResult {
     }
     let cancelled = false;
     setLoading(true);
-    fetchModels(true)
+    const request = source === "catalog" ? fetchModels(true) : fetchModelOptions();
+    request
       .then((data) => {
         if (!cancelled) setModels(data.models.length > 0 ? data.models : DEFAULT_MODELS);
       })
@@ -39,7 +45,7 @@ export function useModels(enabled = true): UseModelsResult {
     return () => {
       cancelled = true;
     };
-  }, [enabled]);
+  }, [enabled, source]);
 
   return { models, loading, error };
 }

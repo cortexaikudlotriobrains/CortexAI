@@ -222,25 +222,6 @@
   .composerControls {
     column-gap: 10px;
   }
-
-  .composerControls[data-mobile-feature-stack="true"] .featureControls {
-    grid-column: 1 / -1;
-    order: 1;
-    overflow: visible;
-  }
-
-  .composerControls[data-mobile-feature-stack="true"] .actions {
-    order: 2;
-  }
-
-  .composerControls[data-mobile-feature-stack="true"] :global(#attachmentStrip) > ul {
-    order: 0;
-  }
-
-  .composerControls[data-mobile-feature-stack="true"] :global(#attachmentStrip) > div {
-    grid-column: 1 / 3;
-    order: 2;
-  }
 }
 
 @media (max-width: 359px) {

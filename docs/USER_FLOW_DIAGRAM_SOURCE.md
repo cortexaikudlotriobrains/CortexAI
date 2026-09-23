@@ -48,7 +48,7 @@ flowchart TB
         R4["/v1/history\nserver/routes/history.py"]
         R5["/v1/usage + /v1/savings\nserver/routes/reporting.py"]
         R6["/v1/byok\nserver/routes/byok.py"]
-        R7["/v1/providers + opt-in /v1/models + /v1/whoami\ncatalog.py + whoami.py"]
+        R7["/v1/providers + /v1/model-options + opt-in /v1/models + /v1/whoami\ncatalog.py + whoami.py"]
     end
 
     %% L4

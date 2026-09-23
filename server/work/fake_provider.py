@@ -29,6 +29,7 @@ class FakeAgentProvider:
         mcp_servers: Sequence[ProviderMcpServer],
         vault_ids: Sequence[str],
         web_enabled: bool,
+        web_requires_approval: bool,
         max_credit_budget: int,
     ) -> ProviderSession:
         session_id = f"fake_session_{uuid4().hex}"
@@ -38,6 +39,7 @@ class FakeAgentProvider:
             "resources": list(resources),
             "mcp_servers": list(mcp_servers),
             "web_enabled": web_enabled,
+            "web_requires_approval": web_requires_approval,
         }
         return ProviderSession(
             id=session_id,
@@ -119,10 +121,12 @@ class FakeAgentProvider:
         *,
         mcp_servers: Sequence[ProviderMcpServer],
         web_enabled: bool,
+        web_requires_approval: bool,
     ) -> None:
         state = self.sessions[session_id]
         state["mcp_servers"] = list(mcp_servers)
         state["web_enabled"] = web_enabled
+        state["web_requires_approval"] = web_requires_approval
 
     def extend_budget(
         self,

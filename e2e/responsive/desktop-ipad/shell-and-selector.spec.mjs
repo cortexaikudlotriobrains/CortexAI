@@ -390,7 +390,7 @@ test("desktop feature chips show accessible tooltips in Ask and Compare", async 
     await page.locator("#btnCompareMode").click();
     await expectChipTooltip(
         page,
-        "Compare with sources",
+        "Research mode",
         "Uses latest information from the web",
     );
     await expectChipTooltip(
@@ -475,33 +475,52 @@ test("desktop centers the empty Ask and Compare composer, then docks it after su
     await expect(page.getByText("Hi, what would you like to compare?", { exact: true })).toHaveCount(0);
 });
 
-test("Compare sources and Improve use the same styling for matching states", async ({ responsiveApp }) => {
+test("Compare Web and Improve use the same styling for matching states", async ({ responsiveApp }) => {
     const { page } = responsiveApp;
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.locator("#btnCompareMode").click();
 
-    const sources = page.getByRole("switch", { name: "Compare with sources" });
+    const web = page.getByRole("switch", { name: "Research mode" });
     const improve = page.getByRole("switch", { name: "Prompt optimization" });
     const promptInput = page.locator("#promptInput");
 
-    await sources.click();
+    await expect(web).toContainText("Web");
+    await expect(web.locator("svg circle")).toBeVisible();
+    await web.click();
     await promptInput.hover();
-    await expectMatchingChipStyles(sources, improve);
+    await expectMatchingChipStyles(web, improve);
 
-    await sources.click();
+    await web.click();
     await improve.click();
     await promptInput.hover();
-    await expectMatchingChipStyles(sources, improve);
+    await expectMatchingChipStyles(web, improve);
 
     await page.getByRole("button", { name: "Account" }).click();
     await page.getByRole("menuitem", { name: "Switch to dark theme" }).click();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-    await expectMatchingChipStyles(sources, improve);
+    await expectMatchingChipStyles(web, improve);
 
-    await sources.click();
+    await web.click();
     await improve.click();
     await promptInput.hover();
-    await expectMatchingChipStyles(sources, improve);
+    await expectMatchingChipStyles(web, improve);
+});
+
+test("desktop Ask and Compare keep feature controls beside Attach", async ({ responsiveApp }) => {
+    const { page } = responsiveApp;
+    await page.setViewportSize({ width: 1440, height: 900 });
+
+    for (const [mode, switchNames] of [
+        ["Ask", ["Smart routing", "Research mode", "Prompt optimization"]],
+        ["Compare", ["Research mode", "Prompt optimization"]],
+    ]) {
+        await page
+            .getByRole("navigation", { name: "Workspace mode" })
+            .getByRole("button", { name: mode })
+            .click();
+        await expectComposerToolbarOrder(page, switchNames);
+        await expectNoHorizontalOverflow(page);
+    }
 });
 
 test("Improve keeps response cards hidden until optimization resolves", async ({ responsiveApp }) => {
@@ -762,6 +781,30 @@ async function expectMatchingChipStyles(first, second) {
         const secondStyle = await chipVisualStyle(second);
         return JSON.stringify(firstStyle) === JSON.stringify(secondStyle);
     }).toBe(true);
+}
+
+async function expectComposerToolbarOrder(page, switchNames) {
+    const attach = page.getByRole("button", { name: "Attach files" });
+    const send = page.getByRole("button", { name: "Send message" });
+    const controls = [attach, ...switchNames.map(name => page.getByRole("switch", { name })), send];
+    const bounds = [];
+
+    for (const control of controls) {
+        await expect(control).toBeVisible();
+        const box = await control.boundingBox();
+        expect(box).not.toBeNull();
+        bounds.push(box);
+    }
+
+    const attachCenter = bounds[0].y + bounds[0].height / 2;
+    for (const box of bounds.slice(1, -1)) {
+        expect(Math.abs(box.y + box.height / 2 - attachCenter)).toBeLessThanOrEqual(1);
+    }
+    for (let index = 1; index < bounds.length; index += 1) {
+        expect(bounds[index - 1].x + bounds[index - 1].width).toBeLessThanOrEqual(
+            bounds[index].x + 1,
+        );
+    }
 }
 
 async function expectSoftComposerShell(page) {

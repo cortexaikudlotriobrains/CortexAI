@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
 
+from config import pricing
 from server.schemas.work import WorkSessionCreateDTO
 from server.work.anthropic_provider import (
     AnthropicManagedAgentProvider,
@@ -144,7 +146,8 @@ def test_usage_delta_prevents_followup_double_charge_and_counts_runtime_web():
     assert usage.provider_cost_usd > 0.02
 
 
-def test_work_billing_counts_managed_agent_cache_partitions_independently():
+def test_work_billing_counts_managed_agent_cache_partitions_independently(monkeypatch):
+    monkeypatch.setattr(pricing, "_utc_now", lambda: datetime(2026, 8, 31, tzinfo=UTC))
     usage = calculate_work_credit_usage(
         {
             "list_cost": {"amount": "20", "currency": "USD"},
@@ -190,7 +193,8 @@ def test_work_billing_counts_managed_agent_cache_partitions_independently():
     assert usage.provider_cost_usd == pytest.approx(0.2025301889)
 
 
-def test_work_billing_uses_cache_deltas_and_provider_cost_floor_for_followups():
+def test_work_billing_uses_cache_deltas_and_provider_cost_floor_for_followups(monkeypatch):
+    monkeypatch.setattr(pricing, "_utc_now", lambda: datetime(2026, 8, 31, tzinfo=UTC))
     baseline = {
         "list_cost": {"amount": "20", "currency": "USD"},
         "input_tokens": 30,
@@ -369,6 +373,7 @@ def test_provider_create_session_uses_beta_budget_permissions_resources_mcp_and_
         mcp_servers=[ProviderMcpServer("github", "https://mcp.example.com", ("list_issues",))],
         vault_ids=["vault-1"],
         web_enabled=False,
+        web_requires_approval=False,
         max_credit_budget=100_000,
     )
     assert created.id == "session-1"
@@ -408,11 +413,17 @@ def test_provider_create_session_uses_beta_budget_permissions_resources_mcp_and_
         "session-1",
         mcp_servers=[],
         web_enabled=True,
+        web_requires_approval=True,
     )
     tool_update = calls["update"]
     assert tool_update[0] == "session-1"
     assert set(tool_update[1]["agent"]) == {"mcp_servers", "tools"}
     assert tool_update[1]["agent"]["tools"][0]["configs"][-1]["enabled"] is True
+    updated_configs = {
+        config["name"]: config for config in tool_update[1]["agent"]["tools"][0]["configs"]
+    }
+    for name in ("web_search", "web_fetch"):
+        assert updated_configs[name]["permission_policy"] == {"type": "always_ask"}
     provider.extend_budget(
         "session-1",
         25_000,

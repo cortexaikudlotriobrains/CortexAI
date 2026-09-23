@@ -115,6 +115,29 @@ def _model_to_dto(candidate) -> ModelCatalogItemDTO:
     )
 
 
+def _build_models_response(
+    *,
+    provider: str | None,
+    enabled_only: bool,
+) -> ModelsCatalogResponseDTO:
+    registry = ModelRegistry.from_yaml()
+    candidates = (
+        registry.list_selectable_models(provider=provider)
+        if enabled_only
+        else registry.list_models(provider=provider, include_disabled=True)
+    )
+    items = [_model_to_dto(candidate) for candidate in candidates]
+    items.sort(key=lambda item: (item.provider, item.model))
+
+    return ModelsCatalogResponseDTO(
+        provider=provider,
+        enabled_only=enabled_only,
+        models=items,
+        total=len(items),
+        timestamp=_utc_now_iso(),
+    )
+
+
 @router.get("/providers", response_model=ProvidersCatalogResponseDTO)
 async def list_providers(
     request: Request,
@@ -167,20 +190,15 @@ async def list_models(
     req_id = str(getattr(request.state, "request_id", "") or uuid4())
     _SESSION_AUTH_GUARD.require(auth=auth, request_id=req_id)
     provider_norm = _validate_provider_or_400(provider)
-    registry = ModelRegistry.from_yaml()
+    return _build_models_response(provider=provider_norm, enabled_only=enabled_only)
 
-    candidates = (
-        registry.list_selectable_models(provider=provider_norm)
-        if enabled_only
-        else registry.list_models(provider=provider_norm, include_disabled=True)
-    )
-    items = [_model_to_dto(candidate) for candidate in candidates]
-    items.sort(key=lambda item: (item.provider, item.model))
 
-    return ModelsCatalogResponseDTO(
-        provider=provider_norm,
-        enabled_only=enabled_only,
-        models=items,
-        total=len(items),
-        timestamp=_utc_now_iso(),
-    )
+@router.get("/model-options", response_model=ModelsCatalogResponseDTO)
+async def list_model_options(
+    request: Request,
+    auth: AuthResult = Depends(get_auth),
+):
+    """List active selectable models for authenticated Ask/Compare controls."""
+    req_id = str(getattr(request.state, "request_id", "") or uuid4())
+    _SESSION_AUTH_GUARD.require(auth=auth, request_id=req_id)
+    return _build_models_response(provider=None, enabled_only=True)

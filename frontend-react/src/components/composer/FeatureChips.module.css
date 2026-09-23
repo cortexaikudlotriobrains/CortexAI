@@ -292,6 +292,10 @@
   .ghostChip svg {
     display: none;
   }
+
+  .ghostChip.keepIcon svg {
+    display: block;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -100,16 +100,18 @@ Agent ID/version, and canonicalizes that model through
 closed. `ANTHROPIC_MANAGED_AGENT_MODEL` is only a provisioning input for the
 repository's `config/work_agent.yaml` template; it is not billing authority.
 
-Run requests use `web_mode=auto|on|off` and default to Auto. The backend detects
-current-information intent for Auto and snapshots both requested and effective
-Web state. The global `CORTEX_WORK_WEB_ENABLED` flag remains the deployment kill
-switch for any run that resolves to Web On.
+Run requests use `web_mode=auto|on|ask|off` and default to Auto. The backend
+detects current-information intent for Auto and snapshots requested, effective,
+and approval Web state. Ask enables provider Web tools with `always_ask` and
+routes each search/fetch through the persisted Cortex approval flow. The global
+`CORTEX_WORK_WEB_ENABLED` flag remains the deployment kill switch for any run
+that resolves to Web enabled.
 
-Built-in `read`, `glob`, `grep`, and enabled web reads are `always_allow`.
-Built-in `bash`, `write`, and `edit` remain `always_ask`. MCP remains
-default-deny/ask at the provider boundary, with Cortex auto-confirming only
-classified READ operations and preserving approval for writes and sensitive
-actions.
+Built-in `read`, `glob`, and `grep` are `always_allow`; web reads are
+`always_allow` in Auto/On and `always_ask` in Ask. Built-in `bash`, `write`, and
+`edit` remain `always_ask`. MCP remains default-deny/ask at the provider
+boundary, with Cortex auto-confirming classified READ operations except Ask-mode
+web calls and preserving approval for writes and sensitive actions.
 
 For each verified connector key (`GITHUB`, `GOOGLE_DRIVE`, `GMAIL`, `SLACK`,
 `JIRA`, `NOTION`, `MICROSOFT_365`) configure:
@@ -152,13 +154,17 @@ requires a reviewed Secrets Manager ARN plus a Managed Agent provider vault ID.
 Use a signed internal account. Never use the fake provider in production.
 
 1. Open `/work`; confirm the concise empty headline `Start a task`.
+   On phone layouts, confirm the goal composer is docked immediately above the
+   fixed Work navigation rather than hanging in the middle of the workspace.
 2. Upload a small owned file, set a 25k budget, and start a run.
 3. Record session/run IDs and confirm `run_created`, planning/progress, and SSE
    heartbeats. Disconnect the browser for at least one edge timeout, reconnect,
    and verify no duplicate events.
 4. Restart one API instance during a run and verify provider-session recovery.
-5. Trigger a read tool (no approval) and a WRITE tool (approval required).
-6. Deny once; verify no side effect. Retry, approve, and verify a replay is 409.
+5. Trigger a read tool (no approval), an Ask-mode Web call (approval required),
+   and a WRITE tool (approval required).
+6. Deny the Web call once and verify no request executes; retry, approve, and
+   verify a replay is 409. Repeat the deny/approve check for the WRITE action.
 7. Complete the task, open/download an artifact, and verify a second user gets
    404 for the same run/file/approval IDs.
 8. Compare reservation, ledger, run `actual_credits`, cumulative provider usage,

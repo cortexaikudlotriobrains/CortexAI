@@ -148,6 +148,27 @@ test("mobile composer uses the refresh hairline shell with a soft focus state", 
     }
 });
 
+test("mobile hides the attachment count and file-size hint", async ({ responsiveApp }) => {
+    const { page } = responsiveApp;
+
+    await expect(page.locator("#attachmentPlanLimit")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Attach files" })).toBeVisible();
+});
+
+test("mobile Ask and Compare keep feature controls beside Attach", async ({ responsiveApp }) => {
+    const { page } = responsiveApp;
+    await page.setViewportSize({ width: 320, height: 568 });
+
+    for (const [mode, switchNames] of [
+        ["Ask", ["Smart routing", "Research mode", "Prompt optimization"]],
+        ["Compare", ["Research mode", "Prompt optimization"]],
+    ]) {
+        await openMobilePanel(page, mode);
+        await expectComposerToolbarOrder(page, switchNames);
+        await expectNoHorizontalOverflow(page);
+    }
+});
+
 for (const viewport of [
     { width: 320, height: 568 },
     { width: 390, height: 844 },
@@ -187,6 +208,19 @@ test("mobile composer auto-grows and keeps Send accessible", async ({ responsive
     await expectNoHorizontalOverflow(page);
 });
 
+test("mobile Enter inserts a newline instead of sending", async ({ responsiveApp }) => {
+    const { page } = responsiveApp;
+    const textarea = page.locator("#promptInput");
+
+    await textarea.fill("First line");
+    await textarea.press("Enter");
+    await page.keyboard.type("Second line");
+
+    await expect(textarea).toHaveValue("First line\nSecond line");
+    await expect(page.getByText("First line", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Send message" })).toBeEnabled();
+});
+
 test("small mobile keeps focused feature tooltips inside the viewport", async ({ responsiveApp }) => {
     const { page } = responsiveApp;
     await page.setViewportSize({ width: 320, height: 568 });
@@ -215,13 +249,15 @@ test("small mobile keeps focused feature tooltips inside the viewport", async ({
     }
 
     await openMobilePanel(page, "Compare");
-    const sources = page.getByRole("switch", { name: "Compare with sources" });
-    const sourcesTooltip = page
+    const web = page.getByRole("switch", { name: "Research mode" });
+    const webTooltip = page
         .locator('[role="tooltip"]')
         .filter({ hasText: "Uses latest information from the web" });
-    await expect(sources).toHaveAttribute(
+    await expect(web).toContainText("Web");
+    await expect(web.locator("svg circle")).toBeVisible();
+    await expect(web).toHaveAttribute(
         "aria-describedby",
-        await sourcesTooltip.getAttribute("id"),
+        await webTooltip.getAttribute("id"),
     );
     await expectNoHorizontalOverflow(page);
 });
@@ -283,36 +319,39 @@ test("mobile attachment chips stay inside the composer without narrowing input",
     await expect(fileName).toHaveCount(0);
 });
 
-test("mobile Ask and Compare empty states center their mode greeting", async ({ responsiveApp }) => {
+test("mobile Ask and Compare empty states share the upper-quarter greeting line", async ({ responsiveApp }) => {
     const { page } = responsiveApp;
-    await page.setViewportSize({ width: 390, height: 844 });
-
     const promptInput = page.locator("#promptInput");
-    await expect(promptInput).toBeVisible();
-    await expect(promptInput).toHaveAttribute("placeholder", "Ask anything…");
-    await expectGreetingCentered(page, "Hi, how can I help?");
-    await expect(page.locator('[aria-label="Prompt examples"]')).toHaveCount(0);
-    await expect(page.getByRole("heading", { name: "Ask anything" })).toHaveCount(0);
+    for (const viewport of [
+        { width: 390, height: 844 },
+        { width: 390, height: 700 },
+        { width: 320, height: 568 },
+    ]) {
+        await page.setViewportSize(viewport);
+        await openMobilePanel(page, "Ask");
+        await expect(promptInput).toBeVisible();
+        await expect(promptInput).toHaveAttribute("placeholder", "Ask anything…");
+        await expectGreetingAtMobileEmptyHeadingLine(page, "Hi, how can I help?");
+        await expect(page.locator('[aria-label="Prompt examples"]')).toHaveCount(0);
+        await expect(page.getByRole("heading", { name: "Ask anything" })).toHaveCount(0);
 
-    await page
-        .getByRole("navigation", { name: "Mobile navigation" })
-        .getByRole("button", { name: "Compare" })
-        .click();
-    await expect(promptInput).toBeVisible();
-    await expect(promptInput).toHaveAttribute(
-        "placeholder",
-        "Ask once and compare model responses",
-    );
-    await expect(page.getByText("Hi, how can I help?", { exact: true })).toHaveCount(0);
-    await expectGreetingCentered(page, "Hi, what would you like to compare?");
-    await expect(page.getByRole("heading", { name: "Compare answers" })).toHaveCount(0);
-
-    await page.setViewportSize({ width: 320, height: 568 });
-    await expectGreetingClearOfComposer(page, "Hi, what would you like to compare?");
-    await expectNoHorizontalOverflow(page);
+        await openMobilePanel(page, "Compare");
+        await expect(promptInput).toBeVisible();
+        await expect(promptInput).toHaveAttribute(
+            "placeholder",
+            "Ask once and compare model responses",
+        );
+        await expect(page.getByText("Hi, how can I help?", { exact: true })).toHaveCount(0);
+        await expectGreetingAtMobileEmptyHeadingLine(
+            page,
+            "Hi, what would you like to compare?",
+        );
+        await expect(page.getByRole("heading", { name: "Compare answers" })).toHaveCount(0);
+        await expectNoHorizontalOverflow(page);
+    }
 });
 
-async function expectGreetingCentered(page, text) {
+async function expectGreetingAtMobileEmptyHeadingLine(page, text) {
     const greeting = page.getByText(text, { exact: true });
     await expect(greeting).toBeVisible();
     const bounds = await greeting.boundingBox();
@@ -322,17 +361,7 @@ async function expectGreetingCentered(page, text) {
     const viewport = page.viewportSize();
     expect(viewport).not.toBeNull();
     expect(Math.abs(bounds.x + bounds.width / 2 - viewport.width / 2)).toBeLessThanOrEqual(1);
-    expect(Math.abs(bounds.y + bounds.height / 2 - viewport.height / 2)).toBeLessThanOrEqual(1);
-    expect(bounds.y + bounds.height).toBeLessThanOrEqual(composerBounds.y - 12);
-}
-
-async function expectGreetingClearOfComposer(page, text) {
-    const greeting = page.getByText(text, { exact: true });
-    await expect(greeting).toBeVisible();
-    const bounds = await greeting.boundingBox();
-    const composerBounds = await page.locator("#promptInput").locator("xpath=../..").boundingBox();
-    expect(bounds).not.toBeNull();
-    expect(composerBounds).not.toBeNull();
+    expect(Math.abs(bounds.y + bounds.height / 2 - viewport.height * 0.25)).toBeLessThanOrEqual(1);
     expect(bounds.y + bounds.height).toBeLessThanOrEqual(composerBounds.y - 12);
 }
 
@@ -385,6 +414,30 @@ async function expectMobileComposerControlsFullyVisible(page) {
         expect(bounds.x, `${name} left edge`).toBeGreaterThanOrEqual(0);
         expect(bounds.x + bounds.width, `${name} right edge`).toBeLessThanOrEqual(
             page.viewportSize().width,
+        );
+    }
+}
+
+async function expectComposerToolbarOrder(page, switchNames) {
+    const attach = page.getByRole("button", { name: "Attach files" });
+    const send = page.getByRole("button", { name: "Send message" });
+    const controls = [attach, ...switchNames.map(name => page.getByRole("switch", { name })), send];
+    const bounds = [];
+
+    for (const control of controls) {
+        await expect(control).toBeVisible();
+        const box = await control.boundingBox();
+        expect(box).not.toBeNull();
+        bounds.push(box);
+    }
+
+    const attachCenter = bounds[0].y + bounds[0].height / 2;
+    for (const box of bounds.slice(1, -1)) {
+        expect(Math.abs(box.y + box.height / 2 - attachCenter)).toBeLessThanOrEqual(1);
+    }
+    for (let index = 1; index < bounds.length; index += 1) {
+        expect(bounds[index - 1].x + bounds[index - 1].width).toBeLessThanOrEqual(
+            bounds[index].x + 1,
         );
     }
 }

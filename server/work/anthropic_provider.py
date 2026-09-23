@@ -268,6 +268,7 @@ def _agent_override(
     agent_id: str | None,
     mcp_servers: Sequence[ProviderMcpServer],
     web_enabled: bool,
+    web_requires_approval: bool,
 ) -> dict[str, object]:
     toolsets: list[dict[str, object]] = [
         {
@@ -287,12 +288,16 @@ def _agent_override(
                 {
                     "name": "web_search",
                     "enabled": web_enabled,
-                    "permission_policy": {"type": "always_allow"},
+                    "permission_policy": {
+                        "type": "always_ask" if web_requires_approval else "always_allow"
+                    },
                 },
                 {
                     "name": "web_fetch",
                     "enabled": web_enabled,
-                    "permission_policy": {"type": "always_allow"},
+                    "permission_policy": {
+                        "type": "always_ask" if web_requires_approval else "always_allow"
+                    },
                 },
             ],
         }
@@ -352,6 +357,7 @@ class AnthropicManagedAgentProvider(AgentProvider):
         mcp_servers: Sequence[ProviderMcpServer],
         vault_ids: Sequence[str],
         web_enabled: bool,
+        web_requires_approval: bool,
         max_credit_budget: int,
     ) -> ProviderSession:
         provider_title = normalize_work_title(title, max_length=200) or "Cortex Work"
@@ -364,6 +370,7 @@ class AnthropicManagedAgentProvider(AgentProvider):
             agent_id=self._config.agent_id,
             mcp_servers=mcp_servers,
             web_enabled=web_enabled,
+            web_requires_approval=web_requires_approval,
         )
         if resources:
             kwargs["resources"] = [
@@ -408,11 +415,13 @@ class AnthropicManagedAgentProvider(AgentProvider):
         *,
         mcp_servers: Sequence[ProviderMcpServer],
         web_enabled: bool,
+        web_requires_approval: bool,
     ) -> None:
         override = _agent_override(
             agent_id=self._config.agent_id,
             mcp_servers=mcp_servers,
             web_enabled=web_enabled,
+            web_requires_approval=web_requires_approval,
         )
         self._client.beta.sessions.update(
             session_id,

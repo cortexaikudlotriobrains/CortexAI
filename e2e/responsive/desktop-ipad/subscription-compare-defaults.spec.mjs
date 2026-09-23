@@ -18,6 +18,22 @@ test("Free Compare defaults use allowed models and keep upgraded models offered"
     ).toBeDisabled();
 });
 
+test("Ask and Compare retain Gemini and Grok while the rich catalogue is disabled", async ({
+    responsiveApp,
+}) => {
+    const { page, state, reload } = responsiveApp;
+    state.modelsCatalogEnabled = false;
+    await reload();
+
+    await page.locator("#btnCompareMode").click();
+    await page.getByRole("button", { name: /Compare model 1:/ }).click();
+
+    const listbox = page.getByRole("listbox", { name: "Compare model 1 options" });
+    await expect(listbox.getByRole("option", { name: /Gemini/ })).toBeVisible();
+    await expect(listbox.getByRole("option", { name: /Grok/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Models" })).toHaveCount(0);
+});
+
 test("Plus Compare skips a premium fallback while retaining the full offering", async ({ responsiveApp }) => {
     const { page, state, reload } = responsiveApp;
     const providerOrder = ["openai", "grok", "claude", "deepseek", "gemini"];

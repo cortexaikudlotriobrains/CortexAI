@@ -605,6 +605,15 @@ def test_models_catalog_rejects_api_key_only_auth(client):
     assert r.json()["detail"]["code"] == "session_auth_required"
 
 
+def test_model_options_require_session_auth(client):
+    unauthenticated = client.get("/v1/model-options")
+    api_key_only = client.get("/v1/model-options", headers={"X-API-Key": "dev-key-1"})
+
+    assert unauthenticated.status_code in (401, 403)
+    assert api_key_only.status_code == 403
+    assert api_key_only.json()["detail"]["code"] == "session_auth_required"
+
+
 def test_models_catalog_returns_not_found_when_disabled(client, monkeypatch):
     monkeypatch.setenv("ENABLE_MODELS_CATALOG", "false")
 
@@ -618,6 +627,34 @@ def test_models_catalog_returns_not_found_when_disabled(client, monkeypatch):
     assert authenticated.json()["detail"] == "Not Found"
     assert unauthenticated.status_code == 404
     assert unauthenticated.json()["detail"] == "Not Found"
+
+
+def test_model_options_remain_complete_when_rich_catalog_is_disabled(client, monkeypatch):
+    monkeypatch.setenv("ENABLE_MODELS_CATALOG", "false")
+
+    response = client.get(
+        "/v1/model-options",
+        cookies={"cortex_session": "test-session-cookie"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["provider"] is None
+    assert body["enabled_only"] is True
+    assert body["total"] == len(body["models"])
+    assert all(item["enabled"] is True for item in body["models"])
+    assert all(item["selectable"] is True for item in body["models"])
+
+    registry = ModelRegistry.from_yaml()
+    expected_pairs = {
+        (candidate.provider, candidate.model_name)
+        for candidate in registry.list_selectable_models()
+    }
+    actual_pairs = {(item["provider"], item["model"]) for item in body["models"]}
+    actual_providers = {provider for provider, _model in actual_pairs}
+
+    assert actual_pairs == expected_pairs
+    assert {"gemini", "grok"}.issubset(actual_providers)
 
 
 def test_providers_catalog_returns_catalog_and_model_counts(client):

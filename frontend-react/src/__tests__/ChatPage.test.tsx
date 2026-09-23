@@ -146,10 +146,6 @@ describe("ChatPage authentication gate", () => {
     mocks.subscriptionEntitlements.current = {
       plan: { code: "plus", display_name: "Plus", status: "active" },
     };
-    (
-      window as unknown as { CORTEX_RUNTIME_CONFIG?: Record<string, unknown> }
-    ).CORTEX_RUNTIME_CONFIG = { modelsCatalogEnabled: true };
-
     renderChatPage();
 
     expect(screen.queryByRole("region", { name: "Sign in to use CortexAI" })).not.toBeInTheDocument();

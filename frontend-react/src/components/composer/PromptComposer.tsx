@@ -33,6 +33,8 @@ interface PromptComposerProps {
     Partial<Pick<UseSubscriptionResult, "loading">>;
 }
 
+const MOBILE_COMPOSER_MEDIA_QUERY = "(max-width: 900px)";
+
 export function PromptComposer({
   models,
   modelsLoading = false,
@@ -184,6 +186,11 @@ export function PromptComposer({
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
+      const usesMobileComposer =
+        typeof window !== "undefined" &&
+        Boolean(window.matchMedia?.(MOBILE_COMPOSER_MEDIA_QUERY).matches);
+      if (usesMobileComposer) return;
+
       event.preventDefault();
       if (!streaming && uploadsPending) {
         setError(uploadWaitMessage);
@@ -234,13 +241,6 @@ export function PromptComposer({
               onTargetLimit={() => {
                 if (thirdTargetError) setSubscriptionError(thirdTargetError);
               }}
-              trailingControls={
-                <FeatureChips
-                  {...featureChipProps}
-                  compareMode
-                  variant="sourcesOnly"
-                />
-              }
             />
           ) : (
             <ModelSelector
@@ -277,14 +277,14 @@ export function PromptComposer({
 
         <div
           className={styles.composerControls}
-          data-mobile-feature-stack={mode === "single" ? "true" : undefined}
+          data-composer-mode={mode}
         >
           <AttachmentStrip entitlements={entitlements} plans={plans} />
 
           <div id="promptFeatureControls" className={styles.featureControls}>
             <FeatureChips
               {...featureChipProps}
-              variant={mode === "compare" ? "improveOnly" : "default"}
+              variant="default"
             />
           </div>
 

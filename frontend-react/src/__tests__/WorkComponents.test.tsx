@@ -79,6 +79,30 @@ describe("Cortex Work components", () => {
     ).toBeInTheDocument();
   });
 
+  it("uses the existing one-time approval card for Web searches", () => {
+    render(
+      <WorkApproval
+        approval={approval({
+          action_type: "READ",
+          tool_name: "web_search",
+          description: "Allow Cortex to search the internet for this request?",
+          request_payload: { query: "current market prices" },
+        })}
+        onApprove={vi.fn()}
+        onDeny={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByRole("heading", { name: /Cortex wants to use Web Search/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Allow Cortex to search the internet for this request?"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("current market prices")).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  });
+
   it("renders authenticated open and download artifact links", () => {
     const artifact: WorkArtifact = {
       id: "artifact-1",
@@ -175,8 +199,24 @@ describe("Cortex Work components", () => {
     );
     await user.type(screen.getByRole("textbox", { name: "Work goal" }), "{Enter}");
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    await user.click(screen.getByRole("button", { name: /Web access: Auto/ }));
+    const webButton = screen.getByRole("button", { name: /Web access: Auto/ });
+    expect(webButton).toHaveTextContent("Web · Auto");
+    expect(webButton.querySelector("svg circle")).not.toBeNull();
+    await user.click(webButton);
     expect(onWebModeChange).toHaveBeenCalledWith("on");
+  });
+
+  it.each([
+    ["auto", "Auto"],
+    ["on", "On"],
+    ["ask", "Ask"],
+    ["off", "Off"],
+  ] as const)("keeps the Web globe beside the Work %s state", (webMode, label) => {
+    render(<WorkComposer {...composerProps({ webMode })} />);
+
+    const webButton = screen.getByRole("button", { name: new RegExp(`Web access: ${label}`) });
+    expect(webButton).toHaveTextContent(`Web · ${label}`);
+    expect(webButton.querySelector("svg circle")).not.toBeNull();
   });
 
   it("presents scaled Work budgets while preserving raw budget selections", async () => {

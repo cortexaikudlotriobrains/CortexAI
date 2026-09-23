@@ -7,7 +7,7 @@ import re
 
 from orchestrator.prompt_analyzer import PromptAnalyzer
 
-WORK_WEB_MODES = frozenset({"auto", "on", "off"})
+WORK_WEB_MODES = frozenset({"auto", "on", "ask", "off"})
 
 _CURRENT_INFORMATION_PATTERNS = (
     r"\bopening hours?\b",
@@ -27,6 +27,7 @@ _CURRENT_INFORMATION_PATTERNS = (
 class WorkWebDecision:
     requested_mode: str
     effective_enabled: bool
+    requires_approval: bool
     current_information: bool
     reason: str
 
@@ -44,12 +45,15 @@ def resolve_work_web_mode(instruction: str, requested_mode: str) -> WorkWebDecis
         raise ValueError(f"Unsupported Work web mode: {requested_mode}")
     current_information = needs_current_information(instruction)
     if mode == "on":
-        return WorkWebDecision(mode, True, current_information, "explicit_on")
+        return WorkWebDecision(mode, True, False, current_information, "explicit_on")
+    if mode == "ask":
+        return WorkWebDecision(mode, True, True, current_information, "explicit_ask")
     if mode == "off":
-        return WorkWebDecision(mode, False, current_information, "explicit_off")
+        return WorkWebDecision(mode, False, False, current_information, "explicit_off")
     return WorkWebDecision(
         mode,
         current_information,
+        False,
         current_information,
         "current_information" if current_information else "not_required",
     )
