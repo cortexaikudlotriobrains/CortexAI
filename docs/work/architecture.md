@@ -29,9 +29,10 @@ The authoritative state is split deliberately:
    line, with Unicode control/format characters removed, before persistence.
 3. `POST /v1/work/sessions/{id}/runs` validates auth, ownership, entitlement,
    active-run/connection/file limits, web rollout, and the requested credit
-   ceiling. The request's `web_mode` is `auto`, `on`, or `off`; the backend
-   resolves Auto from current-information intent and snapshots both the
-   requested and effective state. `Idempotency-Key` is the idempotency key.
+   ceiling. The request's `web_mode` is `auto`, `on`, `ask`, or `off`; the
+   backend resolves Auto from current-information intent and snapshots the
+   requested, effective, and approval state. Ask mounts Web but pauses each
+   search or page fetch for approval. `Idempotency-Key` is the idempotency key.
    React retains the session created in step 2 before requesting this run, so a
    structured denial can retry in place. The sidebar displays only sessions
    with a run and does not present a zero-run shell as executed work. React
@@ -128,9 +129,10 @@ duplicate provider delivery is a no-op.
 
 ## Approval protocol
 
-- Built-in `read`, `glob`, `grep`, and enabled `web_search`/`web_fetch` use
-  provider `always_allow`; they are read-only within the explicitly mounted or
-  enabled task surface and do not pause the session.
+- Built-in `read`, `glob`, and `grep` use provider `always_allow`. Enabled
+  `web_search`/`web_fetch` use `always_allow` in Auto/On and `always_ask` in Ask.
+  Cortex persists the latter as normal READ approvals instead of silently
+  confirming them.
 - Built-in `bash`, `write`, and `edit` inherit provider `always_ask`. MCP tools
   also default to `always_ask`; Cortex classifies each request, silently
   confirms READ, and persists/requests approval for writes and sensitive work.

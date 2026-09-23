@@ -62,6 +62,7 @@ class AgentProvider(Protocol):
         mcp_servers: Sequence[ProviderMcpServer],
         vault_ids: Sequence[str],
         web_enabled: bool,
+        web_requires_approval: bool,
         max_credit_budget: int,
     ) -> ProviderSession: ...
 
@@ -77,6 +78,7 @@ class AgentProvider(Protocol):
         *,
         mcp_servers: Sequence[ProviderMcpServer],
         web_enabled: bool,
+        web_requires_approval: bool,
     ) -> None: ...
 
     def extend_budget(

@@ -46,6 +46,7 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 _SAFE_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")
 _INTERRUPTIBLE_PROVIDER_SESSION_STATUSES = frozenset({"running", "rescheduling"})
+_WEB_APPROVAL_TOOLS = frozenset({"web_search", "web_fetch"})
 _MAX_PROVIDER_CONTINUATION_RUNS = 6
 _MAX_PROVIDER_CONTINUATION_CHARS = 12_000
 
@@ -83,6 +84,20 @@ def _string_list(value: object) -> list[str]:
 
 def _mapping_or_empty(value: object) -> dict[str, object]:
     return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _web_tool_requires_approval(run: Mapping[str, object], tool_name: str) -> bool:
+    snapshot = run.get("configuration_snapshot")
+    configuration = snapshot if isinstance(snapshot, Mapping) else {}
+    return bool(configuration.get("web_requires_approval")) and tool_name in _WEB_APPROVAL_TOOLS
+
+
+def _approval_description(tool_name: str, action_class: str) -> str:
+    if tool_name == "web_search":
+        return "Allow Cortex to search the internet for this request?"
+    if tool_name == "web_fetch":
+        return "Allow Cortex to open this internet page for this request?"
+    return f"Allow {tool_name} to perform this {action_class.lower().replace('_', ' ')} action?"
 
 
 def _can_reuse_provider_session(
@@ -358,6 +373,7 @@ def start_work_run(
     resolved = require_work_enabled(config)
     web_decision = resolve_work_web_mode(instruction, web_mode)
     web_enabled = web_decision.effective_enabled
+    web_requires_approval = web_decision.requires_approval
     if web_enabled and not resolved.web_enabled:
         raise work_http_error(
             status.HTTP_403_FORBIDDEN, "work_web_disabled", "Web access is not enabled for Work."
@@ -410,9 +426,10 @@ def start_work_run(
             "web_enabled": web_enabled,
             "requested_web_mode": web_decision.requested_mode,
             "effective_web_enabled": web_enabled,
+            "web_requires_approval": web_requires_approval,
             "web_current_information": web_decision.current_information,
             "web_resolution_reason": web_decision.reason,
-            "web_policy_version": "work-web-v1",
+            "web_policy_version": "work-web-v2",
             "input_file_ids": [str(value) for value in input_file_ids],
             "enabled_connection_ids": [str(value) for value in enabled_connection_ids],
             "plan_code": effective.plan.code,
@@ -516,6 +533,7 @@ def start_work_run(
             "connection_ids": connection_ids,
             "vault_ids": sorted(vault_ids),
             "web_enabled": web_enabled,
+            "web_requires_approval": web_requires_approval,
         }
         prior_capabilities = (
             (work_session.get("metadata") or {}).get("provider_capabilities")
@@ -545,6 +563,7 @@ def start_work_run(
                 provider_session_id,
                 mcp_servers=mcp_servers,
                 web_enabled=web_enabled,
+                web_requires_approval=web_requires_approval,
             )
             agent.extend_budget(
                 provider_session_id,
@@ -579,6 +598,7 @@ def start_work_run(
                 mcp_servers=mcp_servers,
                 vault_ids=vault_ids,
                 web_enabled=web_enabled,
+                web_requires_approval=web_requires_approval,
                 max_credit_budget=budget,
             )
             provider_session_id = created_session.id
@@ -1070,12 +1090,13 @@ def reconcile_work_run(
                             continue
                         tool_name = str(tool_event.payload.get("tool_name") or "tool")
                         action_class = classify_action(tool_name)
+                        web_approval = _web_tool_requires_approval(run, tool_name)
                         connection_id = _connection_id_for_provider_tool(
                             db,
                             work_run_id=work_run_id,
                             event_payload=tool_event.payload,
                         )
-                        if action_class == "READ":
+                        if action_class == "READ" and not web_approval:
                             auto_confirm.append(str(blocking_id))
                             continue
                         if action_class == "WRITE" and _has_saved_write_grant(
@@ -1115,12 +1136,12 @@ def reconcile_work_run(
                                 connection_id=connection_id,
                                 action_class=action_class,
                                 tool_name=tool_name,
-                                description=f"Allow {tool_name} to perform this {action_class.lower().replace('_', ' ')} action?",
+                                description=_approval_description(tool_name, action_class),
                                 request_payload=_mapping_or_empty(
                                     tool_event.payload.get("input_summary")
                                 ),
                             )
-                            if resolved.action_tools_enabled:
+                            if resolved.action_tools_enabled or web_approval:
                                 approval_ids.append(str(approval["id"]))
                             else:
                                 repository.decide_approval(
@@ -1162,13 +1183,13 @@ def reconcile_work_run(
                                         connection_id=connection_id,
                                         action_class=action_class,
                                         tool_name=tool_name,
-                                        description=f"Allow {tool_name} to perform this {action_class.lower().replace('_', ' ')} action?",
+                                        description=_approval_description(tool_name, action_class),
                                         request_payload=_mapping_or_empty(
                                             tool_event.payload.get("input_summary")
                                         ),
                                     )
                                 ]
-                            if resolved.action_tools_enabled:
+                            if resolved.action_tools_enabled or web_approval:
                                 approval_ids.extend(str(item["id"]) for item in matching)
                             else:
                                 for item in matching:

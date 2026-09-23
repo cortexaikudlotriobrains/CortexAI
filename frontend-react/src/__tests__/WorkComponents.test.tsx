@@ -79,6 +79,30 @@ describe("Cortex Work components", () => {
     ).toBeInTheDocument();
   });
 
+  it("uses the existing one-time approval card for Web searches", () => {
+    render(
+      <WorkApproval
+        approval={approval({
+          action_type: "READ",
+          tool_name: "web_search",
+          description: "Allow Cortex to search the internet for this request?",
+          request_payload: { query: "current market prices" },
+        })}
+        onApprove={vi.fn()}
+        onDeny={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByRole("heading", { name: /Cortex wants to use Web Search/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Allow Cortex to search the internet for this request?"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("current market prices")).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  });
+
   it("renders authenticated open and download artifact links", () => {
     const artifact: WorkArtifact = {
       id: "artifact-1",
@@ -185,6 +209,7 @@ describe("Cortex Work components", () => {
   it.each([
     ["auto", "Auto"],
     ["on", "On"],
+    ["ask", "Ask"],
     ["off", "Off"],
   ] as const)("keeps the Web globe beside the Work %s state", (webMode, label) => {
     render(<WorkComposer {...composerProps({ webMode })} />);

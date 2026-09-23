@@ -1756,6 +1756,7 @@
           "name": "POST /v1/work/sessions/{id}/runs",
           "request": {
             "method": "POST",
+            "description": "Starts a Work run. web_mode accepts auto, on, ask, or off. Ask mounts Web tools but pauses each web_search or web_fetch for the existing approval decision endpoint.",
             "header": [
               { "key": "Authorization", "value": "Bearer {{bearer_token}}" },
               { "key": "Content-Type", "value": "application/json" },
@@ -1807,6 +1808,7 @@
           "name": "POST /v1/work/sessions/{id}/instructions",
           "request": {
             "method": "POST",
+            "description": "Starts a follow-up run. web_mode accepts auto, on, ask, or off. Ask requires approval before each web_search or web_fetch.",
             "header": [
               { "key": "Authorization", "value": "Bearer {{bearer_token}}" },
               { "key": "Content-Type", "value": "application/json" },

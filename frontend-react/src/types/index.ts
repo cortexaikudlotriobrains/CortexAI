@@ -712,7 +712,7 @@ export type WorkRunStatus =
   | "budget_exhausted"
   | "output_limit_reached";
 
-export type WorkWebMode = "auto" | "on" | "off";
+export type WorkWebMode = "auto" | "on" | "ask" | "off";
 
 export interface WorkSession {
   id: string;

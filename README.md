@@ -29,7 +29,7 @@ heading, one guidance line, and concise labels that fill complete editable
 goals without starting a run. On desktop and tablet, the Work goal surface uses
 the same vertical center line as the empty Ask and Compare composers so mode
 changes do not make the primary input jump. Paid users can start a Work session with files,
-an explicit AI-credit ceiling, server-resolved Web Auto/On/Off access, and selected tool
+an explicit AI-credit ceiling, server-resolved Web Auto/On/Ask/Off access, and selected tool
 connections. The backend reserves the ceiling, creates or reuses an Anthropic
 Managed Agent session, persists provider-neutral events, resumes through SSE
 with `Last-Event-ID`, imports validated artifacts into private Cortex object
@@ -48,9 +48,11 @@ Anthropic enforces the corresponding session budget
 and pauses at `budget_reached`; Cortex does not send polling interrupts. A later
 run extends the reused provider session cap by its newly reserved budget, and a
 budget-paused turn resumes from the provider budget update without a competing
-`user.message`. Built-in `read`, `glob`, `grep`, and enabled web reads run
-without confirmation. `bash`, `write`, `edit`, MCP writes, and every sensitive
-action retain the applicable approval gate.
+`user.message`. Built-in `read`, `glob`, and `grep` run without confirmation.
+Enabled web reads run automatically in Auto/On, while Ask pauses each
+`web_search` or `web_fetch` for the existing Cortex approval flow. `bash`,
+`write`, `edit`, MCP writes, and every sensitive action retain the applicable
+approval gate.
 
 Every run also receives a server-owned 40,000 output-token ceiling. At 32,000
 output tokens Cortex asks the Agent to stop exploring and finalize the best
@@ -63,10 +65,12 @@ unbounded browser-owned run.
 
 Work Web defaults to `Auto`. The backend—not the browser—classifies prompts that
 need current information and enables the provider Web tools only for those
-runs. `On` always requests Web and `Off` never mounts it; choosing `Off` for a
-current-information prompt shows a warning but remains an explicit user choice.
+runs. `On` always makes Web available without per-use approval, `Ask` makes the
+tools available but pauses for approval before each search or page fetch, and
+`Off` never mounts them; choosing `Off` for a current-information prompt shows
+a warning but remains an explicit user choice.
 The Work composer uses the same Web globe icon as Ask and Compare while keeping
-the current `Web · Auto|On|Off` state visible.
+the current `Web · Auto|On|Ask|Off` state visible.
 
 Work settlement treats Managed Agent normal input, cache reads, and cache
 writes as independent cumulative usage partitions; follow-ups subtract the

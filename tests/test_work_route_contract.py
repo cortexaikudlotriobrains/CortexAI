@@ -54,6 +54,10 @@ def test_work_request_contract_normalizes_and_rejects_duplicate_resources():
     )
     assert request.instruction == "Prepare the report"
     assert request.web_mode == "auto"
+    assert (
+        WorkRunCreateDTO(instruction="Research this only after approval", web_mode="ask").web_mode
+        == "ask"
+    )
     assert WorkRunCreateDTO(instruction="Current ticket prices", web_enabled=True).web_mode == "on"
     assert WorkRunCreateDTO(instruction="Use only this file", web_enabled=False).web_mode == "off"
     assert WorkApprovalDecisionDTO(remember=True).remember is True

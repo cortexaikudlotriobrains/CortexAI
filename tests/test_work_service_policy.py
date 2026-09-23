@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import replace
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
@@ -9,6 +10,7 @@ from uuid import uuid4
 from fastapi import HTTPException
 import pytest
 
+from config import pricing
 from server.work.config import WorkConfig
 from server.work import service
 from server.work.billing import calculate_work_credit_usage
@@ -243,12 +245,31 @@ def test_web_auto_enables_current_information_without_overriding_explicit_off():
         "auto",
     )
     assert current.effective_enabled is True
+    assert current.requires_approval is False
     assert current.reason == "current_information"
     evergreen = resolve_work_web_mode("Summarize the attached contract", "auto")
     assert evergreen.effective_enabled is False
     explicit_off = resolve_work_web_mode("What is the latest exchange rate?", "off")
     assert explicit_off.effective_enabled is False
     assert explicit_off.current_information is True
+    approval = resolve_work_web_mode("Research the market", "ask")
+    assert approval.effective_enabled is True
+    assert approval.requires_approval is True
+    assert approval.reason == "explicit_ask"
+
+
+def test_web_ask_requires_approval_without_changing_other_read_tools():
+    run = {"configuration_snapshot": {"web_requires_approval": True}}
+    assert service._web_tool_requires_approval(run, "web_search")
+    assert service._web_tool_requires_approval(run, "web_fetch")
+    assert not service._web_tool_requires_approval(run, "read")
+    assert not service._web_tool_requires_approval(
+        {"configuration_snapshot": {"web_requires_approval": False}},
+        "web_search",
+    )
+    assert service._approval_description("web_search", "READ") == (
+        "Allow Cortex to search the internet for this request?"
+    )
 
 
 def test_provider_billing_identity_uses_the_resolved_session_model():
@@ -434,6 +455,7 @@ def test_provider_interrupt_and_followup_event_guards():
 
 
 def test_work_settlement_persists_full_cache_partition_and_provider_floor(monkeypatch):
+    monkeypatch.setattr(pricing, "_utc_now", lambda: datetime(2026, 8, 31, tzinfo=UTC))
     usage = calculate_work_credit_usage(
         {
             "list_cost": {"amount": "20", "currency": "USD"},

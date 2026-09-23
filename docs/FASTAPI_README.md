@@ -223,9 +223,11 @@ recorded on that run, skips input/non-downloadable files, and isolates each
 provider output so one failed download or storage write does not suppress the
 other deliverables.
 
-The run request accepts `web_mode: "auto" | "on" | "off"` and defaults to
-`auto`. The backend resolves `auto` from the instruction's current-information
-intent, persists both requested and effective Web state, and remains the
+The run request accepts `web_mode: "auto" | "on" | "ask" | "off"` and defaults
+to `auto`. The backend resolves `auto` from the instruction's
+current-information intent. `ask` enables the provider Web tools with
+per-`web_search`/`web_fetch` approval through the normal Work approval API. The
+backend persists the requested, effective, and approval state and remains the
 authority even if browser state changes while a session is being created.
 Legacy `web_enabled` booleans remain accepted as explicit On/Off requests.
 
@@ -241,8 +243,9 @@ pauses it at `budget_reached`; reconciliation never emits timer-driven
 `user.interrupt` events. Reused provider sessions receive a cumulative cap
 extension for the newly reserved run. If the prior turn is budget-paused, that
 budget update resumes it without sending a concurrent follow-up message.
-Built-in file/search reads are automatic, while bash/write/edit and sensitive
-or mutating connector actions retain approval enforcement.
+Built-in file reads are automatic. Web reads are automatic in Auto/On and
+approval-gated in Ask, while bash/write/edit and sensitive or mutating connector
+actions retain approval enforcement.
 
 Separately, each run defaults to a 40,000 output-token ceiling. The always-on
 lease-based reconciler requests concise finalization at 32,000 and interrupts

@@ -79,7 +79,16 @@ export function WorkComposer({
   const canSubmit = Boolean(value.trim()) && ready && !busy && !disabled;
   const connectedCount = enabledConnectionIds.length;
   const currentInformationPrompt = looksLikeCurrentInformation(value);
-  const webLabel = webMode === "auto" ? "Auto" : webMode === "on" ? "On" : "Off";
+  const webLabel =
+    webMode === "auto" ? "Auto" : webMode === "on" ? "On" : webMode === "ask" ? "Ask" : "Off";
+  const webDescription =
+    webMode === "auto"
+      ? "Cortex enables Web when the request appears to need current information."
+      : webMode === "on"
+        ? "The agent may use Web without asking for each search."
+        : webMode === "ask"
+          ? "The agent must ask for your approval before each Web search or page fetch."
+          : "The agent cannot use Web.";
 
   const updateToolsPopoverPosition = useCallback(() => {
     const button = toolsButtonRef.current;
@@ -197,7 +206,7 @@ export function WorkComposer({
           <button type="button" className={styles.workChip} onClick={() => inputRef.current?.click()} disabled={disabled}>
             <CortexIcon name="attach" size={15} /> Files {tasks.length > 0 && <b>{tasks.length}</b>}
           </button>
-          <button type="button" className={`${styles.workChip} ${webMode !== "off" ? styles.workChipActive : ""}`} onClick={() => onWebModeChange(nextWebMode(webMode))} disabled={disabled} aria-label={`Web access: ${webLabel}. Activate to change mode.`}>
+          <button type="button" className={`${styles.workChip} ${webMode !== "off" ? styles.workChipActive : ""}`} onClick={() => onWebModeChange(nextWebMode(webMode))} disabled={disabled} aria-label={`Web access: ${webLabel}. Activate to change mode.`} title={webDescription}>
             <CortexIcon name="web" size={15} /> Web · {webLabel}{webMode === "on" && " ✓"}
           </button>
           <div className={styles.popoverAnchor}>
@@ -273,7 +282,8 @@ export function WorkComposer({
 
 function nextWebMode(mode: WorkWebMode): WorkWebMode {
   if (mode === "auto") return "on";
-  if (mode === "on") return "off";
+  if (mode === "on") return "ask";
+  if (mode === "ask") return "off";
   return "auto";
 }
 

@@ -50,7 +50,7 @@ class WorkRunCreateDTO(BaseModel):
     instruction: str = Field(min_length=1, max_length=100_000)
     input_file_ids: list[UUID] = Field(default_factory=list, max_length=20)
     enabled_connection_ids: list[UUID] = Field(default_factory=list, max_length=20)
-    web_mode: Literal["auto", "on", "off"] = "auto"
+    web_mode: Literal["auto", "on", "ask", "off"] = "auto"
     web_enabled: bool | None = None
     max_credit_budget: int | None = Field(default=None, gt=0)
 

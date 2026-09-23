@@ -18,6 +18,7 @@ export function WorkRail({ run, events, connections, enabledConnectionIds }: Wor
     run.configuration_snapshot.effective_web_enabled ?? run.configuration_snapshot.web_enabled,
   );
   const requestedWebMode = String(run.configuration_snapshot.requested_web_mode || "off");
+  const requestedWebLabel = requestedWebMode.charAt(0).toUpperCase() + requestedWebMode.slice(1);
   const maxOutputTokens = run.max_output_tokens || 40_000;
   const actualOutputTokens = run.actual_output_tokens || 0;
   const activityEvents = events.filter(isUserFacingEvent).slice(-8);
@@ -91,7 +92,7 @@ export function WorkRail({ run, events, connections, enabledConnectionIds }: Wor
         <ul className={styles.toolSummary}>
           {effectiveWebEnabled && (
             <li>
-              <CortexIcon name="web" size={14} /> Web{requestedWebMode === "auto" ? " · Auto" : " · On"}
+              <CortexIcon name="web" size={14} /> Web · {requestedWebLabel}
             </li>
           )}
           {activeConnections.map((connection) => (
