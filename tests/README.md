@@ -25,7 +25,7 @@ This test suite provides comprehensive testing for the OpenAI Project, including
 | `test_baseline_safety_rails.py` | Provider safety rails | 20+ tests | Schema/provider/byok/orchestrator regression contracts |
 | `test_provider_catalog.py` | Provider catalog contract | 6 tests | SSoT mapping and module wiring checks |
 | `test_client_registry_and_schema_dynamic.py` | Registry + dynamic schema | 7 tests | Adapter registry factory behavior, catalog-driven schema acceptance |
-| `test_dynamic_provider_discovery_e2e.py` | Discovery endpoint regression | 1 test | New provider appears in `/v1/providers` + `/v1/models` automatically |
+| `test_dynamic_provider_discovery_e2e.py` | Discovery endpoint regression | 1 test | New provider appears in `/v1/providers`, `/v1/model-options`, and `/v1/models` automatically |
 | `test_component_boundaries.py` | Deploy boundary regression | 5 tests | API-only mode, missing frontend handling, React default path, override precedence, and runtime health |
 | `test_multi_compare_mode.py` | Multi-provider comparison | 15+ tests | Concurrent execution, error handling |
 | `test_prompt_optimizer.py` | Prompt optimization | 20+ tests | Input validation, self-correction |

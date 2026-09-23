@@ -70,6 +70,7 @@ export function ModelsPage() {
   const accountBillingDestination = accountSubscription.billingDestination;
   const { models: liveModels, loading: modelsLoading } = useModels(
     !authLoading && (!authEnabled || loggedIn),
+    "catalog",
   );
   const liveCatalogSummary = modelsLoading
     ? getModelsCatalogSummary()

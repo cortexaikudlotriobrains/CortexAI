@@ -31,6 +31,7 @@ export const test = base.extend({
             analysisRuns: responsiveAnalysisRuns(),
             uploadedFiles: new Map(),
             models: [...MODELS],
+            modelsCatalogEnabled: true,
             subscriptionPlan: "free",
             subscriptionSource: null,
             billingEnabled: true,
@@ -113,7 +114,13 @@ async function installResponsiveRoutes(page, state) {
         route.fulfill({
             status: 200,
             contentType: "application/javascript",
-            body: "window.CORTEX_RUNTIME_CONFIG = { enableDevSessionLogin: false, directAttachmentUploads: true, legacyAttachmentUploads: true, workEnabled: true, modelsCatalogEnabled: true };",
+            body: `window.CORTEX_RUNTIME_CONFIG = ${JSON.stringify({
+                enableDevSessionLogin: false,
+                directAttachmentUploads: true,
+                legacyAttachmentUploads: true,
+                workEnabled: true,
+                modelsCatalogEnabled: state.modelsCatalogEnabled,
+            })};`,
         }),
     );
 
@@ -169,7 +176,7 @@ async function installResponsiveRoutes(page, state) {
         if (url.pathname === "/v1/auth/me") {
             return json(route, authenticatedUser());
         }
-        if (url.pathname === "/v1/models") {
+        if (["/v1/model-options", "/v1/models"].includes(url.pathname)) {
             return json(route, {
                 enabled_only: true,
                 models: state.models,

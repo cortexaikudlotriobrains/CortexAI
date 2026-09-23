@@ -51,8 +51,7 @@ export function ChatPage() {
     subscriptionState.entitlements,
   );
   const accountBillingDestination = accountSubscription.billingDestination;
-  const modelsCatalogEnabled = getRuntimeConfig().modelsCatalogEnabled === true;
-  const { models, loading: modelsLoading } = useModels(workspaceReady && modelsCatalogEnabled);
+  const { models, loading: modelsLoading } = useModels(workspaceReady);
   const { removeThread } = useHistory();
   const { submit, regenerate, cancel } = useChat();
   const { theme, toggleTheme } = useTheme();

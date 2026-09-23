@@ -63,7 +63,7 @@ async function installSignedOutRoutes(page, sessionScopedStartupPaths) {
             return json(route, { detail: "Not authenticated" }, 401);
         }
 
-        if (["/v1/providers", "/v1/models", "/v1/history"].includes(url.pathname)) {
+        if (["/v1/providers", "/v1/model-options", "/v1/models", "/v1/history"].includes(url.pathname)) {
             sessionScopedStartupPaths.push(url.pathname);
             return json(route, { detail: `Unexpected signed-out request: ${url.pathname}` }, 500);
         }

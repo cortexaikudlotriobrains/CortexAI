@@ -584,6 +584,37 @@
           ]
         },
         {
+          "name": "GET /v1/model-options",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearer_token}}"
+              }
+            ],
+            "url": "{{base_url}}/v1/model-options",
+            "description": "Session-authenticated active selectable model rows for Ask/Compare. This endpoint remains available when ENABLE_MODELS_CATALOG=false."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+                  "var body = pm.response.json();",
+                  "pm.test('selector options include active rows', function () {",
+                  "  pm.expect(body.enabled_only).to.eql(true);",
+                  "  pm.expect(body.models).to.be.an('array').that.is.not.empty;",
+                  "  pm.expect(body.models.every(function (item) { return item.enabled && item.selectable; })).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "GET /v1/models",
           "request": {
             "method": "GET",
