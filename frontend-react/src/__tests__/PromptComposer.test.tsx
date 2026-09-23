@@ -114,6 +114,8 @@ describe("PromptComposer", () => {
       name: "Helps you ask better for better results",
     });
     const sendButton = screen.getByRole("button", { name: "Send message" });
+    const controls = card?.querySelector('[data-composer-mode="single"]');
+    const featureControls = card?.querySelector("#promptFeatureControls");
 
     expect(textarea).toHaveAttribute("rows", "1");
     expect(textarea).toHaveAttribute(
@@ -123,6 +125,9 @@ describe("PromptComposer", () => {
     expect(card).toContainElement(fileName);
     expect(card).toContainElement(attachButton);
     expect(card).toContainElement(smartSwitch);
+    expect(controls).toContainElement(attachButton);
+    expect(featureControls).toContainElement(smartSwitch);
+    expect(featureControls).toContainElement(researchSwitch);
     expect(smartSwitch).toHaveAttribute("aria-describedby", smartTooltip.id);
     expect(researchSwitch).toHaveAttribute("aria-checked", "true");
     expect(researchSwitch).toHaveAttribute("aria-describedby", researchTooltip.id);
@@ -171,6 +176,8 @@ describe("PromptComposer", () => {
     expect(screen.queryByRole("switch", { name: "Smart routing" })).not.toBeInTheDocument();
     const webSwitch = screen.getByRole("switch", { name: "Research mode" });
     const improveSwitch = screen.getByRole("switch", { name: "Prompt optimization" });
+    const compareSelectors = screen.getByLabelText("Compare model selectors");
+    const featureControls = document.querySelector("#promptFeatureControls");
     expect(webSwitch).toHaveTextContent("Web");
     expect(webSwitch).not.toHaveTextContent("With sources");
     expect(webSwitch.querySelector("svg circle")).not.toBeNull();
@@ -186,6 +193,9 @@ describe("PromptComposer", () => {
         name: "Helps you ask better for better results",
       }).id,
     );
+    expect(compareSelectors).not.toContainElement(webSwitch);
+    expect(featureControls).toContainElement(webSwitch);
+    expect(featureControls).toContainElement(improveSwitch);
     expect(screen.queryByRole("checkbox", { name: "Compare" })).not.toBeInTheDocument();
 
     const textarea = screen.getByRole("textbox", { name: "Prompt input" });

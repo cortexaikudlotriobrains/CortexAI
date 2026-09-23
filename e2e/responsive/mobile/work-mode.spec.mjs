@@ -51,6 +51,10 @@ for (const viewport of [
             expect(composerBounds.y + composerBounds.height).toBeLessThanOrEqual(
                 navigationBounds.y - 12,
             );
+            const composerNavigationGap =
+                navigationBounds.y - (composerBounds.y + composerBounds.height);
+            expect(composerNavigationGap).toBeGreaterThanOrEqual(11);
+            expect(composerNavigationGap).toBeLessThanOrEqual(13);
             await expectNoHorizontalOverflow(page);
         },
     );

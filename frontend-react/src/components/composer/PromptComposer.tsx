@@ -241,13 +241,6 @@ export function PromptComposer({
               onTargetLimit={() => {
                 if (thirdTargetError) setSubscriptionError(thirdTargetError);
               }}
-              trailingControls={
-                <FeatureChips
-                  {...featureChipProps}
-                  compareMode
-                  variant="sourcesOnly"
-                />
-              }
             />
           ) : (
             <ModelSelector
@@ -284,14 +277,14 @@ export function PromptComposer({
 
         <div
           className={styles.composerControls}
-          data-mobile-feature-stack={mode === "single" ? "true" : undefined}
+          data-composer-mode={mode}
         >
           <AttachmentStrip entitlements={entitlements} plans={plans} />
 
           <div id="promptFeatureControls" className={styles.featureControls}>
             <FeatureChips
               {...featureChipProps}
-              variant={mode === "compare" ? "improveOnly" : "default"}
+              variant="default"
             />
           </div>
 

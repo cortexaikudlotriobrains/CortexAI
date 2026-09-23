@@ -155,6 +155,20 @@ test("mobile hides the attachment count and file-size hint", async ({ responsive
     await expect(page.getByRole("button", { name: "Attach files" })).toBeVisible();
 });
 
+test("mobile Ask and Compare keep feature controls beside Attach", async ({ responsiveApp }) => {
+    const { page } = responsiveApp;
+    await page.setViewportSize({ width: 320, height: 568 });
+
+    for (const [mode, switchNames] of [
+        ["Ask", ["Smart routing", "Research mode", "Prompt optimization"]],
+        ["Compare", ["Research mode", "Prompt optimization"]],
+    ]) {
+        await openMobilePanel(page, mode);
+        await expectComposerToolbarOrder(page, switchNames);
+        await expectNoHorizontalOverflow(page);
+    }
+});
+
 for (const viewport of [
     { width: 320, height: 568 },
     { width: 390, height: 844 },
@@ -400,6 +414,30 @@ async function expectMobileComposerControlsFullyVisible(page) {
         expect(bounds.x, `${name} left edge`).toBeGreaterThanOrEqual(0);
         expect(bounds.x + bounds.width, `${name} right edge`).toBeLessThanOrEqual(
             page.viewportSize().width,
+        );
+    }
+}
+
+async function expectComposerToolbarOrder(page, switchNames) {
+    const attach = page.getByRole("button", { name: "Attach files" });
+    const send = page.getByRole("button", { name: "Send message" });
+    const controls = [attach, ...switchNames.map(name => page.getByRole("switch", { name })), send];
+    const bounds = [];
+
+    for (const control of controls) {
+        await expect(control).toBeVisible();
+        const box = await control.boundingBox();
+        expect(box).not.toBeNull();
+        bounds.push(box);
+    }
+
+    const attachCenter = bounds[0].y + bounds[0].height / 2;
+    for (const box of bounds.slice(1, -1)) {
+        expect(Math.abs(box.y + box.height / 2 - attachCenter)).toBeLessThanOrEqual(1);
+    }
+    for (let index = 1; index < bounds.length; index += 1) {
+        expect(bounds[index - 1].x + bounds[index - 1].width).toBeLessThanOrEqual(
+            bounds[index].x + 1,
         );
     }
 }

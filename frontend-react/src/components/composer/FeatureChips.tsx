@@ -99,7 +99,7 @@ export function FeatureChips({
       ariaLabel="Research mode"
       touchTooltipId={touchTooltipId}
       onTouchTooltip={showTouchTooltip}
-      tone={variant === "sourcesOnly" ? "ghost" : "segment"}
+      tone={compareMode || variant === "sourcesOnly" ? "ghost" : "segment"}
       blocked={researchBlocked}
       onBlocked={onResearchBlocked}
     />
@@ -125,13 +125,13 @@ export function FeatureChips({
 
   return (
     <div className={stripClass}>
-      {(smartChip || (researchChip && variant === "default")) && (
+      {smartChip && (
         <div className={styles.segmentedGroup}>
           {smartChip}
-          {researchChip}
+          {variant === "default" && researchChip}
         </div>
       )}
-      {variant === "sourcesOnly" && researchChip}
+      {!smartChip && researchChip}
       {optimizeChip}
     </div>
   );
