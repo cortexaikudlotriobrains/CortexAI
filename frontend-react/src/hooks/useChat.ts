@@ -18,6 +18,7 @@ import {
   isSubscriptionDenial,
   toSubscriptionError,
 } from "../subscription/subscriptionErrors";
+import { useAttachmentUploadStore } from "../store/attachmentUploadStore";
 import { parseModelKey } from "./useSmartRouting";
 import type {
   ApiError,
@@ -60,6 +61,11 @@ export function useChat() {
       return;
     }
 
+    const composerSubmission = beginComposerSubmission({
+      enabled: clearComposer,
+      prompt: state.prompt,
+      attachments: [...state.attachments],
+    });
     const previousActiveTurnId = state.activeTurnId;
     const controller = beginRequestController();
 
@@ -139,7 +145,7 @@ export function useChat() {
           creditActivityId,
           initialQuery: rawPrompt,
           startedAt: requestStartedAt,
-          clearComposer,
+          acceptComposer: composerSubmission.accept,
         });
       } else {
         await runAskTurn({
@@ -154,7 +160,7 @@ export function useChat() {
           creditActivityId,
           initialQuery: rawPrompt,
           startedAt: requestStartedAt,
-          clearComposer,
+          acceptComposer: composerSubmission.accept,
         });
       }
     } catch (err: unknown) {
@@ -178,6 +184,7 @@ export function useChat() {
       latest.setError(message);
       latest.setStreaming(false);
     } finally {
+      composerSubmission.restore();
       clearRequestController(controller);
     }
   }, []);
@@ -312,7 +319,7 @@ async function runAskTurn({
   startedAt,
   targetOverride,
   researchEnabledOverride,
-  clearComposer,
+  acceptComposer,
 }: {
   prompt: string;
   submittedPrompt: string;
@@ -327,7 +334,7 @@ async function runAskTurn({
   startedAt: string;
   targetOverride?: Partial<CompareTargetRequest>;
   researchEnabledOverride?: boolean;
-  clearComposer: boolean;
+  acceptComposer: () => void;
 }) {
   const state = useChatStore.getState();
   const selected = parseModelKey(state.selectedModelKey);
@@ -376,13 +383,12 @@ async function runAskTurn({
 
   let finalResponse: Partial<ChatResponse> = {};
   const deltaBuffer = new StreamDeltaBuffer(activeTurnId);
-  const commitComposer = deferredComposerClear(clearComposer);
   // finally guarantees no orphaned timeout can mutate a turn after the
   // cancel/error path has settled it.
   try {
     for await (const chunk of streamChat(request, signal)) {
       if (signal.aborted) break;
-      commitComposer();
+      acceptComposer();
       if (chunk.type === "delta" && chunk.text) {
         deltaBuffer.append(0, chunk.text);
         continue;
@@ -430,6 +436,7 @@ async function runAskTurn({
         throw new Error(chunk.error ?? "Stream error");
       }
     }
+    if (!signal.aborted) acceptComposer();
   } finally {
     if (signal.aborted) {
       deltaBuffer.dispose();
@@ -477,7 +484,7 @@ async function runCompareTurn({
   creditActivityId,
   initialQuery,
   startedAt,
-  clearComposer,
+  acceptComposer,
 }: {
   prompt: string;
   submittedPrompt: string;
@@ -490,7 +497,7 @@ async function runCompareTurn({
   creditActivityId: string;
   initialQuery: string;
   startedAt: string;
-  clearComposer: boolean;
+  acceptComposer: () => void;
 }) {
   const state = useChatStore.getState();
   const activeKeys = state.compareModelKeys.filter(Boolean);
@@ -542,11 +549,10 @@ async function runCompareTurn({
   }
 
   const deltaBuffer = new StreamDeltaBuffer(activeTurnId);
-  const commitComposer = deferredComposerClear(clearComposer);
   try {
     for await (const chunk of streamCompare(request, signal)) {
       if (signal.aborted) break;
-      commitComposer();
+      acceptComposer();
       const index = chunk.index ?? 0;
       if (chunk.type === "delta" && chunk.text) {
         deltaBuffer.append(index, chunk.text);
@@ -586,6 +592,7 @@ async function runCompareTurn({
         throw new Error(chunk.error ?? "Compare stream error");
       }
     }
+    if (!signal.aborted) acceptComposer();
   } finally {
     if (signal.aborted) {
       deltaBuffer.dispose();
@@ -868,15 +875,43 @@ function toAttachmentItems(attachments: FileUploadResponse[]): AttachmentRequest
   }));
 }
 
-function deferredComposerClear(enabled: boolean): () => void {
-  let committed = !enabled;
-  return () => {
-    if (committed) return;
-    committed = true;
-    const state = useChatStore.getState();
-    void clearAttachmentUploads({ deleteRemote: false });
-    state.setPrompt("");
-    state.clearAttachments();
+function beginComposerSubmission({
+  enabled,
+  prompt,
+  attachments,
+}: {
+  enabled: boolean;
+  prompt: string;
+  attachments: FileUploadResponse[];
+}): { accept: () => void; restore: () => void } {
+  if (!enabled) return { accept: () => undefined, restore: () => undefined };
+
+  // Hand the prompt off to the optimistic turn immediately, but keep a local
+  // snapshot until the server accepts the stream so pre-stream failures remain editable.
+  let pending = true;
+  const uploadTasks = [...useAttachmentUploadStore.getState().tasks];
+  const state = useChatStore.getState();
+  void clearAttachmentUploads({ deleteRemote: false });
+  state.setPrompt("");
+  state.clearAttachments();
+
+  return {
+    accept: () => {
+      pending = false;
+    },
+    restore: () => {
+      if (!pending) return;
+      pending = false;
+
+      const latest = useChatStore.getState();
+      if (!latest.prompt) latest.setPrompt(prompt);
+      for (const attachment of attachments) latest.addAttachment(attachment);
+
+      const uploadState = useAttachmentUploadStore.getState();
+      const currentTaskIds = new Set(uploadState.tasks.map((task) => task.clientId));
+      const missingTasks = uploadTasks.filter((task) => !currentTaskIds.has(task.clientId));
+      if (missingTasks.length > 0) uploadState.addTasks(missingTasks);
+    },
   };
 }
 

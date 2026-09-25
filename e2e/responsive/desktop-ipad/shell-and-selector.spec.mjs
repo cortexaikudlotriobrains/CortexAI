@@ -523,7 +523,7 @@ test("desktop Ask and Compare keep feature controls beside Attach", async ({ res
     }
 });
 
-test("Improve keeps response cards hidden until optimization resolves", async ({ responsiveApp }) => {
+test("Improve clears the composer and keeps response cards hidden until optimization resolves", async ({ responsiveApp }) => {
     const { page } = responsiveApp;
     await page.setViewportSize({ width: 1440, height: 900 });
 
@@ -578,6 +578,7 @@ test("Improve keeps response cards hidden until optimization resolves", async ({
 
     const pendingTurn = page.locator("[data-turn-id]").last();
     await expect(pendingTurn.getByRole("status")).toContainText("Improving your prompt");
+    await expect(page.locator("#promptInput")).toHaveValue("");
     await expect(pendingTurn.locator("article")).toHaveCount(0);
     await expect(page.getByRole("tablist", { name: "Compare model responses" })).toHaveCount(0);
 

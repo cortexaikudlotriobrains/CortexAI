@@ -413,6 +413,7 @@ describe("prompt optimization", () => {
         "Improving your prompt",
       );
     });
+    expect(useChatStore.getState().prompt).toBe("");
     expect(document.querySelector("[data-turn-id]")?.querySelectorAll("article"))
       .toHaveLength(0);
 
@@ -423,6 +424,7 @@ describe("prompt optimization", () => {
     });
     expect(document.querySelector("[data-turn-id]")?.querySelectorAll("article"))
       .toHaveLength(0);
+    expect(useChatStore.getState().prompt).toBe("Cancel this optimization");
     expect(useChatStore.getState().streaming).toBe(false);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/v1/optimize");
