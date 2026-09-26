@@ -305,6 +305,13 @@ def _resolve_chat_execution_plan(
 
     if TRUE_SMART_ROUTING_ENABLED and smart_mode:
         constraints = _build_chat_routing_constraints()
+        reasoning = request.generation.reasoning if request.generation is not None else None
+        requested_reasoning_mode = str(getattr(reasoning, "mode", "auto") or "auto")
+        requested_reasoning_effort = str(getattr(reasoning, "effort", "auto") or "auto")
+        if requested_reasoning_mode != "auto" or requested_reasoning_effort != "auto":
+            constraints = dict(constraints or {})
+            constraints["reasoning_mode"] = requested_reasoning_mode
+            constraints["reasoning_effort"] = requested_reasoning_effort
         if allowed_billing_classes is not None:
             constraints = dict(constraints or {})
             constraints["allowed_billing_classes"] = sorted(allowed_billing_classes)
@@ -496,9 +503,7 @@ def _successful_billing_targets(
         resolve_model_target(
             provider=str(getattr(response, "provider", "") or ""),
             model=str(
-                getattr(response, "requested_model", None)
-                or getattr(response, "model", "")
-                or ""
+                getattr(response, "requested_model", None) or getattr(response, "model", "") or ""
             ),
             orchestrator=orchestrator,
         ),
@@ -541,14 +546,10 @@ def _billable_model_usages(response: object) -> tuple[BillableModelUsage, ...]:
         BillableModelUsage(
             provider=str(getattr(response, "provider", "") or ""),
             model=str(
-                getattr(response, "requested_model", None)
-                or getattr(response, "model", "")
-                or ""
+                getattr(response, "requested_model", None) or getattr(response, "model", "") or ""
             ),
             prompt_tokens=max(0, int(getattr(usage, "prompt_tokens", 0) or 0)),
-            cached_input_tokens=max(
-                0, int(getattr(usage, "cached_input_tokens", 0) or 0)
-            ),
+            cached_input_tokens=max(0, int(getattr(usage, "cached_input_tokens", 0) or 0)),
             cache_write_tokens=max(0, int(getattr(usage, "cache_write_tokens", 0) or 0)),
             output_tokens=max(0, int(getattr(usage, "completion_tokens", 0) or 0)),
             reasoning_tokens=max(0, int(getattr(usage, "reasoning_tokens", 0) or 0)),
@@ -561,9 +562,7 @@ def _billable_model_usages(response: object) -> tuple[BillableModelUsage, ...]:
             ),
             pricing_version=str(getattr(response, "pricing_version", "") or "") or None,
             provider_cost_owner=str(
-                (getattr(response, "metadata", {}) or {}).get(
-                    "provider_cost_owner", "cortex"
-                )
+                (getattr(response, "metadata", {}) or {}).get("provider_cost_owner", "cortex")
             ),
         ),
     )
@@ -642,9 +641,7 @@ def _finalize_chat_usage(
             if settle_model_response
             else ()
         )
-        research_usage = research_credit_usage_from_metadata(
-            getattr(response, "metadata", None)
-        )
+        research_usage = research_credit_usage_from_metadata(getattr(response, "metadata", None))
         _finalize_subscription_usage(
             reservation=reservation,
             successful_targets=successful_targets,
@@ -797,13 +794,15 @@ async def chat(
             inference_attachments=inference_attachments,
         )
 
+    generation_registry = ModelRegistry.from_yaml()
+    generation_input_text = _billing_materialized_input_text(request, inference_attachments)
     generation_budget = resolve_request_budget(
         provider=execution_plan.preview_provider,
         model=execution_plan.preview_model,
         generation=request.generation,
         legacy_max_tokens=request.max_tokens,
-        input_text=_billing_materialized_input_text(request, inference_attachments),
-        registry=ModelRegistry.from_yaml(),
+        input_text=generation_input_text,
+        registry=generation_registry,
     )
     effective_max_tokens = generation_budget.effective_max_output_tokens
     kwargs: dict[str, Any] = {}
@@ -889,6 +888,25 @@ async def chat(
         )
         kwargs.update(generation_budget.provider_kwargs())
 
+    def resolve_smart_generation(provider: str, model: str):
+        resolved = resolve_request_budget(
+            provider=provider,
+            model=model,
+            generation=request.generation,
+            legacy_max_tokens=request.max_tokens,
+            input_text=generation_input_text,
+            registry=generation_registry,
+        )
+        return constrain_budget_to_reservation(
+            resolved,
+            billing_reservation,
+            provider=provider,
+            model=model,
+        )
+
+    if execution_plan.strategy == "smart_orchestrator":
+        kwargs["_smart_generation_resolver"] = resolve_smart_generation
+
     provider_completed = False
     try:
         response = await asyncio.to_thread(
@@ -905,6 +923,10 @@ async def chat(
         )
         provider_completed = True
         response = sanitize_provider_error_response(normalize_empty_success_response(response))
+        if execution_plan.strategy == "smart_orchestrator":
+            response_model = str(response.requested_model or response.model or "").strip()
+            if generation_registry.find_model(response.provider, response_model) is not None:
+                generation_budget = resolve_smart_generation(response.provider, response_model)
         response = annotate_response(response, generation_budget)
         if billing_reservation is not None:
             _finalize_chat_usage(
@@ -1072,13 +1094,15 @@ async def chat_stream(
     target_provider = execution_plan.preview_provider
     target_model = execution_plan.preview_model
 
+    generation_registry = ModelRegistry.from_yaml()
+    generation_input_text = _billing_materialized_input_text(request, inference_attachments)
     generation_budget = resolve_request_budget(
         provider=execution_plan.preview_provider,
         model=execution_plan.preview_model,
         generation=request.generation,
         legacy_max_tokens=request.max_tokens,
-        input_text=_billing_materialized_input_text(request, inference_attachments),
-        registry=ModelRegistry.from_yaml(),
+        input_text=generation_input_text,
+        registry=generation_registry,
     )
     effective_max_tokens = generation_budget.effective_max_output_tokens
     kwargs: dict[str, Any] = {}
@@ -1166,7 +1190,27 @@ async def chat_stream(
         target_provider = execution_plan.preview_provider
         target_model = execution_plan.preview_model
 
+    def resolve_smart_generation(provider: str, model: str):
+        resolved = resolve_request_budget(
+            provider=provider,
+            model=model,
+            generation=request.generation,
+            legacy_max_tokens=request.max_tokens,
+            input_text=generation_input_text,
+            registry=generation_registry,
+        )
+        return constrain_budget_to_reservation(
+            resolved,
+            billing_reservation,
+            provider=provider,
+            model=model,
+        )
+
+    if execution_plan.strategy == "smart_orchestrator":
+        kwargs["_smart_generation_resolver"] = resolve_smart_generation
+
     async def event_stream():
+        response_generation_budget = generation_budget
         stream_started_at = time.monotonic()
         heartbeat_interval_s = _stream_heartbeat_interval_s()
         provider_task: asyncio.Task | None = None
@@ -1235,7 +1279,14 @@ async def chat_stream(
                     stream_log.log("heartbeat_sent", elapsed_ms=elapsed_ms)
             response = await provider_task
             response = sanitize_provider_error_response(normalize_empty_success_response(response))
-            response = annotate_response(response, generation_budget)
+            if execution_plan.strategy == "smart_orchestrator":
+                response_model = str(response.requested_model or response.model or "").strip()
+                if generation_registry.find_model(response.provider, response_model) is not None:
+                    response_generation_budget = resolve_smart_generation(
+                        response.provider,
+                        response_model,
+                    )
+            response = annotate_response(response, response_generation_budget)
             stream_log.log(
                 "provider_call_completed",
                 response_provider=getattr(response, "provider", ""),

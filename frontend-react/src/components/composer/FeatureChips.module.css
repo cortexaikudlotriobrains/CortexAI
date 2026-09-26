@@ -266,6 +266,10 @@
     height: 14px;
     flex-basis: 14px;
   }
+
+  .mobileIconOnly > span {
+    display: none;
+  }
 }
 
 @media (max-width: 430px) and (hover: hover) {
@@ -289,12 +293,22 @@
     padding: 0 6px;
   }
 
-  .ghostChip svg {
+  .chip > span {
     display: none;
   }
 
-  .ghostChip.keepIcon svg {
+  .ghostChip svg {
     display: block;
+  }
+
+  .tooltipEnd {
+    right: auto;
+    left: 0;
+  }
+
+  .tooltipEnd::after {
+    right: auto;
+    left: 14px;
   }
 }
 

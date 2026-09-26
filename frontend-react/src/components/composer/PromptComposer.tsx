@@ -2,6 +2,7 @@ import { useRef, useEffect, useCallback } from "react";
 import { ModelSelector } from "./ModelSelector";
 import { CompareSelector } from "./CompareSelector";
 import { FeatureChips } from "./FeatureChips";
+import { ReasoningSelector } from "./ReasoningSelector";
 import { AttachmentStrip } from "./AttachmentStrip";
 import { useChatStore } from "../../store/chatStore";
 import { useAttachmentUploadStore } from "../../store/attachmentUploadStore";
@@ -14,6 +15,13 @@ import { formatAiCredits } from "../../utils/aiCredits";
 import { DEFAULT_MODELS } from "../../config/defaultModels";
 import { resolveAskModelKey } from "../../config/askDefaults";
 import { resolveCompareModelKeys } from "../../config/compareDefaults";
+import {
+  compareReasoningLevels,
+  defaultModelReasoningLevel,
+  modelForKey,
+  modelReasoningLevels,
+  smartReasoningLevels,
+} from "../../reasoning/reasoningLevels";
 import { CortexIcon } from "../shared/CortexIcon";
 import styles from "./PromptComposer.module.css";
 import {
@@ -53,6 +61,10 @@ export function PromptComposer({
   const setCompareResearchMode = useChatStore((s) => s.setCompareResearchMode);
   const optimizeMode = useChatStore((s) => s.optimizeMode);
   const setOptimizeMode = useChatStore((s) => s.setOptimizeMode);
+  const askReasoningLevel = useChatStore((s) => s.askReasoningLevel);
+  const setAskReasoningLevel = useChatStore((s) => s.setAskReasoningLevel);
+  const compareReasoningLevel = useChatStore((s) => s.compareReasoningLevel);
+  const setCompareReasoningLevel = useChatStore((s) => s.setCompareReasoningLevel);
   const selectedModelKey = useChatStore((s) => s.selectedModelKey);
   const setSelectedModelKey = useChatStore((s) => s.setSelectedModelKey);
   const compareModelKeys = useChatStore((s) => s.compareModelKeys);
@@ -184,6 +196,53 @@ export function PromptComposer({
     subscriptionLoading,
   ]);
 
+  const selectedModel = modelForKey(selectedModelKey, availableModels);
+  const supportedReasoningLevels =
+    mode === "compare"
+      ? compareReasoningLevels(compareModelKeys, availableModels)
+      : smartMode
+        ? smartReasoningLevels(availableModels)
+        : modelReasoningLevels(selectedModel);
+  const reasoningLevel = mode === "compare" ? compareReasoningLevel : askReasoningLevel;
+  const reasoningUnavailable =
+    supportedReasoningLevels.length === 0 && (mode === "compare" || !smartMode);
+
+  useEffect(() => {
+    if (mode === "compare") {
+      if (
+        compareReasoningLevel !== "auto" &&
+        !supportedReasoningLevels.includes(compareReasoningLevel)
+      ) {
+        setCompareReasoningLevel("auto");
+      }
+      return;
+    }
+    if (smartMode) {
+      if (
+        askReasoningLevel !== "auto" &&
+        !supportedReasoningLevels.includes(askReasoningLevel)
+      ) {
+        setAskReasoningLevel("auto");
+      }
+      return;
+    }
+    if (
+      askReasoningLevel !== "auto" &&
+      !supportedReasoningLevels.includes(askReasoningLevel)
+    ) {
+      setAskReasoningLevel(defaultModelReasoningLevel(selectedModel));
+    }
+  }, [
+    askReasoningLevel,
+    compareReasoningLevel,
+    mode,
+    selectedModel,
+    setAskReasoningLevel,
+    setCompareReasoningLevel,
+    smartMode,
+    supportedReasoningLevels,
+  ]);
+
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
       const usesMobileComposer =
@@ -207,7 +266,15 @@ export function PromptComposer({
     smartMode: mode === "single" ? smartMode : false,
     researchMode: mode === "compare" ? compareResearchMode : researchMode,
     optimizeMode,
-    onSmartToggle: mode === "single" ? setSmartMode : () => undefined,
+    onSmartToggle:
+      mode === "single"
+        ? (enabled: boolean) => {
+            setSmartMode(enabled);
+            setAskReasoningLevel(
+              enabled ? "auto" : defaultModelReasoningLevel(selectedModel),
+            );
+          }
+        : () => undefined,
     onResearchToggle: mode === "compare" ? setCompareResearchMode : setResearchMode,
     onOptimizeToggle: setOptimizeMode,
     researchBlocked: Boolean(researchFeatureError || researchAllowanceError),
@@ -248,7 +315,12 @@ export function PromptComposer({
               label="Using"
               models={availableModels}
               value={selectedModelKey}
-              onChange={setSelectedModelKey}
+              onChange={(key) => {
+                setSelectedModelKey(key);
+                setAskReasoningLevel(
+                  defaultModelReasoningLevel(modelForKey(key, availableModels)),
+                );
+              }}
               lockedKeys={lockedModelKeys}
               lockedLabels={lockedModelLabels}
               onLockedSelect={handleLockedModel}
@@ -282,10 +354,27 @@ export function PromptComposer({
           <AttachmentStrip entitlements={entitlements} plans={plans} />
 
           <div id="promptFeatureControls" className={styles.featureControls}>
-            <FeatureChips
-              {...featureChipProps}
-              variant="default"
-            />
+            <div className={styles.featureControlRow}>
+              <FeatureChips
+                {...featureChipProps}
+                variant="default"
+              />
+              <ReasoningSelector
+                value={reasoningLevel}
+                supportedLevels={supportedReasoningLevels}
+                unavailable={reasoningUnavailable}
+                contextLabel={
+                  mode === "compare"
+                    ? "Selected models"
+                    : smartMode
+                      ? "Smart mode"
+                      : selectedModel?.display_name || selectedModel?.model || "Selected model"
+                }
+                onChange={
+                  mode === "compare" ? setCompareReasoningLevel : setAskReasoningLevel
+                }
+              />
+            </div>
           </div>
 
           <div className={styles.actions}>

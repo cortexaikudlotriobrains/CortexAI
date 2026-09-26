@@ -17,6 +17,7 @@ import yaml
 
 from orchestrator.model_registry import ModelRegistry
 from orchestrator.prompt_analyzer import PromptAnalyzer
+from orchestrator.reasoning_capabilities import effective_effort_for_request
 
 PROFILE_ORDER = ("quick", "balanced", "deep", "extended")
 AUTO_PROFILE = "auto"
@@ -233,6 +234,7 @@ def _resolve_reasoning(
     default_mode: str | None,
     disable_supported: bool,
     tags: list[str],
+    candidate: object,
 ) -> tuple[str, str, str, str]:
     requested_mode = _reasoning_value(generation, "mode", "auto")
     requested_effort = _reasoning_value(generation, "effort", "auto")
@@ -244,20 +246,33 @@ def _resolve_reasoning(
 
     reasoning_supported = _supports_reasoning(provider, model, modes, tags)
     if not reasoning_supported:
-        if requested_mode == "on" or requested_effort not in {"auto", "minimal", "low"}:
+        if requested_mode == "on" or requested_effort != "auto":
             raise GenerationPolicyError(f"{provider}:{model} does not support reasoning controls")
         return requested_mode, "off", requested_effort, "none"
 
     if requested_mode == "off" and not disable_supported:
         raise GenerationPolicyError(f"{provider}:{model} does not allow reasoning to be disabled")
 
-    effort = profile_effort if requested_effort == "auto" else requested_effort
+    if requested_effort == "auto":
+        effort = profile_effort
+    else:
+        mapped_effort = effective_effort_for_request(candidate, requested_effort)
+        if mapped_effort is None:
+            raise GenerationPolicyError(
+                f"Reasoning effort '{requested_effort}' is unsupported for {provider}:{model}"
+            )
+        effort = mapped_effort
     mode = requested_mode
     if provider == "deepseek":
         if mode == "auto":
             mode = "on" if (default_mode or "thinking") != "none" else "off"
         effective_mode = "thinking" if mode == "on" else "none"
-        effort = "max" if effort in {"xhigh", "max"} else "high"
+        if effort in {"xhigh", "max"}:
+            effort = "max"
+        elif effort in {"minimal", "low"}:
+            effort = "low"
+        else:
+            effort = "high"
     elif provider == "claude":
         configured_default = str(default_mode or "none").strip().lower()
         if mode == "off" or (mode == "auto" and configured_default == "none"):
@@ -283,6 +298,8 @@ def _resolve_reasoning(
         effective_mode = "none" if mode == "off" else "standard"
         if effective_mode == "none":
             effort = "none"
+    elif provider == "grok":
+        effective_mode = "none" if mode == "off" else "reasoning"
     else:
         effective_mode = "none" if mode == "off" else (default_mode or effort)
 
@@ -384,6 +401,7 @@ def resolve_generation_budget(
         default_mode=candidate.default_reasoning_mode,
         disable_supported=candidate.reasoning_disable_supported,
         tags=[str(tag).lower() for tag in candidate.tags],
+        candidate=candidate,
     )
 
     return GenerationBudgetResolution(

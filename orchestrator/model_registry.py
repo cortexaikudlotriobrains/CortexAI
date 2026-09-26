@@ -8,6 +8,7 @@ import yaml
 
 from config.pricing import ModelPricing
 from orchestrator.routing_types import ModelCandidate, RoutingConstraints, Tier
+from orchestrator.reasoning_capabilities import candidate_supports_reasoning_request
 from server.billing.models import ALLOWED_MODEL_BILLING_CLASSES, ModelBillingClass
 from utils.logger import get_logger
 
@@ -336,6 +337,12 @@ class ModelRegistry:
                 if constraints and constraints.min_context_limit is not None:
                     if candidate.context_limit < constraints.min_context_limit:
                         continue
+                if constraints and not candidate_supports_reasoning_request(
+                    candidate,
+                    mode=constraints.reasoning_mode,
+                    effort=constraints.reasoning_effort,
+                ):
+                    continue
                 results.append(candidate)
 
         return results

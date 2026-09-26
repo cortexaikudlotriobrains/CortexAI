@@ -64,6 +64,15 @@ class SmartRouter:
                 if candidates:
                     reasons.append("credit_affordable_lower_tier")
                     break
+        if not candidates:
+            for compatible_tier in (Tier.T0, Tier.T1, Tier.T2, Tier.T3):
+                if compatible_tier == tier:
+                    continue
+                candidates = self._registry.get_candidates(compatible_tier, constraints)
+                if candidates:
+                    tier = compatible_tier
+                    reasons.append("reasoning_capability_tier_adjustment")
+                    break
         selection = self._selector.select(features, candidates, constraints)
         ordered_candidates = [selection.primary_candidate, *selection.fallback_candidates]
 

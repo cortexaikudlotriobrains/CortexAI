@@ -47,6 +47,8 @@ class RoutingConstraints:
     allowed_billing_classes: list[str] | None = None
     allowed_models: list[str] | None = None
     min_context_limit: int | None = None
+    reasoning_mode: str | None = None
+    reasoning_effort: str | None = None
     json_only: bool = False
     strict_format: bool = False
 

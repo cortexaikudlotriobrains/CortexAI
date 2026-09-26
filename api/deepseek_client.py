@@ -107,9 +107,12 @@ class DeepSeekClient(BaseAIClient):
                 "thinking": {"type": "enabled" if thinking_enabled else "disabled"}
             }
             if thinking_enabled:
-                request_payload["reasoning_effort"] = (
-                    "max" if reasoning_effort in {"xhigh", "max"} else "high"
-                )
+                if reasoning_effort in {"xhigh", "max"}:
+                    request_payload["reasoning_effort"] = "max"
+                elif reasoning_effort in {"minimal", "low"}:
+                    request_payload["reasoning_effort"] = "low"
+                else:
+                    request_payload["reasoning_effort"] = "high"
             else:
                 request_payload["temperature"] = temperature
             adaptive_retry = None
@@ -117,16 +120,18 @@ class DeepSeekClient(BaseAIClient):
             try:
                 response = self.client.chat.completions.create(**request_payload)
             except Exception as request_exc:
-                dropped_param, retry_payload = self._build_retry_payload_without_unsupported_parameter(
-                    request_payload,
-                    request_exc,
-                    safe_parameters={
-                        "temperature",
-                        "top_p",
-                        "presence_penalty",
-                        "frequency_penalty",
-                        "max_tokens",
-                    },
+                dropped_param, retry_payload = (
+                    self._build_retry_payload_without_unsupported_parameter(
+                        request_payload,
+                        request_exc,
+                        safe_parameters={
+                            "temperature",
+                            "top_p",
+                            "presence_penalty",
+                            "frequency_penalty",
+                            "max_tokens",
+                        },
+                    )
                 )
                 if retry_payload is not None and dropped_param is not None:
                     logger.warning(

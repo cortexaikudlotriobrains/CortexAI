@@ -7,11 +7,11 @@ billing, and React do not own independent output-token defaults.
 
 ## Cortex-managed Auto policy
 
-The React app does not show an Answer depth control. New Ask and Compare calls send
-`generation.profile=auto`, and the server chooses enough output room from the selected
-model and the prompt. This is a technical capacity decision, not a promise about how
-verbose the answer will be; users request concise, detailed, tabular, or step-by-step
-answers in the prompt.
+The React app does not expose output-token profiles as an Answer depth control. New Ask
+and Compare calls send `generation.profile=auto`, and the server chooses enough output
+room from the selected model and prompt. The adjacent Reasoning control is independent:
+it selects model thinking effort, not answer length. Users still request concise,
+detailed, tabular, or step-by-step output in the prompt.
 
 | Auto case | Requested output ceiling | Default reasoning effort |
 | --- | ---: | --- |
@@ -51,7 +51,8 @@ The browser sends:
 ```json
 {
   "generation": {
-    "profile": "auto"
+    "profile": "auto",
+    "reasoning": {"mode": "auto", "effort": "auto"}
   }
 }
 ```
@@ -73,6 +74,23 @@ API callers may also supply provider-neutral reasoning controls:
 callers that omit both budget fields retain the compatibility default `quick`/1K.
 
 ## Reasoning mapping
+
+The browser exposes one product scale: `Auto`, `Low`, `Medium`, `High`, and `Maximum`.
+`Auto` leaves both mode and effort automatic. A manual choice sends `mode=on` with
+`effort=low|medium|high|max`. Maximum maps to native `max` when available and otherwise
+to `xhigh`; Low maps to `low` or `minimal`. A manual request never silently jumps from
+Low to Medium/High or from Medium to High.
+
+Smart Ask starts at Auto. Selecting a manual effort becomes a hard routing constraint:
+models that cannot honor it are removed, including during fallback or tier escalation,
+and each attempted model receives its own resolved provider parameters. Manual Ask
+starts at the selected model's lowest supported public level. Compare starts at Low and
+enables only the intersection supported by every selected target. A model with no
+controllable reasoning exposes an unavailable control. Work has no new control.
+
+`GET /v1/model-options` and the opt-in `/v1/models` expose `reasoning_levels`,
+`default_reasoning_level`, and `reasoning_controllable` in addition to the native
+reasoning metadata. The React UI consumes only these normalized fields.
 
 `orchestrator/generation_policy.py` translates the provider-neutral mode and effort
 into adapter parameters. The model registry declares supported modes, efforts,
@@ -100,8 +118,9 @@ work and is returned as `incomplete`, not rewritten as a provider failure.
 The exact effective ceiling passed to a provider is also passed to
 `server/billing/enforcement_service.py`. Compare authorizes each target with its own
 resolved ceiling. The preflight is a maximum temporary AI-credit hold; settlement
-uses actual successful usage and releases the unused amount. The browser does not
-show a live hold estimate in the composer.
+uses actual successful usage and releases the unused amount. The browser does not show
+a live hold estimate in the composer. Higher manual reasoning can increase latency and
+provider output work; actual successful usage remains the settlement authority.
 
 `POST /v1/billing/estimate-generation` remains available to API callers. It performs
 the same Auto/profile resolution and credit calculation without reserving credits,

@@ -308,6 +308,9 @@ class ModelCatalogItemDTO(BaseModel):
     reasoning_efforts: List[str] = Field(default_factory=list)
     reasoning_disable_supported: bool = True
     reasoning_counts_against_output: bool = True
+    reasoning_levels: List[str] = Field(default_factory=list)
+    default_reasoning_level: Optional[str] = None
+    reasoning_controllable: bool = False
     pricing_source_url: Optional[str] = None
     lifecycle_source_url: Optional[str] = None
     source_verified_at: Optional[str] = None

@@ -4,6 +4,11 @@ import pytest
 import yaml
 
 from orchestrator.model_registry import ModelRegistry
+from orchestrator.reasoning_capabilities import (
+    default_reasoning_level,
+    normalized_reasoning_levels,
+)
+from orchestrator.routing_types import RoutingConstraints, Tier
 from server.billing.models import ModelBillingClass
 from server.billing.plan_catalog import get_plan_catalog
 
@@ -98,6 +103,58 @@ def test_every_claude_model_declares_its_thinking_mode_explicitly():
     for candidate in registry.list_models(provider="claude"):
         assert candidate.reasoning_modes
         assert candidate.default_reasoning_mode in candidate.reasoning_modes
+
+
+def test_selectable_models_expose_normalized_reasoning_capabilities():
+    registry = ModelRegistry.from_yaml()
+    expected = {
+        ("openai", "gpt-5.6-sol"): ["low", "medium", "high", "max"],
+        ("gemini", "gemini-3.1-pro-preview"): ["low", "medium", "high"],
+        ("deepseek", "deepseek-v4-pro"): ["low", "high", "max"],
+        ("grok", "grok-4.3"): ["low", "medium", "high", "max"],
+        ("grok", "grok-4.5"): ["low", "medium", "high"],
+        ("claude", "claude-sonnet-5"): ["low", "medium", "high", "max"],
+        ("openai", "gpt-4o-mini"): [],
+    }
+
+    for key, levels in expected.items():
+        candidate = registry.find_model(*key)
+        assert candidate is not None
+        assert normalized_reasoning_levels(candidate) == levels
+        assert default_reasoning_level(candidate) == (levels[0] if levels else None)
+
+
+def test_smart_routing_filters_models_by_requested_reasoning_level():
+    registry = ModelRegistry.from_yaml()
+    constraints = RoutingConstraints(reasoning_mode="on", reasoning_effort="max")
+
+    candidates = [
+        *registry.get_candidates(Tier.T0, constraints),
+        *registry.get_candidates(Tier.T1, constraints),
+        *registry.get_candidates(Tier.T2, constraints),
+        *registry.get_candidates(Tier.T3, constraints),
+    ]
+    pairs = {(candidate.provider, candidate.model_name) for candidate in candidates}
+
+    assert ("openai", "gpt-5.6-sol") in pairs
+    assert ("deepseek", "deepseek-v4-pro") in pairs
+    assert ("grok", "grok-4.3") in pairs
+    assert ("claude", "claude-opus-5") in pairs
+    assert ("gemini", "gemini-3.1-pro-preview") not in pairs
+    assert ("grok", "grok-4.5") not in pairs
+    assert ("openai", "gpt-4o-mini") not in pairs
+
+
+def test_smart_reasoning_on_excludes_models_without_reasoning_controls():
+    registry = ModelRegistry.from_yaml()
+    candidates = registry.get_candidates(
+        Tier.T1,
+        RoutingConstraints(reasoning_mode="on", reasoning_effort="auto"),
+    )
+
+    assert ("openai", "gpt-4o-mini") not in {
+        (candidate.provider, candidate.model_name) for candidate in candidates
+    }
 
 
 def test_active_claude_4_models_use_the_requested_subscription_classes():

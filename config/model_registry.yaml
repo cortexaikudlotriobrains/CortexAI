@@ -25,6 +25,11 @@ providers:
         credit_pricing_version: "2026-07-31"
         context_limit: 400000
         max_output_tokens: 128000
+        reasoning_modes: ["none", "standard", "pro"]
+        default_reasoning_mode: "standard"
+        reasoning_efforts: ["none", "low", "medium", "high", "xhigh", "max"]
+        reasoning_disable_supported: true
+        reasoning_counts_against_output: true
         tags: ["cheap", "fast", "reasoning", "general", "coding"]
         enabled: true
         selectable: true
@@ -58,6 +63,11 @@ providers:
         credit_pricing_version: "2026-07-31"
         context_limit: 1050000
         max_output_tokens: 128000
+        reasoning_modes: ["none", "standard"]
+        default_reasoning_mode: "none"
+        reasoning_efforts: ["none", "low", "medium", "high", "xhigh"]
+        reasoning_disable_supported: true
+        reasoning_counts_against_output: true
         tags: ["cheap", "fast", "reasoning", "general", "long_context"]
         enabled: true
         selectable: true
@@ -82,6 +92,10 @@ providers:
         credit_pricing_version: "2026-07-31"
         context_limit: 128000
         max_output_tokens: 16384
+        reasoning_modes: ["none"]
+        default_reasoning_mode: "none"
+        reasoning_disable_supported: true
+        reasoning_counts_against_output: false
         tags: ["cheap", "fast", "balanced", "general", "vision"]
         enabled: true
         selectable: true
@@ -106,6 +120,11 @@ providers:
         credit_pricing_version: "2026-07-31"
         context_limit: 1050000
         max_output_tokens: 128000
+        reasoning_modes: ["none", "standard"]
+        default_reasoning_mode: "none"
+        reasoning_efforts: ["none", "low", "medium", "high", "xhigh"]
+        reasoning_disable_supported: true
+        reasoning_counts_against_output: true
         tags: ["fast", "reasoning", "coding", "general", "long_context"]
         enabled: true
         selectable: true
@@ -130,6 +149,11 @@ providers:
         credit_pricing_version: "2026-07-31"
         context_limit: 1050000
         max_output_tokens: 128000
+        reasoning_modes: ["none", "standard", "pro"]
+        default_reasoning_mode: "standard"
+        reasoning_efforts: ["none", "low", "medium", "high", "xhigh", "max"]
+        reasoning_disable_supported: true
+        reasoning_counts_against_output: true
         tags: ["strong", "reasoning", "coding", "agentic", "long_context"]
         enabled: true
         selectable: true
@@ -163,6 +187,11 @@ providers:
         credit_pricing_version: "2026-07-31"
         context_limit: 1050000
         max_output_tokens: 128000
+        reasoning_modes: ["none", "standard"]
+        default_reasoning_mode: "none"
+        reasoning_efforts: ["none", "low", "medium", "high", "xhigh"]
+        reasoning_disable_supported: true
+        reasoning_counts_against_output: true
         tags: ["flagship", "reasoning", "coding", "accurate", "long_context"]
         enabled: true
         selectable: true
@@ -370,7 +399,12 @@ providers:
         credit_pricing_version: "2026-07-31"
         context_limit: 1048576
         max_output_tokens: 65536
-        tags: ["cheap", "fast", "general", "long_context"]
+        reasoning_modes: ["thinking"]
+        default_reasoning_mode: "thinking"
+        reasoning_efforts: ["minimal", "low", "medium", "high"]
+        reasoning_disable_supported: false
+        reasoning_counts_against_output: true
+        tags: ["cheap", "fast", "reasoning", "general", "long_context"]
         enabled: true
         selectable: true
         release_status: "generally_available"
@@ -394,10 +428,10 @@ providers:
         credit_pricing_version: "2026-07-31"
         context_limit: 1048576
         max_output_tokens: 65536
-        reasoning_modes: ["none", "thinking"]
+        reasoning_modes: ["thinking"]
         default_reasoning_mode: "thinking"
-        reasoning_efforts: ["low", "medium", "high"]
-        reasoning_disable_supported: true
+        reasoning_efforts: ["minimal", "low", "medium", "high"]
+        reasoning_disable_supported: false
         reasoning_counts_against_output: true
         tags: ["fast", "reasoning", "multimodal", "general", "long_context"]
         enabled: true
@@ -423,10 +457,10 @@ providers:
         credit_pricing_version: "2026-07-31"
         context_limit: 1048576
         max_output_tokens: 65536
-        reasoning_modes: ["none", "thinking"]
+        reasoning_modes: ["thinking"]
         default_reasoning_mode: "thinking"
         reasoning_efforts: ["low", "medium", "high"]
-        reasoning_disable_supported: true
+        reasoning_disable_supported: false
         reasoning_counts_against_output: true
         tags: ["preview", "flagship", "reasoning", "coding", "long_context"]
         enabled: true
@@ -562,7 +596,7 @@ providers:
         tags: ["fast", "reasoning", "coding", "cheap", "long_context"]
         reasoning_modes: ["none", "thinking"]
         default_reasoning_mode: "thinking"
-        reasoning_efforts: ["high", "max"]
+        reasoning_efforts: ["low", "high", "max"]
         reasoning_disable_supported: true
         reasoning_counts_against_output: true
         enabled: true
@@ -591,7 +625,7 @@ providers:
         tags: ["strong", "reasoning", "coding", "cheap", "long_context"]
         reasoning_modes: ["none", "thinking"]
         default_reasoning_mode: "thinking"
-        reasoning_efforts: ["high", "max"]
+        reasoning_efforts: ["low", "high", "max"]
         reasoning_disable_supported: true
         reasoning_counts_against_output: true
         enabled: true
@@ -674,8 +708,11 @@ providers:
         context_limit: 1000000
         max_output_tokens: 128000
         tags: ["fast", "reasoning", "agentic", "long_context"]
-        reasoning_modes: ["none", "low", "medium", "high"]
-        default_reasoning_mode: "none"
+        reasoning_modes: ["none", "low", "medium", "high", "xhigh"]
+        default_reasoning_mode: "low"
+        reasoning_efforts: ["low", "medium", "high", "xhigh"]
+        reasoning_disable_supported: true
+        reasoning_counts_against_output: true
         enabled: true
         selectable: true
         release_status: "generally_available"
@@ -708,6 +745,9 @@ providers:
         tags: ["flagship", "reasoning", "agentic", "coding", "long_context"]
         reasoning_modes: ["low", "medium", "high"]
         default_reasoning_mode: "high"
+        reasoning_efforts: ["low", "medium", "high"]
+        reasoning_disable_supported: false
+        reasoning_counts_against_output: true
         enabled: true
         selectable: true
         release_status: "generally_available"
@@ -829,7 +869,7 @@ providers:
         max_output_tokens: 128000
         reasoning_modes: ["none", "adaptive"]
         default_reasoning_mode: "adaptive"
-        reasoning_efforts: ["low", "medium", "high"]
+        reasoning_efforts: ["low", "medium", "high", "xhigh", "max"]
         reasoning_disable_supported: true
         reasoning_counts_against_output: true
         tags: ["strong", "reasoning", "coding", "agentic", "long_context"]
@@ -900,7 +940,7 @@ providers:
         max_output_tokens: 128000
         reasoning_modes: ["adaptive"]
         default_reasoning_mode: "adaptive"
-        reasoning_efforts: ["low", "medium", "high", "max"]
+        reasoning_efforts: ["low", "medium", "high", "xhigh", "max"]
         reasoning_disable_supported: false
         reasoning_counts_against_output: true
         tags: ["flagship", "reasoning", "coding", "agentic", "accurate", "long_context"]

@@ -262,16 +262,16 @@ class CortexOrchestrator:
         if requested_model and self._model_registry:
             identity = self._model_registry.resolve_model_identity(model_type, requested_model)
         runtime_model = (
-            str(identity.get("runtime_model") or "").strip()
-            if isinstance(identity, dict)
-            else ""
+            str(identity.get("runtime_model") or "").strip() if isinstance(identity, dict) else ""
         ) or requested_model
         key_scope = (
             hashlib.sha256(api_key_override.encode("utf-8")).hexdigest()[:12]
             if api_key_override
             else "env"
         )
-        cache_key = f"{model_type}:{requested_model or 'default'}:{runtime_model or 'default'}:{key_scope}"
+        cache_key = (
+            f"{model_type}:{requested_model or 'default'}:{runtime_model or 'default'}:{key_scope}"
+        )
         if cache_key in self._client_cache:
             return self._client_cache[cache_key]
 
@@ -751,9 +751,7 @@ Never claim you performed web browsing yourself; the system handles retrieval.
             save_research_state(new_state)
 
             # Inject research
-            injected_messages = self._inject_reference_context(
-                messages, research_ctx.injected_text
-            )
+            injected_messages = self._inject_reference_context(messages, research_ctx.injected_text)
 
             metadata = {
                 "research_used": True,
@@ -822,6 +820,8 @@ Never claim you performed web browsing yourself; the system handles retrieval.
             allowed_billing_classes=allowed_billing_classes,
             allowed_models=allowed_models,
             min_context_limit=raw.get("min_context_limit"),
+            reasoning_mode=raw.get("reasoning_mode"),
+            reasoning_effort=raw.get("reasoning_effort"),
             json_only=bool(raw.get("json_only", False)),
             strict_format=bool(raw.get("strict_format", False)),
         )
@@ -1155,6 +1155,7 @@ Never claim you performed web browsing yourself; the system handles retrieval.
         routing_constraints: RoutingConstraints | None,
         provider_api_keys: dict[str, str] | None = None,
         candidate_authorizer: Callable[[str, str], bool] | None = None,
+        generation_resolver: Callable[[str, str], Any] | None = None,
         **kwargs,
     ) -> UnifiedResponse:
         if not self._smart_router or not self._model_registry or not self._validator:
@@ -1228,6 +1229,8 @@ Never claim you performed web browsing yourself; the system handles retrieval.
                     break
                 current_tier = next_tier
                 candidates = self._model_registry.get_candidates(current_tier, routing_constraints)
+                if not candidates:
+                    continue
                 selection = self._selector.select(features, candidates, routing_constraints)
                 current_candidates = [
                     selection.primary_candidate,
@@ -1262,11 +1265,23 @@ Never claim you performed web browsing yourself; the system handles retrieval.
                         }
                     )
                     continue
+            attempt_kwargs = dict(kwargs)
+            if generation_resolver is not None:
+                resolved_generation = generation_resolver(
+                    candidate.provider,
+                    candidate.model_name,
+                )
+                for key in ("max_tokens", "reasoning_mode", "reasoning_effort"):
+                    attempt_kwargs.pop(key, None)
+                provider_kwargs = getattr(resolved_generation, "provider_kwargs", None)
+                if callable(provider_kwargs):
+                    attempt_kwargs.update(provider_kwargs())
+
             resp = self._invoke_candidate(
                 candidate,
                 messages,
                 provider_api_keys=provider_api_keys,
-                **kwargs,
+                **attempt_kwargs,
             )
             prev_response = last_response
             last_response = resp
@@ -1324,6 +1339,10 @@ Never claim you performed web browsing yourself; the system handles retrieval.
                 routing_md["fallback_used"] = True
                 current_tier = decision.next_tier
                 candidates = self._model_registry.get_candidates(current_tier, routing_constraints)
+                if not candidates:
+                    attempt_index += 1
+                    current_candidates = []
+                    continue
                 selection = self._selector.select(features, candidates, routing_constraints)
                 current_candidates = [
                     selection.primary_candidate,
@@ -1375,6 +1394,7 @@ Never claim you performed web browsing yourself; the system handles retrieval.
             if not isinstance(provider_api_keys, dict):
                 provider_api_keys = {}
             candidate_authorizer = kwargs.pop("_smart_candidate_authorizer", None)
+            candidate_generation_resolver = kwargs.pop("_smart_generation_resolver", None)
             prepared_messages = kwargs.pop("_prepared_messages", None)
             prepared_research_metadata = kwargs.pop("_prepared_research_metadata", None)
             prepared_opt_metadata = kwargs.pop("_prepared_opt_metadata", None)
@@ -1490,6 +1510,11 @@ Never claim you performed web browsing yourself; the system handles retrieval.
                     candidate_authorizer=(
                         candidate_authorizer if callable(candidate_authorizer) else None
                     ),
+                    generation_resolver=(
+                        candidate_generation_resolver
+                        if callable(candidate_generation_resolver)
+                        else None
+                    ),
                     **kwargs,
                 )
             else:
@@ -1603,9 +1628,7 @@ Never claim you performed web browsing yourself; the system handles retrieval.
                     **research_metadata,
                     "research_mode": research_mode,
                     "provider_cost_owner": (
-                        "customer"
-                        if provider_api_keys.get(response.provider.lower())
-                        else "cortex"
+                        "customer" if provider_api_keys.get(response.provider.lower()) else "cortex"
                     ),
                 },
             )

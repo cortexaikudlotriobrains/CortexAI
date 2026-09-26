@@ -30,6 +30,7 @@ export type ReasoningEffort =
   | "high"
   | "xhigh"
   | "max";
+export type ReasoningLevel = "auto" | "low" | "medium" | "high" | "max";
 
 export interface GenerationRequest {
   profile?: GenerationProfile;
@@ -371,6 +372,9 @@ export interface ModelCatalogItem {
   reasoning_efforts?: string[];
   reasoning_disable_supported?: boolean;
   reasoning_counts_against_output?: boolean;
+  reasoning_levels?: Exclude<ReasoningLevel, "auto">[];
+  default_reasoning_level?: Exclude<ReasoningLevel, "auto">;
+  reasoning_controllable?: boolean;
   pricing_source_url?: string;
   lifecycle_source_url?: string;
   source_verified_at?: string;

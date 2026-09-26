@@ -32,6 +32,8 @@ describe("response regeneration", () => {
       researchMode: false,
       compareResearchMode: true,
       optimizeMode: false,
+      askReasoningLevel: "auto",
+      compareReasoningLevel: "low",
       selectedModelKey: "openai:gpt-5.1",
       compareModelKeys: [
         "openai:gpt-5.1",
@@ -84,7 +86,10 @@ describe("response regeneration", () => {
       prompt: "Research this",
       provider: "openai",
       model: "gpt-5.1",
-      generation: { profile: "auto" },
+      generation: {
+        profile: "auto",
+        reasoning: { mode: "auto", effort: "auto" },
+      },
       routing: { smart_mode: false, research_mode: true },
       attachments: [{ file_id: "source-file" }],
       context: {
@@ -146,7 +151,10 @@ describe("response regeneration", () => {
       prompt: "Compare this",
       provider: "claude",
       model: "claude-sonnet-4-5",
-      generation: { profile: "auto" },
+      generation: {
+        profile: "auto",
+        reasoning: { mode: "auto", effort: "auto" },
+      },
       routing: { smart_mode: false, research_mode: true },
       context: {
         session_id: "session-1",
@@ -205,7 +213,10 @@ describe("response regeneration", () => {
     expect(vi.mocked(streamChat).mock.calls[0]?.[0]).toMatchObject({
       provider: "claude",
       model: "claude-sonnet-4-5",
-      generation: { profile: "deep" },
+      generation: {
+        profile: "deep",
+        reasoning: { mode: "auto", effort: "auto" },
+      },
       regeneration: {
         source_request_id: source.responses[1].request_id,
         retry_reason: "output_limit",
@@ -249,7 +260,10 @@ describe("response regeneration", () => {
       prompt: "Compare with three models",
       provider: "gemini",
       model: "gemini-2.5-pro",
-      generation: { profile: "auto" },
+      generation: {
+        profile: "auto",
+        reasoning: { mode: "auto", effort: "auto" },
+      },
       routing: { smart_mode: false, research_mode: true },
       attachments: [{ file_id: "source-file" }],
     });

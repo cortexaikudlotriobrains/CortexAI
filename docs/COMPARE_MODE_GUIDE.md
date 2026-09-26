@@ -13,6 +13,7 @@ This guide covers both:
 - API compare mode (`POST /v1/compare`, `POST /v1/compare/stream`)
 - CLI compare mode (`COMPARE_MODE=true`)
 - Browser Compare mode, where `With sources` is enabled by default for new page sessions and can be turned off manually. Empty initial model slots are filled only after effective entitlements load and only from models allowed by the current plan; higher-plan models remain visible for discovery.
+- Browser Compare reasoning starts at Low and enables only levels supported by every selected target. Auto lets each model use its own managed default; unsupported levels remain visible but disabled, and changing a target recomputes the intersection.
 - Browser Cortex Analysis, an on-demand synthesis of two or three completed Compare responses.
 
 ## Cortex Analysis

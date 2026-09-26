@@ -174,6 +174,7 @@ function Chip({
     styles.chip,
     styles[`${tone}Chip`],
     id === "routeResearchBtn" ? styles.keepIcon : "",
+    id === "routeSmartBtn" || id === "routeOptimizeBtn" ? styles.mobileIconOnly : "",
     active ? styles.active : "",
     blocked ? styles.blocked : "",
   ]

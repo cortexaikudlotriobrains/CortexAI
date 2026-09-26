@@ -169,6 +169,26 @@ test("mobile Ask and Compare keep feature controls beside Attach", async ({ resp
     }
 });
 
+test("mobile reasoning menu stays usable at the smallest supported width", async ({ responsiveApp }) => {
+    const { page } = responsiveApp;
+    await page.setViewportSize({ width: 320, height: 568 });
+
+    const trigger = page.getByRole("button", { name: "Reasoning level: Auto" });
+    await expect(trigger).toBeVisible();
+    await trigger.click();
+
+    const menu = page.getByRole("listbox", { name: "Reasoning levels" });
+    await expect(menu).toBeVisible();
+    const bounds = await menu.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds.x).toBeGreaterThanOrEqual(0);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(320);
+
+    await page.getByRole("option", { name: /Maximum/ }).click();
+    await expect(page.getByRole("button", { name: "Reasoning level: Maximum" })).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+});
+
 for (const viewport of [
     { width: 320, height: 568 },
     { width: 390, height: 844 },
@@ -406,6 +426,15 @@ async function expectMobileComposerControlsFullyVisible(page) {
         );
     }
 
+    const reasoning = page.getByRole("button", { name: /^Reasoning level:/ });
+    await expect(reasoning).toBeVisible();
+    const reasoningBounds = await reasoning.boundingBox();
+    expect(reasoningBounds, "Reasoning level bounds").not.toBeNull();
+    expect(reasoningBounds.x).toBeGreaterThanOrEqual(featureBounds.x - 1);
+    expect(reasoningBounds.x + reasoningBounds.width).toBeLessThanOrEqual(
+        featureBounds.x + featureBounds.width + 1,
+    );
+
     for (const name of ["Attach files", "Send message"]) {
         const control = page.getByRole("button", { name });
         await expect(control).toBeVisible();
@@ -420,8 +449,14 @@ async function expectMobileComposerControlsFullyVisible(page) {
 
 async function expectComposerToolbarOrder(page, switchNames) {
     const attach = page.getByRole("button", { name: "Attach files" });
+    const reasoning = page.getByRole("button", { name: /^Reasoning level:/ });
     const send = page.getByRole("button", { name: "Send message" });
-    const controls = [attach, ...switchNames.map(name => page.getByRole("switch", { name })), send];
+    const controls = [
+        attach,
+        ...switchNames.map(name => page.getByRole("switch", { name })),
+        reasoning,
+        send,
+    ];
     const bounds = [];
 
     for (const control of controls) {

@@ -619,10 +619,10 @@ test("Cortex-managed Auto budget preserves incomplete output for retry", async (
                             profile,
                             requested_max_output_tokens: retry ? 12288 : 8192,
                             effective_max_output_tokens: retry ? 12288 : 8192,
-                            requested_reasoning_mode: "auto",
+                            requested_reasoning_mode: "on",
                             effective_reasoning_mode: "standard",
-                            requested_reasoning_effort: "auto",
-                            effective_reasoning_effort: retry ? "high" : "medium",
+                            requested_reasoning_effort: "low",
+                            effective_reasoning_effort: "low",
                             reasoning_disable_supported: true,
                             reasoning_counts_against_output: true,
                             policy_version: "generation-budget-v3",
@@ -655,11 +655,17 @@ test("Cortex-managed Auto budget preserves incomplete output for retry", async (
 
     await expect(page.getByText("Partial answer kept for the user.")).toBeVisible();
     await expect(page.getByText("Response stopped at its token limit.")).toBeVisible();
-    expect(requestBodies[0].generation).toEqual({ profile: "auto" });
+    expect(requestBodies[0].generation).toEqual({
+        profile: "auto",
+        reasoning: { mode: "on", effort: "low" },
+    });
 
     await page.getByRole("button", { name: "Retry with more room" }).click();
     await expect.poll(() => requestBodies.length).toBe(2);
-    expect(requestBodies[1].generation).toEqual({ profile: "deep" });
+    expect(requestBodies[1].generation).toEqual({
+        profile: "deep",
+        reasoning: { mode: "on", effort: "low" },
+    });
     await expect(page.getByText("Completed answer with more room.")).toBeVisible();
 });
 

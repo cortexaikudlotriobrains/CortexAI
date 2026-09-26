@@ -32,9 +32,14 @@ import type {
   FileUploadResponse,
   GenerationProfile,
   PromptOptimizationState,
+  ReasoningLevel,
   ResponseRunStatus,
   UserContextRequest,
 } from "../types";
+import {
+  generationForReasoningLevel,
+  reasoningLevelFromResponse,
+} from "../reasoning/reasoningLevels";
 
 const MANAGED_GENERATION_PROFILE: GenerationProfile = "auto";
 
@@ -243,6 +248,9 @@ export function useChat() {
         regenerationSourceRequestId:
           sourceTurn.mode === "compare" ? sourceResponse.request_id : undefined,
         generationProfileOverride,
+        reasoningLevelOverride: reasoningLevelFromResponse(
+          sourceResponse.generation_budget?.requested_reasoning_effort,
+        ),
       });
     } catch (err: unknown) {
       if (controller.signal.aborted) return;
@@ -349,7 +357,10 @@ async function runAskTurn({
     provider: smartMode ? undefined : provider || undefined,
     model: smartMode ? undefined : model || undefined,
     routing: { smart_mode: smartMode, research_mode: researchEnabled },
-    generation: { profile: MANAGED_GENERATION_PROFILE },
+    generation: generationForReasoningLevel(
+      state.askReasoningLevel,
+      MANAGED_GENERATION_PROFILE,
+    ),
     attachments: attachmentItems.length > 0 ? attachmentItems : undefined,
     context,
   };
@@ -523,7 +534,10 @@ async function runCompareTurn({
     initial_query: initialQuery,
     targets,
     routing: { smart_mode: false, research_mode: researchEnabled },
-    generation: { profile: MANAGED_GENERATION_PROFILE },
+    generation: generationForReasoningLevel(
+      state.compareReasoningLevel,
+      MANAGED_GENERATION_PROFILE,
+    ),
     attachments: attachmentItems.length > 0 ? attachmentItems : undefined,
     context,
   };
@@ -621,6 +635,7 @@ async function runRegenerateResponse({
   researchEnabledOverride,
   regenerationSourceRequestId,
   generationProfileOverride,
+  reasoningLevelOverride,
 }: {
   turnId: string;
   responseIndex: number;
@@ -633,6 +648,7 @@ async function runRegenerateResponse({
   researchEnabledOverride?: boolean;
   regenerationSourceRequestId?: string;
   generationProfileOverride?: GenerationProfile;
+  reasoningLevelOverride: ReasoningLevel;
 }) {
   const state = useChatStore.getState();
   const selected = parseModelKey(state.selectedModelKey);
@@ -647,7 +663,10 @@ async function runRegenerateResponse({
     provider: smartMode ? undefined : provider || undefined,
     model: smartMode ? undefined : model || undefined,
     routing: { smart_mode: smartMode, research_mode: researchEnabled },
-    generation: { profile: generationProfileOverride ?? MANAGED_GENERATION_PROFILE },
+    generation: generationForReasoningLevel(
+      reasoningLevelOverride,
+      generationProfileOverride ?? MANAGED_GENERATION_PROFILE,
+    ),
     attachments: attachmentItems.length > 0 ? attachmentItems : undefined,
     context,
     regeneration: regenerationSourceRequestId

@@ -10,6 +10,7 @@ import type {
   HistoryEntry,
   HistoryThread,
   PromptOptimizationState,
+  ReasoningLevel,
   ResponseRunStatus,
   TurnStatus,
 } from "../types";
@@ -51,10 +52,14 @@ interface ChatStoreState {
   researchMode: boolean;
   compareResearchMode: boolean;
   optimizeMode: boolean;
+  askReasoningLevel: ReasoningLevel;
+  compareReasoningLevel: ReasoningLevel;
   setSmartMode: (v: boolean) => void;
   setResearchMode: (v: boolean) => void;
   setCompareResearchMode: (v: boolean) => void;
   setOptimizeMode: (v: boolean) => void;
+  setAskReasoningLevel: (level: ReasoningLevel) => void;
+  setCompareReasoningLevel: (level: ReasoningLevel) => void;
 
   selectedModelKey: string;
   setSelectedModelKey: (key: string) => void;
@@ -140,10 +145,14 @@ export const useChatStore = create<ChatStoreState>((set) => ({
   researchMode: true,
   compareResearchMode: true,
   optimizeMode: false,
+  askReasoningLevel: "auto",
+  compareReasoningLevel: "low",
   setSmartMode: (v) => set({ smartMode: v }),
   setResearchMode: (v) => set({ researchMode: v }),
   setCompareResearchMode: (v) => set({ compareResearchMode: v }),
   setOptimizeMode: (v) => set({ optimizeMode: v }),
+  setAskReasoningLevel: (level) => set({ askReasoningLevel: level }),
+  setCompareReasoningLevel: (level) => set({ compareReasoningLevel: level }),
 
   selectedModelKey: "",
   setSelectedModelKey: (key) => set({ selectedModelKey: key }),

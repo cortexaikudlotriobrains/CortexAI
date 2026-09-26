@@ -38,6 +38,8 @@ describe("PromptComposer", () => {
       researchMode: true,
       compareResearchMode: true,
       optimizeMode: false,
+      askReasoningLevel: "auto",
+      compareReasoningLevel: "low",
       selectedModelKey: "openai:gpt-5.1",
       compareModelKeys: [
         "openai:gpt-5.1",
@@ -165,6 +167,44 @@ describe("PromptComposer", () => {
 
     expect(researchSwitch).toHaveAttribute("aria-checked", "false");
     expect(useChatStore.getState().researchMode).toBe(false);
+  });
+
+  it("lets Smart users override Auto reasoning and resets explicit models to Low", async () => {
+    const user = userEvent.setup();
+    render(<PromptComposer models={DEFAULT_MODELS} />);
+
+    const reasoning = screen.getByRole("button", { name: "Reasoning level: Auto" });
+    await user.click(reasoning);
+    await user.click(screen.getByRole("option", { name: /High/ }));
+
+    expect(useChatStore.getState().askReasoningLevel).toBe("high");
+    expect(screen.getByRole("button", { name: "Reasoning level: High" })).toBeVisible();
+
+    await user.click(screen.getByRole("switch", { name: "Smart routing" }));
+
+    expect(useChatStore.getState().smartMode).toBe(false);
+    expect(useChatStore.getState().askReasoningLevel).toBe("low");
+    expect(screen.getByRole("button", { name: "Reasoning level: Low" })).toBeVisible();
+  });
+
+  it("disables Compare reasoning levels that are not shared by every model", async () => {
+    const user = userEvent.setup();
+    useChatStore.setState({
+      mode: "compare",
+      compareModelKeys: [
+        "openai:gpt-5.6-luna",
+        "deepseek:deepseek-v4-flash",
+        "",
+      ],
+      compareReasoningLevel: "low",
+    });
+    render(<PromptComposer models={DEFAULT_MODELS} />);
+
+    await user.click(screen.getByRole("button", { name: "Reasoning level: Low" }));
+
+    expect(screen.getByRole("option", { name: /Low/ })).toBeEnabled();
+    expect(screen.getByRole("option", { name: /Medium/ })).toBeDisabled();
+    expect(screen.getByRole("option", { name: /Maximum/ })).toBeEnabled();
   });
 
   it("uses the same shell in Compare mode without a redundant mode switch", () => {

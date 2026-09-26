@@ -89,6 +89,14 @@
   grid-column: 2;
 }
 
+.featureControlRow {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
 .actions {
   display: flex;
   grid-column: 3;
@@ -221,6 +229,10 @@
 
   .composerControls {
     column-gap: 10px;
+  }
+
+  .featureControlRow {
+    gap: 5px;
   }
 }
 

@@ -755,6 +755,12 @@ function model(provider, modelName, supportsImageInput, billingClass) {
         context_limit: 128000,
         tags: [],
         enabled: true,
+        reasoning_modes: ["none", "standard"],
+        default_reasoning_mode: "standard",
+        reasoning_efforts: ["low", "medium", "high", "max"],
+        reasoning_levels: ["low", "medium", "high", "max"],
+        default_reasoning_level: "low",
+        reasoning_controllable: true,
         supports_image_input: supportsImageInput,
         supported_attachment_mime_types: [],
     };

@@ -655,6 +655,18 @@ def test_model_options_remain_complete_when_rich_catalog_is_disabled(client, mon
 
     assert actual_pairs == expected_pairs
     assert {"gemini", "grok"}.issubset(actual_providers)
+    assert all("reasoning_levels" in item for item in body["models"])
+    assert all("reasoning_controllable" in item for item in body["models"])
+
+    by_pair = {(item["provider"], item["model"]): item for item in body["models"]}
+    assert by_pair[("openai", "gpt-5.6-sol")]["reasoning_levels"] == [
+        "low",
+        "medium",
+        "high",
+        "max",
+    ]
+    assert by_pair[("openai", "gpt-5.6-sol")]["default_reasoning_level"] == "low"
+    assert by_pair[("openai", "gpt-4o-mini")]["reasoning_controllable"] is False
 
 
 def test_providers_catalog_returns_catalog_and_model_counts(client):
@@ -768,8 +780,7 @@ def test_models_catalog_filters_by_provider_case_insensitive(client):
 
     registry = ModelRegistry.from_yaml()
     expected_names = sorted(
-        candidate.model_name
-        for candidate in registry.list_selectable_models(provider=provider)
+        candidate.model_name for candidate in registry.list_selectable_models(provider=provider)
     )
     actual_names = sorted(item["model"] for item in body["models"])
     assert actual_names == expected_names
