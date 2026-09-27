@@ -70,10 +70,16 @@ export function ResponseCard({
   const modelPresentation = getModelPresentation(response.provider, response.model);
   const accent = resolveProviderAccent(response.provider, slotIndex);
   const loadingStatus = resolveLoadingStatus(response, !!isStreaming, hasError);
+  const hasVisibleResponseText = response.text.trim().length > 0;
   const responseText = hasError
     ? errorMessage(response)
     : response.text || (loadingStatus ? "" : "(empty response)");
-  const elapsedMs = useElapsedMs(response.started_at, !!loadingStatus);
+  const showLoading = !!loadingStatus && !hasVisibleResponseText;
+  const elapsedMs = useElapsedMs(
+    response.started_at,
+    response.first_visible_at,
+    showLoading,
+  );
   const durationMs = resolveDisplayDurationMs(response);
   const failedDurationMs = resolveFailedDurationMs(response, elapsedMs);
   const isFailed = hasError || response.ui_status === "failed";
@@ -84,7 +90,6 @@ export function ResponseCard({
   const hasMetaContent =
     !!loadingStatus || isFailed || hasCompletedMetrics || hasCredits;
   const metaPinned = !!loadingStatus || isFailed;
-  const showLoading = !!loadingStatus && !responseText;
   const showRegenerate = !!onRegenerate && !loadingStatus;
   const isIncomplete = response.completion_status === "incomplete";
   const canRetryWithMoreRoom =
@@ -221,7 +226,9 @@ export function ResponseCard({
             Saved ~{formatAiCredits(cacheSavings)} credits through context reuse
           </div>
         )}
-        {isStreaming && !!responseText && <span className={styles.cursor} aria-hidden="true" />}
+        {isStreaming && hasVisibleResponseText && (
+          <span className={styles.cursor} aria-hidden="true" />
+        )}
       </div>
 
       {isIncomplete && (
@@ -634,19 +641,24 @@ function loadingStatusText(status: ResponseRunStatus) {
   }
 }
 
-function useElapsedMs(startedAt: string | undefined, enabled: boolean) {
+function useElapsedMs(
+  startedAt: string | undefined,
+  stoppedAt: string | undefined,
+  running: boolean,
+) {
   const fallbackStartedAt = useRef(Date.now());
   const [nowMs, setNowMs] = useState(() => Date.now());
   const startedAtMs = parseTimestamp(startedAt) ?? fallbackStartedAt.current;
+  const stoppedAtMs = parseTimestamp(stoppedAt);
 
   useEffect(() => {
-    if (!enabled) return undefined;
+    if (!running) return undefined;
     setNowMs(Date.now());
     const intervalId = window.setInterval(() => setNowMs(Date.now()), 1000);
     return () => window.clearInterval(intervalId);
-  }, [enabled, startedAtMs]);
+  }, [running, startedAtMs]);
 
-  return Math.max(0, nowMs - startedAtMs);
+  return Math.max(0, (stoppedAtMs ?? nowMs) - startedAtMs);
 }
 
 function resolveFailedDurationMs(response: ChatResponse, elapsedMs: number) {
@@ -662,6 +674,10 @@ function resolveFailedDurationMs(response: ChatResponse, elapsedMs: number) {
 
 function resolveDisplayDurationMs(response: ChatResponse): number | null {
   const startedAtMs = parseTimestamp(response.started_at);
+  const firstVisibleAtMs = parseTimestamp(response.first_visible_at);
+  if (startedAtMs !== null && firstVisibleAtMs !== null) {
+    return Math.max(0, firstVisibleAtMs - startedAtMs);
+  }
   const completedAtMs = parseTimestamp(response.completed_at);
   if (startedAtMs !== null && completedAtMs !== null) {
     return Math.max(0, completedAtMs - startedAtMs);

@@ -176,6 +176,53 @@ describe("ResponseCard", () => {
     expect(header).toHaveTextContent("00:10 elapsed · Generating response");
   });
 
+  it("freezes elapsed time when the first response content becomes visible", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-09T00:00:08.000Z"));
+    const pending = {
+      ...response(false, ""),
+      latency_ms: null,
+      ui_status: "streaming" as const,
+      started_at: "2026-06-09T00:00:00.000Z",
+    };
+    const { rerender } = render(<ResponseCard response={pending} isStreaming />);
+    const header = document.querySelector("header");
+
+    expect(header).toHaveTextContent("00:08 elapsed · Generating response");
+
+    rerender(
+      <ResponseCard
+        response={{
+          ...pending,
+          text: "The first visible response content",
+          first_visible_at: "2026-06-09T00:00:08.400Z",
+        }}
+        isStreaming
+      />,
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+
+    expect(header).toHaveTextContent("00:08 elapsed · Generating response");
+
+    rerender(
+      <ResponseCard
+        response={{
+          ...pending,
+          text: "The completed response",
+          first_visible_at: "2026-06-09T00:00:08.400Z",
+          completed_at: "2026-06-09T00:00:20.000Z",
+          ui_status: "complete",
+        }}
+      />,
+    );
+
+    expect(header).toHaveTextContent("8.4s");
+    expect(header).not.toHaveTextContent("20.0s");
+  });
+
   it("shows completed duration without rendering token usage from the response", () => {
     const completed = {
       ...response(false, "Completed answer."),

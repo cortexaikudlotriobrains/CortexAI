@@ -173,6 +173,7 @@ export interface ChatResponse {
   timestamp: string;
   ui_status?: ResponseRunStatus;
   started_at?: string;
+  first_visible_at?: string;
   completed_at?: string;
   failed_at?: string;
 }

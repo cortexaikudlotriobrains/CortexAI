@@ -457,7 +457,7 @@ function updateResponseState(
     if (turn.id !== turnId) return turn;
     const responses = [...turn.responses];
     const current = responses[index] ?? makePlaceholderResponse(index, "", "", undefined);
-    responses[index] = updater(current);
+    responses[index] = recordFirstVisibleTimestamp(current, updater(current));
     return {
       ...turn,
       responses,
@@ -506,6 +506,7 @@ function mergeCompletedResponses(
     return {
       ...response,
       started_at: previous?.started_at ?? response.started_at,
+      first_visible_at: previous?.first_visible_at ?? response.first_visible_at,
       completed_at: failed
         ? response.completed_at ?? previous?.completed_at
         : response.completed_at ?? previous?.completed_at ?? resolvedAt,
@@ -515,6 +516,24 @@ function mergeCompletedResponses(
       ui_status: failed ? "failed" : "complete",
     };
   });
+}
+
+function hasVisibleResponseText(text: string): boolean {
+  return text.trim().length > 0;
+}
+
+function recordFirstVisibleTimestamp(
+  current: ChatResponse,
+  next: ChatResponse,
+): ChatResponse {
+  if (next.first_visible_at) return next;
+  if (current.first_visible_at) {
+    return { ...next, first_visible_at: current.first_visible_at };
+  }
+  if (hasVisibleResponseText(current.text) || !hasVisibleResponseText(next.text)) {
+    return next;
+  }
+  return { ...next, first_visible_at: new Date().toISOString() };
 }
 
 function makeId(prefix = "turn"): string {
