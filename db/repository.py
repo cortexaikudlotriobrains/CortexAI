@@ -2645,8 +2645,10 @@ def get_compare_analysis_sources(
 
     llm_requests = get_table("llm_requests")
     llm_responses = get_table("llm_responses")
+    routing_decisions = get_table("routing_decisions")
     req_cols = {col.name for col in llm_requests.columns}
     resp_cols = {col.name for col in llm_responses.columns}
+    routing_cols = {col.name for col in routing_decisions.columns}
     if "request_group_id" not in req_cols:
         return None
 
@@ -2661,6 +2663,9 @@ def get_compare_analysis_sources(
     response_text_expr = llm_responses.c.text if "text" in resp_cols else literal("")
     response_error_expr = (
         llm_responses.c.error_message if "error_message" in resp_cols else literal(None)
+    )
+    routing_trace_expr = (
+        routing_decisions.c.trace if "trace" in routing_cols else literal(None)
     )
     created_expr = llm_requests.c.created_at if "created_at" in req_cols else llm_requests.c.id
     group_text_expr = func.lower(cast(llm_requests.c.request_group_id, String))
@@ -2682,12 +2687,16 @@ def get_compare_analysis_sources(
             revision_expr.label("response_revision"),
             response_text_expr.label("response_text"),
             response_error_expr.label("error_message"),
+            routing_trace_expr.label("routing_trace"),
             created_expr.label("created_at"),
         )
         .select_from(
             llm_requests.outerjoin(
                 llm_responses,
                 llm_responses.c.llm_request_id == llm_requests.c.id,
+            ).outerjoin(
+                routing_decisions,
+                routing_decisions.c.llm_request_id == llm_requests.c.id,
             )
         )
         .where(and_(llm_requests.c.user_id == user_id, group_match))
@@ -2718,6 +2727,14 @@ def get_compare_analysis_sources(
                 "provider": str(item.get("provider") or "unknown"),
                 "model": str(item.get("model") or "unknown"),
                 "content": str(item.get("response_text") or ""),
+                "web_source_items": _extract_history_web_source_items(
+                    item.get("routing_trace")
+                ),
+                "web_search": (
+                    _history_routing_trace_payload(item.get("routing_trace")).get(
+                        "web_search", {}
+                    )
+                ),
                 "error_message": (
                     str(item["error_message"]) if item.get("error_message") is not None else None
                 ),

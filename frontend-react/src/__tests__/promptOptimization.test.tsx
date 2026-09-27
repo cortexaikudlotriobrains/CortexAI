@@ -23,8 +23,6 @@ describe("prompt optimization", () => {
     useChatStore.setState({
       mode: "single",
       smartMode: true,
-      researchMode: false,
-      compareResearchMode: true,
       optimizeMode: false,
       selectedModelKey: "openai:gpt-5.1",
       compareModelKeys: [
@@ -343,10 +341,8 @@ describe("prompt optimization", () => {
       <FeatureChips
         compareMode
         smartMode={false}
-        researchMode={true}
         optimizeMode={true}
         onSmartToggle={vi.fn()}
-        onResearchToggle={vi.fn()}
         onOptimizeToggle={vi.fn()}
       />,
     );

@@ -7,6 +7,7 @@ from config.cache_optimization import (
     cache_friendly_prompt_ordering_enabled,
     claude_prompt_cache_enabled,
 )
+from config.web_search import load_native_web_search_config
 
 anthropic: Any
 try:
@@ -19,6 +20,12 @@ except Exception as exc:
     _anthropic_import_error = exc
 
 from models.unified_response import TokenUsage, UnifiedResponse
+from tools.web.provider_metadata import (
+    build_web_search_metadata,
+    field_value,
+    normalize_web_sources,
+    sequence_value,
+)
 from utils.cost_calculator import CostCalculator
 from utils.logger import get_logger
 
@@ -148,6 +155,67 @@ class ClaudeClient(BaseAIClient):
                 chunks.append(str(getattr(part, "text", "") or ""))
         return "".join(chunks).strip()
 
+    @classmethod
+    def _extract_text_and_web_search(
+        cls, response: Any
+    ) -> tuple[str, int, list[dict[str, str]]]:
+        parts = sequence_value(field_value(response, "content", []))
+        raw_sources: list[dict[str, str]] = []
+        operations = 0
+        for part in parts:
+            part_type = str(field_value(part, "type", "") or "").lower()
+            if part_type == "server_tool_use" and str(
+                field_value(part, "name", "") or ""
+            ).lower() == "web_search":
+                operations += 1
+            if part_type == "web_search_tool_result":
+                for result in sequence_value(field_value(part, "content", [])):
+                    url = str(field_value(result, "url", "") or "")
+                    if url:
+                        raw_sources.append(
+                            {
+                                "url": url,
+                                "title": str(field_value(result, "title", "") or ""),
+                            }
+                        )
+            for citation in sequence_value(field_value(part, "citations", [])):
+                url = str(field_value(citation, "url", "") or "")
+                if url:
+                    raw_sources.append(
+                        {
+                            "url": url,
+                            "title": str(field_value(citation, "title", "") or ""),
+                        }
+                    )
+
+        usage = field_value(response, "usage")
+        server_usage = field_value(usage, "server_tool_use")
+        try:
+            reported = int(field_value(server_usage, "web_search_requests", 0) or 0)
+        except (TypeError, ValueError):
+            reported = 0
+        operations = max(operations, reported)
+        sources = normalize_web_sources(raw_sources, limit=8)
+        source_index = {
+            source["url"].casefold().rstrip("/"): index + 1
+            for index, source in enumerate(sources)
+        }
+        chunks: list[str] = []
+        for part in parts:
+            if str(field_value(part, "type", "") or "").lower() != "text":
+                continue
+            chunk = str(field_value(part, "text", "") or "")
+            citations = []
+            for citation in sequence_value(field_value(part, "citations", [])):
+                number = source_index.get(
+                    str(field_value(citation, "url", "") or "").casefold().rstrip("/")
+                )
+                if number is not None and number not in citations:
+                    citations.append(number)
+            marker = "".join(f"[{number}]" for number in citations)
+            chunks.append(f"{chunk}{marker}" if marker and marker not in chunk else chunk)
+        return "".join(chunks).strip(), operations, sources
+
     @staticmethod
     def _supports_custom_temperature(model: str, reasoning_mode: str) -> bool:
         """Return whether Anthropic accepts a non-default temperature here."""
@@ -184,6 +252,13 @@ class ClaudeClient(BaseAIClient):
         reasoning_mode = str(kwargs.get("reasoning_mode") or "").strip().lower()
         reasoning_effort = str(kwargs.get("reasoning_effort") or "").strip().lower()
         attachments = self._normalize_inference_attachments(kwargs.pop("attachments", None))
+        web_search_policy = kwargs.pop("web_search_policy", {}) or {}
+        kwargs.pop("web_search_executor", None)
+        web_config = load_native_web_search_config()
+        web_search_enabled = (
+            web_config.provider_enabled("claude")
+            and str(web_search_policy.get("mode") or "off") != "off"
+        )
 
         try:
             normalized_messages = self._normalize_input(prompt=prompt, messages=messages)
@@ -226,6 +301,24 @@ class ClaudeClient(BaseAIClient):
                 request_payload["thinking"] = {"type": "disabled"}
             if reasoning_mode == "adaptive" and reasoning_effort not in {"", "none"}:
                 request_payload["output_config"] = {"effort": reasoning_effort}
+            if web_search_enabled:
+                request_payload["tools"] = [
+                    {
+                        "type": "web_search_20250305",
+                        "name": "web_search",
+                        "max_uses": max(
+                            1,
+                            min(3, int(web_search_policy.get("max_operations") or 3)),
+                        ),
+                    }
+                ]
+                request_payload["tool_choice"] = {
+                    "type": (
+                        "any"
+                        if str(web_search_policy.get("mode") or "auto") == "required"
+                        else "auto"
+                    )
+                }
 
             adaptive_retry = None
             try:
@@ -263,7 +356,7 @@ class ClaudeClient(BaseAIClient):
                     raise
             latency_ms = self._measure_latency(start_time)
 
-            text = self._extract_text(response)
+            text, search_operations, search_sources = self._extract_text_and_web_search(response)
             usage = getattr(response, "usage", None)
             normal_input_tokens = self._usage_int(getattr(usage, "input_tokens", 0))
             cached_input_tokens = self._usage_int(
@@ -328,6 +421,25 @@ class ClaudeClient(BaseAIClient):
                 },
             )
 
+            metadata = {
+                "endpoint": "messages.create",
+                "pricing_unknown": bool(cost.get("pricing_unknown", False)),
+                **build_web_search_metadata(
+                    provider="claude",
+                    backend="web_search",
+                    requested_mode=str(web_search_policy.get("requested_mode") or "off"),
+                    effective_mode=(
+                        str(web_search_policy.get("mode") or "off")
+                        if web_search_enabled
+                        else "off"
+                    ),
+                    operations=search_operations,
+                    sources=search_sources,
+                ),
+            }
+            if adaptive_retry:
+                metadata["adaptive_retry"] = adaptive_retry
+
             return UnifiedResponse(
                 request_id=request_id,
                 text=text,
@@ -338,18 +450,7 @@ class ClaudeClient(BaseAIClient):
                 estimated_cost=estimated_cost,
                 finish_reason=finish_reason,
                 error=None,
-                metadata=(
-                    {
-                        "endpoint": "messages.create",
-                        "adaptive_retry": adaptive_retry,
-                        "pricing_unknown": bool(cost.get("pricing_unknown", False)),
-                    }
-                    if adaptive_retry
-                    else {
-                        "endpoint": "messages.create",
-                        "pricing_unknown": bool(cost.get("pricing_unknown", False)),
-                    }
-                ),
+                metadata=metadata,
                 raw=raw,
                 **self._response_audit_fields(
                     served_model=served_model,

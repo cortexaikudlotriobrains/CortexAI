@@ -326,9 +326,6 @@ test("desktop sidebar shows a new chat before the response is persisted", async 
 
     const sidebar = page.locator("aside[aria-label='Primary navigation']");
     const preview = sidebar.locator("[data-current-chat-preview]");
-    const sourcesEnabled = await page
-        .getByRole("switch", { name: "Research mode" })
-        .getAttribute("aria-checked") === "true";
     const loadingOrb = page.locator("canvas.response-loading-orb");
     const workRow = sidebar.getByRole("button", {
         name: "Older Work history. Work, completed",
@@ -337,7 +334,7 @@ test("desktop sidebar shows a new chat before the response is persisted", async 
         await expect(loadingOrb).toBeVisible();
         await expect(loadingOrb).toHaveAttribute(
             "data-loading-state",
-            sourcesEnabled ? "searching" : "working",
+            "working",
         );
         await expect(loadingOrb).toHaveAttribute("aria-hidden", "true");
         await expect(
@@ -378,21 +375,12 @@ test("desktop feature chips show accessible tooltips in Ask and Compare", async 
     );
     await expectChipTooltip(
         page,
-        "Research mode",
-        "Uses latest information from the web",
-    );
-    await expectChipTooltip(
-        page,
         "Prompt optimization",
         "Helps you ask better for better results",
     );
+    await expect(page.getByRole("switch", { name: "Research mode" })).toHaveCount(0);
 
     await page.locator("#btnCompareMode").click();
-    await expectChipTooltip(
-        page,
-        "Research mode",
-        "Uses latest information from the web",
-    );
     await expectChipTooltip(
         page,
         "Prompt optimization",
@@ -411,7 +399,6 @@ test("dark theme gives enabled Ask feature chips a distinct accent state", async
 
     const switches = [
         page.getByRole("switch", { name: "Smart routing" }),
-        page.getByRole("switch", { name: "Research mode" }),
         page.getByRole("switch", { name: "Prompt optimization" }),
     ];
     for (const featureSwitch of switches) {
@@ -475,35 +462,22 @@ test("desktop centers the empty Ask and Compare composer, then docks it after su
     await expect(page.getByText("Hi, what would you like to compare?", { exact: true })).toHaveCount(0);
 });
 
-test("Compare Web and Improve use the same styling for matching states", async ({ responsiveApp }) => {
+test("Compare omits Web and retains the Improve control", async ({ responsiveApp }) => {
     const { page } = responsiveApp;
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.locator("#btnCompareMode").click();
 
-    const web = page.getByRole("switch", { name: "Research mode" });
     const improve = page.getByRole("switch", { name: "Prompt optimization" });
-    const promptInput = page.locator("#promptInput");
-
-    await expect(web).toContainText("Web");
-    await expect(web.locator("svg circle")).toBeVisible();
-    await web.click();
-    await promptInput.hover();
-    await expectMatchingChipStyles(web, improve);
-
-    await web.click();
+    await expect(page.getByRole("switch", { name: "Research mode" })).toHaveCount(0);
+    await expect(improve).toBeVisible();
+    await expect(improve).toHaveAttribute("aria-checked", "false");
     await improve.click();
-    await promptInput.hover();
-    await expectMatchingChipStyles(web, improve);
+    await expect(improve).toHaveAttribute("aria-checked", "true");
 
     await page.getByRole("button", { name: "Account" }).click();
     await page.getByRole("menuitem", { name: "Switch to dark theme" }).click();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-    await expectMatchingChipStyles(web, improve);
-
-    await web.click();
-    await improve.click();
-    await promptInput.hover();
-    await expectMatchingChipStyles(web, improve);
+    await expect(improve).toHaveCSS("color", "rgb(255, 255, 255)");
 });
 
 test("desktop Ask and Compare keep feature controls beside Attach", async ({ responsiveApp }) => {
@@ -511,8 +485,8 @@ test("desktop Ask and Compare keep feature controls beside Attach", async ({ res
     await page.setViewportSize({ width: 1440, height: 900 });
 
     for (const [mode, switchNames] of [
-        ["Ask", ["Smart routing", "Research mode", "Prompt optimization"]],
-        ["Compare", ["Research mode", "Prompt optimization"]],
+        ["Ask", ["Smart routing", "Prompt optimization"]],
+        ["Compare", ["Prompt optimization"]],
     ]) {
         await page
             .getByRole("navigation", { name: "Workspace mode" })
@@ -768,26 +742,6 @@ async function expectCenteredComposer(page) {
         const cardCenter = cardBounds.y + cardBounds.height / 2;
         return Math.abs(composerCenter - cardCenter);
     }).toBeLessThanOrEqual(1);
-}
-
-async function chipVisualStyle(chip) {
-    return chip.evaluate(element => {
-        const style = getComputedStyle(element);
-        return {
-            backgroundColor: style.backgroundColor,
-            borderColor: style.borderColor,
-            boxShadow: style.boxShadow,
-            color: style.color,
-        };
-    });
-}
-
-async function expectMatchingChipStyles(first, second) {
-    await expect.poll(async () => {
-        const firstStyle = await chipVisualStyle(first);
-        const secondStyle = await chipVisualStyle(second);
-        return JSON.stringify(firstStyle) === JSON.stringify(secondStyle);
-    }).toBe(true);
 }
 
 async function expectComposerToolbarOrder(page, switchNames) {

@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 
+from config.web_search import load_native_web_search_config
 from models.unified_response import (
     MultiUnifiedResponse,
     NormalizedError,
@@ -35,6 +36,10 @@ from server.billing.credit_calculator import (
 )
 from server.billing.entitlement_service import ModelTargetIntent
 from server.billing.errors import enforcement_http_exception
+from server.billing.web_search_billing import (
+    billable_web_search_usages,
+    web_search_reservation_override,
+)
 from server.dependencies import AuthResult, get_auth, get_orchestrator
 from server.generation_service import (
     annotate_response,
@@ -50,6 +55,11 @@ from server.utils import (
     normalize_empty_success_response,
     sanitize_provider_error_response,
     validate_and_trim_context,
+)
+from tools.web.native_policy import (
+    WebSearchPolicy,
+    orchestrator_research_mode,
+    resolve_web_search_policy,
 )
 from utils.logger import get_logger
 
@@ -78,22 +88,28 @@ _finalize_subscription_usage = persistence_service.finalize_subscription_usage
 _release_subscription_usage = persistence_service.release_subscription_usage
 
 
-def _resolve_compare_research_mode(request: CompareRequest) -> bool:
+def _resolve_compare_web_policy(
+    request: CompareRequest, prompt: str
+) -> tuple[WebSearchPolicy, bool]:
     """
     Compare mode always uses explicit targets; ignore smart_mode flags completely.
     """
     routing = request.routing
-    if not routing:
-        return False
-
-    if bool(getattr(routing, "smart_mode", False)):
+    if routing and bool(getattr(routing, "smart_mode", False)):
         logger.debug("Compare mode ignores routing.smart_mode=true and uses explicit targets only")
         try:
             routing.smart_mode = False
         except Exception:
             pass
 
-    return bool(routing.research_mode)
+    config = load_native_web_search_config()
+    policy = resolve_web_search_policy(
+        prompt,
+        requested_mode=getattr(routing, "web_mode", None) if routing else None,
+        legacy_research_mode=(getattr(routing, "research_mode", None) if routing else None),
+        max_operations=config.max_operations,
+    )
+    return policy, bool(config.enabled and config.compare_enabled)
 
 
 def _resolve_compare_generation_budgets(
@@ -215,11 +231,15 @@ def _billable_stream_responses(
     ordered_responses: list[UnifiedResponse | None],
     billable_response_indices: set[int],
 ) -> list[UnifiedResponse]:
-    """Return only successful stream responses whose output started."""
+    """Return emitted model responses plus any completed billable search usage."""
     return [
         response
         for index, response in enumerate(ordered_responses)
-        if response is not None and index in billable_response_indices
+        if response is not None
+        and (
+            index in billable_response_indices
+            or bool(billable_web_search_usages((response,)))
+        )
     ]
 
 
@@ -283,6 +303,7 @@ def _reserve_compare_usage(
     request_id: str,
     request: CompareRequest,
     research_enabled: bool,
+    web_search_reservation_credits_value: int | None,
     orchestrator: CortexOrchestrator,
     resolved_attachments: list[attachments_service.ResolvedAttachment],
     initial_query: str,
@@ -304,6 +325,7 @@ def _reserve_compare_usage(
             operation_type="compare",
             model_targets=targets,
             research_enabled=research_enabled,
+            web_search_reservation_credits=web_search_reservation_credits_value,
             smart_routing=False,
             attachment_count=len(resolved_attachments),
             total_attachment_bytes=sum(item.size_bytes for item in resolved_attachments),
@@ -342,12 +364,14 @@ def _finalize_compare_usage(
             orchestrator=orchestrator,
         )
         resolved_research_usage = research_usage or _research_credit_usage(responses)
+        web_search_usages = billable_web_search_usages(responses)
         _finalize_subscription_usage(
             reservation=reservation,
             successful_targets=successful_targets,
             model_usages=_billable_model_usages(responses),
             research_provider_credits_used=resolved_research_usage.provider_credits_used,
             research_usage_estimated=resolved_research_usage.estimated,
+            web_search_usages=web_search_usages,
             file_analysis_performed=attachments_present and bool(successful_targets),
         )
     except Exception as exc:
@@ -484,8 +508,14 @@ async def compare(
     context = _build_user_context(request.context)
     requested_session_id = request.context.session_id if request.context else None
     force_new_session = bool(request.context and request.context.new_session)
-    research_mode = _resolve_compare_research_mode(request)
-    orchestrator_research_mode = "on" if research_mode else "off"
+    web_policy, native_web_search = _resolve_compare_web_policy(request, request.prompt)
+    research_mode = web_policy.enabled
+    routing = request.routing
+    orchestrator_mode = orchestrator_research_mode(
+        web_policy,
+        requested_mode=getattr(routing, "web_mode", None) if routing else None,
+        legacy_research_mode=(getattr(routing, "research_mode", None) if routing else None),
+    )
 
     persistence_resolution: persistence_service.ApiKeyPersistenceResolution | None = None
     provider_api_keys: dict[str, str] = {}
@@ -566,6 +596,8 @@ async def compare(
     if inference_attachments:
         kwargs["attachments"] = inference_attachments
     kwargs["request_id"] = req_id
+    kwargs["web_search_policy"] = web_policy.to_provider_dict()
+    kwargs["_native_web_search"] = native_web_search
 
     billing_reservation: ReservedRequestUsage | None = None
     if API_DB_ENABLED and persistence_resolution is not None:
@@ -574,6 +606,12 @@ async def compare(
             request_id=f"{req_id}:compare:{uuid.uuid4()}",
             request=request,
             research_enabled=research_mode,
+            web_search_reservation_credits_value=web_search_reservation_override(
+                (target.provider for target in request.targets),
+                native_enabled=native_web_search,
+                search_enabled=web_policy.enabled,
+                per_target=True,
+            ),
             orchestrator=orchestrator,
             resolved_attachments=resolved_attachments,
             initial_query=request.initial_query or effective_prompt,
@@ -603,7 +641,7 @@ async def compare(
             context=context,
             timeout_s=request.timeout_s,
             token_tracker=None,
-            research_mode=orchestrator_research_mode,
+            research_mode=orchestrator_mode,
             **kwargs,
         )
         provider_completed = True
@@ -682,8 +720,14 @@ async def compare_stream(
     context = _build_user_context(request.context)
     requested_session_id = request.context.session_id if request.context else None
     force_new_session = bool(request.context and request.context.new_session)
-    research_mode = _resolve_compare_research_mode(request)
-    orchestrator_research_mode = "on" if research_mode else "off"
+    web_policy, native_web_search = _resolve_compare_web_policy(request, request.prompt)
+    research_mode = web_policy.enabled
+    routing = request.routing
+    orchestrator_mode = orchestrator_research_mode(
+        web_policy,
+        requested_mode=getattr(routing, "web_mode", None) if routing else None,
+        legacy_research_mode=(getattr(routing, "research_mode", None) if routing else None),
+    )
 
     persistence_resolution: persistence_service.ApiKeyPersistenceResolution | None = None
     provider_api_keys: dict[str, str] = {}
@@ -759,6 +803,8 @@ async def compare_stream(
     if inference_attachments:
         kwargs["attachments"] = inference_attachments
     kwargs["request_id"] = req_id
+    kwargs["web_search_policy"] = web_policy.to_provider_dict()
+    kwargs["_native_web_search"] = native_web_search
 
     request_group_id = str(uuid.uuid4())
     billing_reservation: ReservedRequestUsage | None = None
@@ -768,6 +814,12 @@ async def compare_stream(
             request_id=f"{req_id}:compare-stream:{uuid.uuid4()}",
             request=request,
             research_enabled=research_mode,
+            web_search_reservation_credits_value=web_search_reservation_override(
+                (target.provider for target in request.targets),
+                native_enabled=native_web_search,
+                search_enabled=web_policy.enabled,
+                per_target=True,
+            ),
             orchestrator=orchestrator,
             resolved_attachments=resolved_attachments,
             initial_query=request.initial_query or effective_prompt,
@@ -825,12 +877,23 @@ async def compare_stream(
             prepare_messages = getattr(orchestrator, "prepare_messages_for_turn", None)
             if callable(prepare_messages):
                 try:
-                    prepared_turn = await asyncio.to_thread(
-                        prepare_messages,
-                        prompt=effective_prompt,
-                        context=context,
-                        research_mode=orchestrator_research_mode,
-                    )
+                    try:
+                        prepared_turn = await asyncio.to_thread(
+                            prepare_messages,
+                            prompt=effective_prompt,
+                            context=context,
+                            research_mode=orchestrator_mode,
+                            use_shared_research=not native_web_search,
+                        )
+                    except TypeError as exc:
+                        if "use_shared_research" not in str(exc):
+                            raise
+                        prepared_turn = await asyncio.to_thread(
+                            prepare_messages,
+                            prompt=effective_prompt,
+                            context=context,
+                            research_mode=orchestrator_mode,
+                        )
                 except Exception:
                     logger.exception("Compare stream shared message preparation failed")
 
@@ -906,7 +969,7 @@ async def compare_stream(
                             context=context,
                             orchestrator=orchestrator,
                             timeout_s=request.timeout_s,
-                            research_mode=orchestrator_research_mode,
+                            research_mode=orchestrator_mode,
                             request_id=req_id,
                             kwargs={**kwargs, **generation_budgets[i].provider_kwargs()},
                             prepared_turn=prepared_turn,

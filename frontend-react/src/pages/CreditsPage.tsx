@@ -259,7 +259,9 @@ function creditActivityLabel(activity: CreditActivity): string {
   const answerItems = chargedItems.filter(
     (item) => item.item_type === "model" && item.operation_type !== "optimize",
   );
-  const hasSearchCharge = chargedItems.some((item) => item.item_type === "research");
+  const hasSearchCharge = chargedItems.some(
+    (item) => item.item_type === "research" || item.item_type === "tool",
+  );
   const parts: string[] = [];
   if (hasOptimizerCharge && answerItems.length > 0) {
     parts.push(finalOptimizedAnswerLabel(answerItems));
@@ -341,6 +343,24 @@ function finalOptimizedAnswerLabel(answerItems: CreditTransaction[]): string {
 }
 
 function toCreditBreakdownItem(transaction: CreditTransaction): CreditBreakdownItem {
+  if (transaction.item_type === "tool") {
+    const operations = numericMetadata(transaction, "operations");
+    const perOperation =
+      operations && operations > 0 ? transaction.fixed_credits / operations : null;
+    const detail =
+      operations !== null && perOperation !== null
+        ? `${formatInteger(operations)} search ${
+            operations === 1 ? "operation" : "operations"
+          } × ${formatAiCredits(perOperation)} AI credits each`
+        : "Provider web-search charge";
+    return {
+      key: transaction.id,
+      label: `${providerDisplayName(transaction.provider)} Web Search`,
+      detail: `${detail}${transaction.usage_estimated ? " · estimated" : ""}`,
+      totalCredits: transaction.total_credits,
+    };
+  }
+
   if (transaction.item_type === "research") {
     const providerCredits = numericMetadata(transaction, "provider_credits_used");
     const conversion = numericMetadata(transaction, "cortex_credits_per_provider_credit");
@@ -390,6 +410,21 @@ function modelDisplayName(transaction: CreditTransaction): string {
   return transaction.model
     ? getModelPresentation(transaction.provider ?? "", transaction.model).label
     : "AI model";
+}
+
+function providerDisplayName(provider: string | null): string {
+  const labels: Record<string, string> = {
+    openai: "OpenAI",
+    claude: "Claude",
+    anthropic: "Claude",
+    gemini: "Gemini",
+    google: "Gemini",
+    grok: "Grok",
+    deepseek: "DeepSeek",
+    tavily: "Tavily",
+  };
+  const normalized = (provider ?? "").trim().toLowerCase();
+  return labels[normalized] ?? (provider?.trim() || "Provider");
 }
 
 function modelSummary(transactions: CreditTransaction[]): string {

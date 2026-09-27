@@ -6,7 +6,7 @@ providers:
     default_model: gpt-5.6-terra
     compare_default_model: gpt-5.6-luna
     byok_supported: true
-    capabilities: [chat, stream, compare, smart_routing, prompt_optimization]
+    capabilities: [chat, stream, compare, smart_routing, prompt_optimization, web_search]
     ui:
       display_name: ChatGPT
       icon_token: target
@@ -21,7 +21,7 @@ providers:
     default_model: gemini-3.6-flash
     compare_default_model: gemini-3.5-flash-lite
     byok_supported: true
-    capabilities: [chat, stream, compare, smart_routing, prompt_optimization]
+    capabilities: [chat, stream, compare, smart_routing, prompt_optimization, web_search]
     ui:
       display_name: Gemini
       icon_token: star
@@ -36,7 +36,7 @@ providers:
     default_model: deepseek-v4-flash
     compare_default_model: deepseek-v4-flash
     byok_supported: true
-    capabilities: [chat, stream, compare, smart_routing, prompt_optimization]
+    capabilities: [chat, stream, compare, smart_routing, prompt_optimization, web_search]
     ui:
       display_name: DeepSeek
       icon_token: brain
@@ -51,7 +51,7 @@ providers:
     default_model: grok-4.3
     compare_default_model: grok-4.3
     byok_supported: true
-    capabilities: [chat, stream, compare, smart_routing, prompt_optimization]
+    capabilities: [chat, stream, compare, smart_routing, prompt_optimization, web_search]
     ui:
       display_name: Grok
       icon_token: robot
@@ -66,7 +66,7 @@ providers:
     default_model: claude-sonnet-5
     compare_default_model: claude-sonnet-5
     byok_supported: true
-    capabilities: [chat, stream, compare, smart_routing, prompt_optimization]
+    capabilities: [chat, stream, compare, smart_routing, prompt_optimization, web_search]
     ui:
       display_name: Claude
       icon_token: target

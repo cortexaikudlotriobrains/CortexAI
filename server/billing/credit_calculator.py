@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from decimal import Decimal, ROUND_CEILING
 from typing import Any
 
+from tools.web.provider_metadata import SEARCH_CREDITS_PER_OPERATION
+
 CORTEX_CREDITS_PER_TAVILY_CREDIT = 5_000
 TAVILY_ADVANCED_SEARCH_CREDIT_ESTIMATE = 2
 # Research preflight reserves the normal Advanced Search cost. Settlement uses
@@ -52,6 +54,45 @@ class ResearchCreditUsage:
     provider_credits_used: int
     cortex_credits: int
     estimated: bool = False
+
+
+@dataclass(frozen=True)
+class WebSearchCreditUsage:
+    provider: str
+    backend: str
+    operations: int
+    cortex_credits: int
+    provider_cost_usd: float
+    estimated: bool = False
+
+
+def web_search_credit_usage_from_metadata(
+    metadata: Mapping[str, Any] | None,
+) -> WebSearchCreditUsage:
+    if not isinstance(metadata, Mapping):
+        return WebSearchCreditUsage("", "", 0, 0, 0.0, False)
+    raw = metadata.get("web_search")
+    if not isinstance(raw, Mapping):
+        return WebSearchCreditUsage("", "", 0, 0, 0.0, False)
+    provider = str(raw.get("provider") or "").strip().lower()
+    backend = str(raw.get("backend") or provider).strip().lower()
+    try:
+        operations = max(0, int(raw.get("operations") or 0))
+    except (TypeError, ValueError):
+        operations = 0
+    rate = SEARCH_CREDITS_PER_OPERATION.get(provider, 0)
+    try:
+        provider_cost_usd = max(0.0, float(raw.get("provider_cost_usd") or 0.0))
+    except (TypeError, ValueError):
+        provider_cost_usd = 0.0
+    return WebSearchCreditUsage(
+        provider=provider,
+        backend=backend,
+        operations=operations,
+        cortex_credits=operations * rate,
+        provider_cost_usd=provider_cost_usd,
+        estimated=bool(raw.get("usage_estimated")),
+    )
 
 
 def calculate_research_credit_charge(provider_credits_used: int) -> int:

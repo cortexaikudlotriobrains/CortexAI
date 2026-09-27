@@ -776,3 +776,13 @@ def test_billing_migration_contains_required_constraints_and_is_additive():
     assert "uq_cache_reuse_events_user_operation_request" in cache_migration
     assert cache_migration.startswith("begin;")
     assert cache_migration.rstrip().endswith("commit;")
+
+    tool_migration = (
+        Path("db/migrations/20260927_add_tool_credit_transaction_item.sql")
+        .read_text(encoding="utf-8")
+        .lower()
+    )
+    assert "'tool'" in tool_migration
+    assert "ck_credit_transactions_item_type" in tool_migration
+    assert tool_migration.startswith("-- add provider-native tool usage")
+    assert tool_migration.rstrip().endswith("commit;")

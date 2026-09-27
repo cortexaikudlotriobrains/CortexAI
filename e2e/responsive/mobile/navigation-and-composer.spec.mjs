@@ -160,8 +160,8 @@ test("mobile Ask and Compare keep feature controls beside Attach", async ({ resp
     await page.setViewportSize({ width: 320, height: 568 });
 
     for (const [mode, switchNames] of [
-        ["Ask", ["Smart routing", "Research mode", "Prompt optimization"]],
-        ["Compare", ["Research mode", "Prompt optimization"]],
+        ["Ask", ["Smart routing", "Prompt optimization"]],
+        ["Compare", ["Prompt optimization"]],
     ]) {
         await openMobilePanel(page, mode);
         await expectComposerToolbarOrder(page, switchNames);
@@ -247,7 +247,6 @@ test("small mobile keeps focused feature tooltips inside the viewport", async ({
 
     for (const [switchName, tooltipText] of [
         ["Smart routing", "Gets you the best answer automatically"],
-        ["Research mode", "Uses latest information from the web"],
         ["Prompt optimization", "Helps you ask better for better results"],
     ]) {
         const chip = page.getByRole("switch", { name: switchName });
@@ -269,16 +268,8 @@ test("small mobile keeps focused feature tooltips inside the viewport", async ({
     }
 
     await openMobilePanel(page, "Compare");
-    const web = page.getByRole("switch", { name: "Research mode" });
-    const webTooltip = page
-        .locator('[role="tooltip"]')
-        .filter({ hasText: "Uses latest information from the web" });
-    await expect(web).toContainText("Web");
-    await expect(web.locator("svg circle")).toBeVisible();
-    await expect(web).toHaveAttribute(
-        "aria-describedby",
-        await webTooltip.getAttribute("id"),
-    );
+    await expect(page.getByRole("switch", { name: "Research mode" })).toHaveCount(0);
+    await expect(page.getByRole("switch", { name: "Prompt optimization" })).toBeVisible();
     await expectNoHorizontalOverflow(page);
 });
 
@@ -286,13 +277,13 @@ test("mobile tap toggles a feature chip and shows its tooltip briefly", async ({
     const { page } = responsiveApp;
     await page.setViewportSize({ width: 390, height: 844 });
 
-    const research = page.getByRole("switch", { name: "Research mode" });
+    const optimize = page.getByRole("switch", { name: "Prompt optimization" });
     const tooltip = page
         .locator('[role="tooltip"]')
-        .filter({ hasText: "Uses latest information from the web" });
-    await expect(research).toHaveAttribute("aria-checked", "true");
+        .filter({ hasText: "Helps you ask better for better results" });
+    await expect(optimize).toHaveAttribute("aria-checked", "false");
 
-    await research.evaluate(element => {
+    await optimize.evaluate(element => {
         element.dispatchEvent(
             new PointerEvent("pointerup", {
                 bubbles: true,
@@ -302,7 +293,7 @@ test("mobile tap toggles a feature chip and shows its tooltip briefly", async ({
         element.click();
     });
 
-    await expect(research).toHaveAttribute("aria-checked", "false");
+    await expect(optimize).toHaveAttribute("aria-checked", "true");
     await expect(tooltip).toHaveAttribute("data-touch-visible", "true");
     await expect(tooltip).toBeVisible();
     await expectNoHorizontalOverflow(page);
@@ -415,7 +406,7 @@ async function expectMobileComposerControlsFullyVisible(page) {
     const featureBounds = await featureControls.boundingBox();
     expect(featureBounds).not.toBeNull();
 
-    for (const name of ["Smart routing", "Research mode", "Prompt optimization"]) {
+    for (const name of ["Smart routing", "Prompt optimization"]) {
         const control = page.getByRole("switch", { name });
         await expect(control).toBeVisible();
         const bounds = await control.boundingBox();

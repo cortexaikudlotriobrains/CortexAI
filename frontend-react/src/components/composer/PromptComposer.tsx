@@ -55,10 +55,6 @@ export function PromptComposer({
   const mode = useChatStore((s) => s.mode);
   const smartMode = useChatStore((s) => s.smartMode);
   const setSmartMode = useChatStore((s) => s.setSmartMode);
-  const researchMode = useChatStore((s) => s.researchMode);
-  const setResearchMode = useChatStore((s) => s.setResearchMode);
-  const compareResearchMode = useChatStore((s) => s.compareResearchMode);
-  const setCompareResearchMode = useChatStore((s) => s.setCompareResearchMode);
   const optimizeMode = useChatStore((s) => s.optimizeMode);
   const setOptimizeMode = useChatStore((s) => s.setOptimizeMode);
   const askReasoningLevel = useChatStore((s) => s.askReasoningLevel);
@@ -93,13 +89,6 @@ export function PromptComposer({
       return [`${model.provider}:${model.model}`, required ? capitalize(required) : "Unavailable"];
     }),
   );
-  const researchFeatureError = featureAccessError("research", entitlements, plans);
-  const researchAllowanceError = allowanceAccessError(
-    "ai_credits",
-    1,
-    entitlements,
-    plans,
-  );
   const improveFeatureError = featureAccessError("prompt_improvement", entitlements, plans);
   const improveAllowanceError = allowanceAccessError(
     "ai_credits",
@@ -120,7 +109,7 @@ export function PromptComposer({
       selectedModelKey,
       compareModelKeys,
       models: availableModels,
-      researchEnabled: mode === "compare" ? compareResearchMode : researchMode,
+      researchEnabled: true,
       optimizeEnabled: optimizeMode,
       attachmentCount: attachments.length,
       entitlements,
@@ -264,7 +253,6 @@ export function PromptComposer({
   const featureChipProps = {
     compareMode: mode === "compare",
     smartMode: mode === "single" ? smartMode : false,
-    researchMode: mode === "compare" ? compareResearchMode : researchMode,
     optimizeMode,
     onSmartToggle:
       mode === "single"
@@ -275,14 +263,9 @@ export function PromptComposer({
             );
           }
         : () => undefined,
-    onResearchToggle: mode === "compare" ? setCompareResearchMode : setResearchMode,
     onOptimizeToggle: setOptimizeMode,
-    researchBlocked: Boolean(researchFeatureError || researchAllowanceError),
     optimizeBlocked: Boolean(improveFeatureError || improveAllowanceError),
-    researchAllowanceLabel: allowanceLabel(entitlements),
     optimizeAllowanceLabel: allowanceLabel(entitlements),
-    onResearchBlocked: () =>
-      setSubscriptionError(researchFeatureError ?? researchAllowanceError),
     onOptimizeBlocked: () =>
       setSubscriptionError(improveFeatureError ?? improveAllowanceError),
   };

@@ -102,6 +102,8 @@ class AnalysisSource:
     provider: str
     model: str
     content: str
+    web_sources: tuple[dict[str, str], ...] = ()
+    web_search: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -150,6 +152,19 @@ def normalize_analysis_sources(
                 provider=str(item.get("provider") or "unknown").strip().lower(),
                 model=str(item.get("model") or "unknown").strip(),
                 content=content,
+                web_sources=tuple(
+                    {
+                        "title": str(source.get("title") or source.get("url") or ""),
+                        "url": str(source.get("url") or ""),
+                    }
+                    for source in (item.get("web_source_items") or [])[:8]
+                    if isinstance(source, dict) and str(source.get("url") or "").strip()
+                ),
+                web_search=(
+                    dict(item.get("web_search") or {})
+                    if isinstance(item.get("web_search"), dict)
+                    else {}
+                ),
             )
         )
     return sources, failed_count
@@ -171,6 +186,7 @@ def source_snapshot(sources: list[AnalysisSource]) -> list[dict[str, Any]]:
             "provider": source.provider,
             "model": source.model,
             "contentSha256": hashlib.sha256(source.content.encode("utf-8")).hexdigest(),
+            "webSourceCount": len(source.web_sources),
         }
         for source in sources
     ]
@@ -232,7 +248,19 @@ def analyze_responses(
     model_payload = {
         "question": question,
         "responses": [
-            {"label": label, "content": source.content} for label, source in label_map.items()
+            {
+                "label": label,
+                "content": source.content,
+                "search": {
+                    "used": bool(source.web_sources)
+                    or int(source.web_search.get("operations") or 0) > 0,
+                    "operations": max(
+                        0, int(source.web_search.get("operations") or 0)
+                    ),
+                },
+                "sources": [dict(item) for item in source.web_sources],
+            }
+            for label, source in label_map.items()
         ],
     }
     messages = [
@@ -248,6 +276,7 @@ def analyze_responses(
         model=model,
         max_completion_tokens=CORTEX_ANALYSIS_MAX_OUTPUT_TOKENS,
         response_format=_analysis_response_format(),
+        web_search_policy={"requested_mode": "off", "mode": "off"},
         request_id=f"cortex-analysis-{uuid4()}",
         _cache_scope={
             "scope_id": source_fingerprint(sources),

@@ -17,6 +17,7 @@ from config.provider_catalog import (
     get_provider_default_models,
     get_provider_ids,
 )
+from config.web_search import load_native_web_search_config
 from models.user_context import UserContext
 from orchestrator.core import CortexOrchestrator
 from orchestrator.model_registry import ModelRegistry
@@ -29,6 +30,10 @@ from server.billing.enforcement_service import (
 from server.billing.credit_calculator import research_credit_usage_from_metadata
 from server.billing.entitlement_service import ModelTargetIntent
 from server.billing.errors import enforcement_http_exception
+from server.billing.web_search_billing import (
+    billable_web_search_usages,
+    web_search_reservation_override,
+)
 from server.dependencies import AuthResult, get_auth, get_orchestrator
 from server.generation_service import annotate_response, resolve_request_budget
 from server.generation_service import constrain_budget_to_reservation
@@ -42,6 +47,11 @@ from server.utils import (
     normalize_empty_success_response,
     sanitize_provider_error_response,
     validate_and_trim_context,
+)
+from tools.web.native_policy import (
+    WebSearchPolicy,
+    orchestrator_research_mode,
+    resolve_web_search_policy,
 )
 from utils.logger import get_logger
 
@@ -85,6 +95,18 @@ class ChatExecutionPlan:
     routing_constraints: dict[str, Any] | None
     preview_provider: str
     preview_model: str
+
+
+def _resolve_chat_web_policy(request: ChatRequest, prompt: str) -> tuple[WebSearchPolicy, bool]:
+    routing = request.routing
+    config = load_native_web_search_config()
+    policy = resolve_web_search_policy(
+        prompt,
+        requested_mode=getattr(routing, "web_mode", None) if routing else None,
+        legacy_research_mode=(getattr(routing, "research_mode", None) if routing else None),
+        max_operations=config.max_operations,
+    )
+    return policy, config.enabled
 
 
 def _default_model_for_provider(provider: str) -> str:
@@ -301,7 +323,13 @@ def _resolve_chat_execution_plan(
 
     routing = request.routing
     smart_mode = True if routing is None else bool(routing.smart_mode)
-    research_mode = False if routing is None else bool(routing.research_mode)
+    # Only preserve the legacy Smart-routing preference for an explicit legacy
+    # Web=true request. Automatic provider-native search does not bias model choice.
+    research_mode = bool(
+        routing
+        and getattr(routing, "web_mode", None) is None
+        and getattr(routing, "research_mode", None) is True
+    )
 
     if TRUE_SMART_ROUTING_ENABLED and smart_mode:
         constraints = _build_chat_routing_constraints()
@@ -489,7 +517,10 @@ def _to_ndjson(event: dict) -> str:
 
 def _research_was_performed(response: object) -> bool:
     metadata = getattr(response, "metadata", None)
-    return research_credit_usage_from_metadata(metadata).provider_credits_used > 0
+    return (
+        research_credit_usage_from_metadata(metadata).provider_credits_used > 0
+        or bool(billable_web_search_usages((response,)))
+    )
 
 
 def _successful_billing_targets(
@@ -574,6 +605,7 @@ def _reserve_chat_usage(
     request_id: str,
     execution_plan: ChatExecutionPlan,
     research_enabled: bool,
+    web_search_reservation_credits_value: int | None,
     orchestrator: CortexOrchestrator,
     resolved_attachments: list[attachments_service.ResolvedAttachment],
     input_text: str,
@@ -603,6 +635,7 @@ def _reserve_chat_usage(
             operation_type=operation_type,
             model_targets=targets,
             research_enabled=research_enabled,
+            web_search_reservation_credits=web_search_reservation_credits_value,
             smart_routing=execution_plan.strategy == "smart_orchestrator",
             attachment_count=len(resolved_attachments),
             total_attachment_bytes=sum(item.size_bytes for item in resolved_attachments),
@@ -642,12 +675,14 @@ def _finalize_chat_usage(
             else ()
         )
         research_usage = research_credit_usage_from_metadata(getattr(response, "metadata", None))
+        web_search_usages = billable_web_search_usages((response,))
         _finalize_subscription_usage(
             reservation=reservation,
             successful_targets=successful_targets,
             model_usages=(_billable_model_usages(response) if settle_model_response else ()),
             research_provider_credits_used=research_usage.provider_credits_used,
             research_usage_estimated=research_usage.estimated,
+            web_search_usages=web_search_usages,
             file_analysis_performed=attachments_present and bool(successful_targets),
         )
     except Exception as exc:
@@ -687,14 +722,20 @@ async def chat(
     requested_session_id = request.context.session_id if request.context else None
     force_new_session = bool(request.context and request.context.new_session)
     routing = request.routing
-    research_mode = bool(routing and routing.research_mode)
-    orchestrator_research_mode = "on" if research_mode else "off"
+    web_policy, native_web_search = _resolve_chat_web_policy(request, request.prompt)
+    research_mode = web_policy.enabled
+    legacy_research_mode = getattr(routing, "research_mode", None) if routing else None
+    orchestrator_mode = orchestrator_research_mode(
+        web_policy,
+        requested_mode=getattr(routing, "web_mode", None) if routing else None,
+        legacy_research_mode=legacy_research_mode,
+    )
     if (
         research_mode
         and request.regeneration is not None
         and not request.regeneration.refresh_research
     ):
-        orchestrator_research_mode = "auto"
+        orchestrator_mode = "auto"
 
     if request.regeneration is not None and not API_DB_ENABLED:
         raise HTTPException(
@@ -814,6 +855,8 @@ async def chat(
     if inference_attachments:
         kwargs["attachments"] = inference_attachments
     kwargs["request_id"] = req_id
+    kwargs["web_search_policy"] = web_policy.to_provider_dict()
+    kwargs["_native_web_search"] = native_web_search
 
     billing_reservation: ReservedRequestUsage | None = None
     if API_DB_ENABLED and persistence_resolution is not None:
@@ -835,6 +878,16 @@ async def chat(
             request_id=f"{req_id}:chat:{uuid4()}",
             execution_plan=execution_plan,
             research_enabled=research_mode,
+            web_search_reservation_credits_value=web_search_reservation_override(
+                (
+                    (provider for provider, _model in smart_targets)
+                    if smart_targets
+                    else (execution_plan.preview_provider,)
+                ),
+                native_enabled=native_web_search,
+                search_enabled=web_policy.enabled,
+                per_target=False,
+            ),
             orchestrator=orchestrator,
             resolved_attachments=resolved_attachments,
             input_text=_billing_materialized_input_text(request, inference_attachments),
@@ -916,7 +969,7 @@ async def chat(
             context=context,
             model_name=execution_plan.model_name,
             token_tracker=None,
-            research_mode=orchestrator_research_mode,
+            research_mode=orchestrator_mode,
             routing_mode=execution_plan.routing_mode,
             routing_constraints=execution_plan.routing_constraints,
             **kwargs,
@@ -985,14 +1038,20 @@ async def chat_stream(
     requested_session_id = request.context.session_id if request.context else None
     force_new_session = bool(request.context and request.context.new_session)
     routing = request.routing
-    research_mode = bool(routing and routing.research_mode)
-    orchestrator_research_mode = "on" if research_mode else "off"
+    web_policy, native_web_search = _resolve_chat_web_policy(request, request.prompt)
+    research_mode = web_policy.enabled
+    legacy_research_mode = getattr(routing, "research_mode", None) if routing else None
+    orchestrator_mode = orchestrator_research_mode(
+        web_policy,
+        requested_mode=getattr(routing, "web_mode", None) if routing else None,
+        legacy_research_mode=legacy_research_mode,
+    )
     if (
         research_mode
         and request.regeneration is not None
         and not request.regeneration.refresh_research
     ):
-        orchestrator_research_mode = "auto"
+        orchestrator_mode = "auto"
 
     if request.regeneration is not None and not API_DB_ENABLED:
         raise HTTPException(
@@ -1114,6 +1173,8 @@ async def chat_stream(
     if inference_attachments:
         kwargs["attachments"] = inference_attachments
     kwargs["request_id"] = req_id
+    kwargs["web_search_policy"] = web_policy.to_provider_dict()
+    kwargs["_native_web_search"] = native_web_search
 
     billing_reservation: ReservedRequestUsage | None = None
     if API_DB_ENABLED and persistence_resolution is not None:
@@ -1135,6 +1196,16 @@ async def chat_stream(
             request_id=f"{req_id}:chat-stream:{uuid4()}",
             execution_plan=execution_plan,
             research_enabled=research_mode,
+            web_search_reservation_credits_value=web_search_reservation_override(
+                (
+                    (provider for provider, _model in smart_targets)
+                    if smart_targets
+                    else (execution_plan.preview_provider,)
+                ),
+                native_enabled=native_web_search,
+                search_enabled=web_policy.enabled,
+                per_target=False,
+            ),
             orchestrator=orchestrator,
             resolved_attachments=resolved_attachments,
             input_text=_billing_materialized_input_text(request, inference_attachments),
@@ -1257,7 +1328,7 @@ async def chat_stream(
                     context=context,
                     model_name=execution_plan.model_name,
                     token_tracker=None,
-                    research_mode=orchestrator_research_mode,
+                    research_mode=orchestrator_mode,
                     routing_mode=execution_plan.routing_mode,
                     routing_constraints=execution_plan.routing_constraints,
                     **kwargs,

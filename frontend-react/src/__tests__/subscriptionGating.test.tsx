@@ -33,8 +33,6 @@ describe("subscription feature gating", () => {
     useChatStore.setState({
       mode: "single",
       smartMode: false,
-      researchMode: false,
-      compareResearchMode: false,
       optimizeMode: false,
       selectedModelKey: "openai:gpt-5.1",
       compareModelKeys: ["openai:gpt-5.1", "claude:claude-sonnet-4-5", ""],
@@ -311,7 +309,7 @@ describe("subscription feature gating", () => {
     ).toBeDisabled();
   });
 
-  it("explains exhausted Web access without changing or clearing the draft", async () => {
+  it("blocks an automatic Ask request when credits are exhausted without clearing the draft", async () => {
     const user = userEvent.setup();
     const entitlements = entitlementFixture();
     entitlements.allowances.ai_credits = {
@@ -329,20 +327,13 @@ describe("subscription feature gating", () => {
       />,
     );
 
-    const research = screen.getByRole("switch", { name: "Research mode" });
-    expect(research).toHaveAttribute("aria-disabled", "true");
-    expect(
-      screen.getByRole("tooltip", {
-        name: /Uses latest information from the web.*0 credits left/,
-      }),
-    ).toBeInTheDocument();
-    await user.click(research);
+    expect(screen.queryByRole("switch", { name: "Research mode" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(useChatStore.getState().subscriptionError?.code).toBe(
       "insufficient_credits",
     );
     expect(useChatStore.getState().prompt).toBe("Keep this draft");
-    expect(research).toHaveAttribute("aria-checked", "false");
   });
 
   it("does not show an estimated credit warning for expensive Compare requests", () => {
@@ -358,7 +349,6 @@ describe("subscription feature gating", () => {
     ];
     useChatStore.setState({
       mode: "compare",
-      compareResearchMode: true,
       compareModelKeys: [
         "openai:gpt-5.1",
         "claude:claude-sonnet-4-5",

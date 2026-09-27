@@ -98,8 +98,7 @@ export function useChat() {
           mode: state.mode,
           prompt: rawPrompt,
           submittedPrompt: rawPrompt,
-          researchEnabled:
-            state.mode === "compare" ? state.compareResearchMode : state.researchMode,
+          researchEnabled: false,
           optimizeEnabled: true,
           attachments,
           responses: buildPlaceholdersForCurrentMode(
@@ -326,7 +325,7 @@ async function runAskTurn({
   initialQuery,
   startedAt,
   targetOverride,
-  researchEnabledOverride,
+  researchEnabledOverride: _researchEnabledOverride,
   acceptComposer,
 }: {
   prompt: string;
@@ -349,14 +348,14 @@ async function runAskTurn({
   const provider = targetOverride?.provider ?? selected.provider;
   const model = targetOverride?.model ?? selected.model;
   const smartMode = targetOverride?.provider ? false : state.smartMode;
-  const researchEnabled = researchEnabledOverride ?? state.researchMode;
+  const researchEnabled = false;
   const request: ChatRequest = {
     prompt: submittedPrompt,
     credit_activity_id: creditActivityId,
     initial_query: initialQuery,
     provider: smartMode ? undefined : provider || undefined,
     model: smartMode ? undefined : model || undefined,
-    routing: { smart_mode: smartMode, research_mode: researchEnabled },
+    routing: { smart_mode: smartMode, web_mode: "auto" },
     generation: generationForReasoningLevel(
       state.askReasoningLevel,
       MANAGED_GENERATION_PROFILE,
@@ -522,7 +521,7 @@ async function runCompareTurn({
     const { provider, model } = parseModelKey(key);
     return { provider, model: model || undefined };
   });
-  const researchEnabled = state.compareResearchMode;
+  const researchEnabled = false;
   const placeholders = targets.map((target, index) =>
     makePlaceholderResponse(index, target.provider, target.model ?? "", state.sessionId, {
       startedAt,
@@ -533,7 +532,7 @@ async function runCompareTurn({
     credit_activity_id: creditActivityId,
     initial_query: initialQuery,
     targets,
-    routing: { smart_mode: false, research_mode: researchEnabled },
+    routing: { smart_mode: false, web_mode: "auto" },
     generation: generationForReasoningLevel(
       state.compareReasoningLevel,
       MANAGED_GENERATION_PROFILE,
@@ -632,7 +631,7 @@ async function runRegenerateResponse({
   signal,
   startedAt,
   targetOverride,
-  researchEnabledOverride,
+  researchEnabledOverride: _researchEnabledOverride,
   regenerationSourceRequestId,
   generationProfileOverride,
   reasoningLevelOverride,
@@ -655,14 +654,13 @@ async function runRegenerateResponse({
   const provider = targetOverride?.provider ?? selected.provider;
   const model = targetOverride?.model ?? selected.model;
   const smartMode = targetOverride?.provider ? false : state.smartMode;
-  const researchEnabled = researchEnabledOverride ?? state.researchMode;
   const request: ChatRequest = {
     prompt: submittedPrompt,
     credit_activity_id: createCreditActivityId(),
     initial_query: submittedPrompt,
     provider: smartMode ? undefined : provider || undefined,
     model: smartMode ? undefined : model || undefined,
-    routing: { smart_mode: smartMode, research_mode: researchEnabled },
+    routing: { smart_mode: smartMode, web_mode: "auto" },
     generation: generationForReasoningLevel(
       reasoningLevelOverride,
       generationProfileOverride ?? MANAGED_GENERATION_PROFILE,

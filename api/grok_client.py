@@ -7,7 +7,13 @@ from config.cache_optimization import (
     cache_friendly_prompt_ordering_enabled,
     grok_prompt_cache_enabled,
 )
+from config.web_search import load_native_web_search_config
 from models.unified_response import NormalizedError, UnifiedResponse
+from tools.web.provider_metadata import (
+    build_web_search_metadata,
+    extract_responses_web_search,
+    field_value,
+)
 from utils.cost_calculator import CostCalculator
 from utils.logger import get_logger
 
@@ -79,6 +85,13 @@ class GrokClient(BaseAIClient):
             else None
         ) or None
         attachments = self._normalize_inference_attachments(kwargs.pop("attachments", None))
+        web_search_policy = kwargs.pop("web_search_policy", {}) or {}
+        kwargs.pop("web_search_executor", None)
+        web_config = load_native_web_search_config()
+        web_search_enabled = (
+            web_config.provider_enabled("grok")
+            and str(web_search_policy.get("mode") or "off") != "off"
+        )
 
         try:
             normalized_messages = self._normalize_input(prompt=prompt, messages=messages)
@@ -123,10 +136,48 @@ class GrokClient(BaseAIClient):
                     "x-grok-conv-id": cache_context.cache_scope_key
                 }
             adaptive_retry = None
+            endpoint = "chat.completions"
 
             try:
-                response = self.client.chat.completions.create(**request_payload)
+                if web_search_enabled:
+                    cap = max(1, min(3, int(web_search_policy.get("max_operations") or 3)))
+                    response_payload: dict[str, Any] = {
+                        "model": model,
+                        "input": self._build_responses_messages(
+                            normalized_messages,
+                            attachments=binary_attachments,
+                            web_instruction=(
+                                f"Use no more than {cap} web searches. "
+                                + (
+                                    "Web search is required for this request."
+                                    if str(web_search_policy.get("mode") or "auto")
+                                    == "required"
+                                    else "Search only when current or externally verifiable information is needed."
+                                )
+                            ),
+                        ),
+                        "tools": [{"type": "web_search"}],
+                        "tool_choice": (
+                            "required"
+                            if str(web_search_policy.get("mode") or "auto") == "required"
+                            else "auto"
+                        ),
+                        "max_output_tokens": max_tokens,
+                        "max_tool_calls": cap,
+                        "parallel_tool_calls": False,
+                        "extra_body": {"max_turns": cap},
+                    }
+                    if temperature is not None:
+                        response_payload["temperature"] = temperature
+                    if reasoning_mode:
+                        response_payload["reasoning"] = {"effort": reasoning_mode}
+                    response = self.client.responses.create(**response_payload)
+                    endpoint = "responses"
+                else:
+                    response = self.client.chat.completions.create(**request_payload)
             except Exception as request_exc:
+                if web_search_enabled:
+                    raise
                 dropped_param, retry_payload = self._build_retry_payload_without_unsupported_parameter(
                     request_payload,
                     request_exc,
@@ -163,8 +214,17 @@ class GrokClient(BaseAIClient):
 
             latency_ms = self._measure_latency(start_time)
 
-            # Extract text
-            text = response.choices[0].message.content or ""
+            if endpoint == "responses":
+                text = self._extract_responses_text(response)
+                text, search_operations, search_sources = extract_responses_web_search(
+                    response,
+                    text=text,
+                )
+                search_operations = min(search_operations, cap)
+            else:
+                text = response.choices[0].message.content or ""
+                search_operations = 0
+                search_sources = []
 
             # Extract token usage
             token_usage = self._openai_compatible_token_usage(
@@ -189,12 +249,23 @@ class GrokClient(BaseAIClient):
 
             # Normalize finish reason
             finish_reason = self._normalize_finish_reason(
-                response.choices[0].finish_reason if response.choices else None, provider="grok"
+                (
+                    field_value(response, "finish_reason")
+                    if endpoint == "responses"
+                    else (response.choices[0].finish_reason if response.choices else None)
+                ),
+                provider="grok",
             )
 
             # Build raw response if requested
             raw = None
-            if save_full:
+            if save_full and endpoint == "responses":
+                raw = (
+                    response.model_dump()
+                    if hasattr(response, "model_dump")
+                    else (response if isinstance(response, dict) else None)
+                )
+            elif save_full:
                 raw = {
                     "id": response.id,
                     "object": response.object,
@@ -235,6 +306,25 @@ class GrokClient(BaseAIClient):
                 },
             )
 
+            metadata = {
+                "endpoint": endpoint,
+                "pricing_unknown": bool(cost.get("pricing_unknown", False)),
+                **build_web_search_metadata(
+                    provider="grok",
+                    backend="web_search",
+                    requested_mode=str(web_search_policy.get("requested_mode") or "off"),
+                    effective_mode=(
+                        str(web_search_policy.get("mode") or "off")
+                        if web_search_enabled
+                        else "off"
+                    ),
+                    operations=search_operations,
+                    sources=search_sources,
+                ),
+            }
+            if adaptive_retry:
+                metadata["adaptive_retry"] = adaptive_retry
+
             return UnifiedResponse(
                 request_id=request_id,
                 text=text,
@@ -245,18 +335,7 @@ class GrokClient(BaseAIClient):
                 estimated_cost=estimated_cost,
                 finish_reason=finish_reason,
                 error=None,
-                metadata=(
-                    {
-                        "endpoint": "chat.completions",
-                        "adaptive_retry": adaptive_retry,
-                        "pricing_unknown": bool(cost.get("pricing_unknown", False)),
-                    }
-                    if adaptive_retry
-                    else {
-                        "endpoint": "chat.completions",
-                        "pricing_unknown": bool(cost.get("pricing_unknown", False)),
-                    }
-                ),
+                metadata=metadata,
                 raw=raw,
                 **self._response_audit_fields(
                     served_model=served_model,
@@ -324,6 +403,57 @@ class GrokClient(BaseAIClient):
             else:
                 out.append({"role": role, "content": text})
         return out
+
+    @classmethod
+    def _build_responses_messages(
+        cls,
+        normalized_messages: list[dict[str, Any]],
+        *,
+        attachments: list[dict[str, Any]],
+        web_instruction: str,
+    ) -> list[dict[str, Any]]:
+        messages = [
+            {"role": "system", "content": [{"type": "input_text", "text": web_instruction}]}
+        ]
+        last_user_idx = max(
+            (
+                index
+                for index, message in enumerate(normalized_messages)
+                if str(message.get("role") or "").lower() == "user"
+            ),
+            default=-1,
+        )
+        for index, message in enumerate(normalized_messages):
+            role = str(message.get("role") or "user").lower()
+            content_type = "output_text" if role == "assistant" else "input_text"
+            content: list[dict[str, Any]] = [
+                {"type": content_type, "text": cls._normalize_message_text(message)}
+            ]
+            if index == last_user_idx:
+                for attachment in attachments:
+                    content.append(
+                        {
+                            "type": "input_image",
+                            "image_url": (
+                                f"data:{attachment['mime_type']};base64,"
+                                f"{attachment['data_base64']}"
+                            ),
+                        }
+                    )
+            messages.append({"role": role, "content": content})
+        return messages
+
+    @staticmethod
+    def _extract_responses_text(response: Any) -> str:
+        output_text = field_value(response, "output_text")
+        if output_text:
+            return str(output_text)
+        chunks: list[str] = []
+        for item in field_value(response, "output", []) or []:
+            for part in field_value(item, "content", []) or []:
+                if str(field_value(part, "type", "") or "") in {"output_text", "text"}:
+                    chunks.append(str(field_value(part, "text", "") or ""))
+        return "".join(chunks).strip()
 
     @classmethod
     def list_available_models(cls, api_key: str = None, **kwargs) -> None:

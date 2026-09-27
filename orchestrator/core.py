@@ -334,7 +334,8 @@ If a system message containing "WEB RESEARCH SOURCES:" is present:
 - If an exact detail is missing, state what is missing and suggest one focused follow-up search query.
 
 If no web source excerpts are present:
-- For current-data requests, say you do not have current data.
+- Use the provider web-search tool when it is available and current information is needed.
+- If no web-search tool is available, say you do not have current data.
 - For general knowledge, answer from training data.
 
 Never fabricate numbers, dates, percentages, or citations.
@@ -407,6 +408,7 @@ Never claim you performed web browsing yourself; the system handles retrieval.
         prompt: str,
         context: UserContext | None = None,
         research_mode: str = "auto",
+        use_shared_research: bool = True,
     ) -> dict[str, Any]:
         """Build one optimized/research-injected message payload for a turn."""
         optimized_prompt, opt_metadata = self._optimize_prompt_if_enabled(
@@ -417,15 +419,17 @@ Never claim you performed web browsing yourself; the system handles retrieval.
             logger.debug("Using optimized prompt for request")
 
         messages = self._build_messages(optimized_prompt, context, research_mode=research_mode)
-        if self.research_service:
+        if use_shared_research and self.research_service:
             messages, research_metadata = self._apply_research_if_needed(
                 prompt=optimized_prompt,
                 messages=messages,
                 research_mode=research_mode,
                 context=context,
             )
-        else:
+        elif use_shared_research:
             research_metadata = self._empty_research_metadata("service_not_configured")
+        else:
+            research_metadata = self._empty_research_metadata("provider_native")
 
         return {
             "prompt": optimized_prompt,
@@ -1376,6 +1380,45 @@ Never claim you performed web browsing yourself; the system handles retrieval.
 
         return final_response
 
+    def _execute_provider_search(self, query: str) -> dict[str, Any]:
+        """Execute one DeepSeek-requested Tavily search without shared injection."""
+        normalized_query = str(query or "").strip()
+        if not normalized_query:
+            return {
+                "ok": False,
+                "error": "search_query_required",
+                "sources": [],
+                "provider_credits_used": 0,
+                "provider_credits_estimated": False,
+            }
+        if self.research_service is None:
+            return {
+                "ok": False,
+                "error": "tavily_not_configured",
+                "sources": [],
+                "provider_credits_used": 0,
+                "provider_credits_estimated": False,
+            }
+
+        result = self.research_service.build(normalized_query, use_cache=False)
+        sources = [
+            {
+                "title": source.title,
+                "url": source.url,
+                "excerpt": source.excerpt,
+            }
+            for source in (result.sources or [])[:5]
+        ]
+        return {
+            "ok": bool(result.used and sources),
+            "error": result.error,
+            "query": result.search_query or normalized_query,
+            "content": result.injected_text,
+            "sources": sources,
+            "provider_credits_used": max(0, int(result.provider_credits_used or 0)),
+            "provider_credits_estimated": bool(result.provider_credits_estimated),
+        }
+
     # ---------- public API ----------
     def ask(
         self,
@@ -1399,6 +1442,9 @@ Never claim you performed web browsing yourself; the system handles retrieval.
             prepared_research_metadata = kwargs.pop("_prepared_research_metadata", None)
             prepared_opt_metadata = kwargs.pop("_prepared_opt_metadata", None)
             prepared_prompt = kwargs.pop("_prepared_prompt", None)
+            native_web_search = bool(kwargs.pop("_native_web_search", False))
+            if native_web_search:
+                kwargs.setdefault("web_search_executor", self._execute_provider_search)
 
             if prepared_messages is not None:
                 optimized_prompt = str(prepared_prompt or prompt)
@@ -1416,6 +1462,7 @@ Never claim you performed web browsing yourself; the system handles retrieval.
                     prompt=prompt,
                     context=context,
                     research_mode=research_mode,
+                    use_shared_research=not native_web_search,
                 )
                 optimized_prompt = prepared_turn["prompt"]
                 messages = prepared_turn["messages"]
@@ -1568,7 +1615,12 @@ Never claim you performed web browsing yourself; the system handles retrieval.
 
             # Merge research and optimization metadata into response
             md = resp.metadata or {}
-            merged_md = {**md, **research_metadata, **opt_metadata, "research_mode": research_mode}
+            merged_md = {
+                **research_metadata,
+                **md,
+                **opt_metadata,
+                "research_mode": research_mode,
+            }
             resp = replace(resp, metadata=merged_md)
 
             if record_direct_circuit:
@@ -1617,6 +1669,9 @@ Never claim you performed web browsing yourself; the system handles retrieval.
         per_client_generation = kwargs.pop("_per_client_generation", {}) or {}
         if not isinstance(per_client_generation, dict):
             per_client_generation = {}
+        native_web_search = bool(kwargs.pop("_native_web_search", False))
+        if native_web_search:
+            kwargs.setdefault("web_search_executor", self._execute_provider_search)
 
         def with_turn_metadata(response: UnifiedResponse) -> UnifiedResponse:
             normalized = self._normalize_empty_success_response(response)
@@ -1624,8 +1679,8 @@ Never claim you performed web browsing yourself; the system handles retrieval.
             return replace(
                 normalized,
                 metadata={
-                    **metadata,
                     **research_metadata,
+                    **metadata,
                     "research_mode": research_mode,
                     "provider_cost_owner": (
                         "customer" if provider_api_keys.get(response.provider.lower()) else "cortex"
@@ -1644,15 +1699,16 @@ Never claim you performed web browsing yourself; the system handles retrieval.
 
             messages = self._build_messages(optimized_prompt, context, research_mode=research_mode)
 
-            # Apply research ONCE for all models (compare fairness)
-            if self.research_service:
+            # Legacy rollback mode shares one Tavily pack. Native mode gives
+            # every provider its own isolated tool/search execution.
+            if not native_web_search and self.research_service:
                 messages, research_metadata = self._apply_research_if_needed(
                     prompt=optimized_prompt,
                     messages=messages,
                     research_mode=research_mode,
                     context=context,
                 )
-            else:
+            elif not native_web_search:
                 research_metadata = {
                     "research_used": False,
                     "research_reused": False,
@@ -1662,6 +1718,8 @@ Never claim you performed web browsing yourself; the system handles retrieval.
                     "research_error": "service_not_configured",
                     "sources": [],
                 }
+            else:
+                research_metadata = self._empty_research_metadata("provider_native")
 
             kwargs.setdefault(
                 "_cache_scope",
@@ -1723,7 +1781,8 @@ Never claim you performed web browsing yourself; the system handles retrieval.
                         token_tracker.update(r)
                 return MultiUnifiedResponse.from_responses(request_group_id, prompt, responses)
 
-            # Execute comparisons with research-injected messages (parallel inside MultiModelOrchestrator)
+            # Execute comparisons in parallel. In native mode the same prompt
+            # is shared, but evidence and citations are provider-specific.
             result = self._multi_orchestrator.get_comparisons_sync(
                 prompt=prompt,
                 clients=clients,

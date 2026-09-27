@@ -3455,6 +3455,38 @@ def test_compare_stream_partial_settlement_uses_only_emitted_successes():
     ) == [emitted]
 
 
+def test_compare_stream_partial_settlement_keeps_search_from_failed_target():
+    from server.routes import compare as compare_route
+
+    failed_after_search = UnifiedResponse(
+        request_id="failed-search",
+        text="",
+        provider="deepseek",
+        model="deepseek-chat",
+        latency_ms=1,
+        token_usage=TokenUsage(2, 1, 3),
+        estimated_cost=0.0,
+        finish_reason="error",
+        error=NormalizedError(
+            code="provider_error",
+            message="failed after search",
+            provider="deepseek",
+            retryable=True,
+        ),
+        metadata={
+            "web_search": {
+                "provider": "deepseek",
+                "backend": "tavily",
+                "operations": 1,
+            }
+        },
+    )
+
+    assert compare_route._billable_stream_responses([failed_after_search], set()) == [
+        failed_after_search
+    ]
+
+
 def test_chat_stream_finalizes_success_after_output_before_terminal_event(client, monkeypatch):
     chat_route, _ = _enable_subscription_route_test_mode(monkeypatch)
     reservation = _test_reservation("ask")

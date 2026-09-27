@@ -932,10 +932,10 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"prompt\": \"Postman B2B e2e chat probe\",\n  \"credit_activity_id\": \"postman-chat-activity\",\n  \"initial_query\": \"Postman B2B e2e chat probe\",\n  \"provider\": \"{{chat_provider}}\",\n  \"model\": \"{{chat_model}}\",\n  \"generation\": {\"profile\": \"auto\", \"reasoning\": {\"mode\": \"on\", \"effort\": \"low\"}},\n  \"routing\": {\n    \"smart_mode\": false,\n    \"research_mode\": false\n  }\n}"
+              "raw": "{\n  \"prompt\": \"Postman B2B e2e chat probe\",\n  \"credit_activity_id\": \"postman-chat-activity\",\n  \"initial_query\": \"Postman B2B e2e chat probe\",\n  \"provider\": \"{{chat_provider}}\",\n  \"model\": \"{{chat_model}}\",\n  \"generation\": {\"profile\": \"auto\", \"reasoning\": {\"mode\": \"on\", \"effort\": \"low\"}},\n  \"routing\": {\n    \"smart_mode\": false,\n    \"web_mode\": \"auto\"\n  }\n}"
             },
             "url": "{{base_url}}/v1/chat",
-            "description": "DB-mode Ask resolves the effective plan and server-owned model billing class, then reserves model/research units before provider execution. Optional credit_activity_id and initial_query are display-only ledger context. Claude thinking, effort, and temperature fields are filtered by the selected model's registry capabilities. Entitlement denial is 403, exhausted monthly allowance is 429, and unsafe billing configuration is 500."
+            "description": "DB-mode Ask resolves the effective plan and server-owned model billing class, then reserves model and provider-native search capacity before execution. web_mode accepts off, auto, required, or on as a required-search alias; legacy research_mode booleans remain compatible. Optional credit_activity_id and initial_query are display-only ledger context. Claude thinking, effort, and temperature fields are filtered by the selected model's registry capabilities. Entitlement denial is 403, exhausted monthly allowance is 429, and unsafe billing configuration is 500."
           },
           "event": [
             {
@@ -994,10 +994,10 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"prompt\": \"Postman B2B e2e chat stream probe\",\n  \"credit_activity_id\": \"postman-chat-stream-activity\",\n  \"initial_query\": \"Postman B2B e2e chat stream probe\",\n  \"provider\": \"{{chat_provider}}\",\n  \"model\": \"{{chat_model}}\",\n  \"generation\": {\"profile\": \"auto\", \"reasoning\": {\"mode\": \"on\", \"effort\": \"low\"}}\n}"
+              "raw": "{\n  \"prompt\": \"Postman B2B e2e chat stream probe\",\n  \"credit_activity_id\": \"postman-chat-stream-activity\",\n  \"initial_query\": \"Postman B2B e2e chat stream probe\",\n  \"provider\": \"{{chat_provider}}\",\n  \"model\": \"{{chat_model}}\",\n  \"generation\": {\"profile\": \"auto\", \"reasoning\": {\"mode\": \"on\", \"effort\": \"low\"}},\n  \"routing\": {\"smart_mode\": false, \"web_mode\": \"auto\"}\n}"
             },
             "url": "{{base_url}}/v1/chat/stream",
-            "description": "Reserves Ask subscription usage before returning the NDJSON stream. Claude thinking, effort, and temperature fields are filtered by the selected model's registry capabilities. Provider failure releases response units; successful model/research usage is finalized before terminal response events."
+            "description": "Reserves Ask model and provider-native search capacity before returning the NDJSON stream. Claude thinking, effort, and temperature fields are filtered by the selected model's registry capabilities. Provider failure releases unused capacity; successful model and actual search-tool usage are finalized before terminal response events."
           },
           "event": [
             {
@@ -1043,10 +1043,10 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"prompt\": \"Postman B2B compare probe\",\n  \"credit_activity_id\": \"postman-compare-activity\",\n  \"initial_query\": \"Postman B2B compare probe\",\n  \"generation\": {\"profile\": \"auto\", \"reasoning\": {\"mode\": \"on\", \"effort\": \"low\"}},\n  \"targets\": [\n    {\"provider\": \"{{chat_provider}}\", \"model\": \"{{chat_model}}\"},\n    {\"provider\": \"{{compare_provider}}\", \"model\": \"{{compare_model}}\"}\n  ]\n}"
+              "raw": "{\n  \"prompt\": \"Postman B2B compare probe\",\n  \"credit_activity_id\": \"postman-compare-activity\",\n  \"initial_query\": \"Postman B2B compare probe\",\n  \"generation\": {\"profile\": \"auto\", \"reasoning\": {\"mode\": \"on\", \"effort\": \"low\"}},\n  \"routing\": {\"web_mode\": \"auto\"},\n  \"targets\": [\n    {\"provider\": \"{{chat_provider}}\", \"model\": \"{{chat_model}}\"},\n    {\"provider\": \"{{compare_provider}}\", \"model\": \"{{compare_model}}\"}\n  ]\n}"
             },
             "url": "{{base_url}}/v1/compare",
-            "description": "Accepts 2-3 explicit targets. Optional credit_activity_id and initial_query are display-only ledger context. Free/Plus allow 2 and Pro allows 3. Claude generation controls are resolved independently per target from registry capabilities. All target classes and research are reserved before providers start; settlement charges only successful targets and performed research."
+            "description": "Accepts 2-3 explicit targets. web_mode=auto gives every target its own provider-native search and source set; DeepSeek alone uses the Tavily backend. Optional credit_activity_id and initial_query are display-only ledger context. Free/Plus allow 2 and Pro allows 3. Claude generation controls are resolved independently per target from registry capabilities. All target classes and worst-case search operations are reserved before providers start; settlement charges only successful targets and reported search operations up to the three-operation product cap."
           },
           "event": [
             {
@@ -1098,10 +1098,10 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"prompt\": \"Postman B2B compare stream probe\",\n  \"credit_activity_id\": \"postman-compare-stream-activity\",\n  \"initial_query\": \"Postman B2B compare stream probe\",\n  \"generation\": {\"profile\": \"auto\", \"reasoning\": {\"mode\": \"on\", \"effort\": \"low\"}},\n  \"targets\": [\n    {\"provider\": \"{{chat_provider}}\", \"model\": \"{{chat_model}}\"},\n    {\"provider\": \"{{compare_provider}}\", \"model\": \"{{compare_model}}\"}\n  ]\n}"
+              "raw": "{\n  \"prompt\": \"Postman B2B compare stream probe\",\n  \"credit_activity_id\": \"postman-compare-stream-activity\",\n  \"initial_query\": \"Postman B2B compare stream probe\",\n  \"generation\": {\"profile\": \"auto\", \"reasoning\": {\"mode\": \"on\", \"effort\": \"low\"}},\n  \"routing\": {\"web_mode\": \"auto\"},\n  \"targets\": [\n    {\"provider\": \"{{chat_provider}}\", \"model\": \"{{chat_model}}\"},\n    {\"provider\": \"{{compare_provider}}\", \"model\": \"{{compare_model}}\"}\n  ]\n}"
             },
             "url": "{{base_url}}/v1/compare/stream",
-            "description": "Reserves all Compare targets before returning NDJSON. Claude generation controls are resolved independently per target from registry capabilities. Aggregate settlement finalizes successful targets before done and also handles completed partial targets on disconnect/error."
+            "description": "Reserves all Compare targets and their independent provider-native search caps before returning NDJSON. Claude generation controls are resolved independently per target from registry capabilities. Aggregate settlement finalizes successful targets and reported search-tool operations up to the product cap before done and also handles completed partial targets on disconnect/error."
           },
           "event": [
             {

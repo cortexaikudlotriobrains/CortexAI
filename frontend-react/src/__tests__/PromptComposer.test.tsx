@@ -35,8 +35,6 @@ describe("PromptComposer", () => {
     useChatStore.setState({
       mode: "single",
       smartMode: true,
-      researchMode: true,
-      compareResearchMode: true,
       optimizeMode: false,
       askReasoningLevel: "auto",
       compareReasoningLevel: "low",
@@ -105,12 +103,8 @@ describe("PromptComposer", () => {
     const fileName = screen.getByText("long-mobile-design-reference.pdf");
     const attachButton = screen.getByRole("button", { name: "Attach files" });
     const smartSwitch = screen.getByRole("switch", { name: "Smart routing" });
-    const researchSwitch = screen.getByRole("switch", { name: "Research mode" });
     const smartTooltip = screen.getByRole("tooltip", {
       name: "Gets you the best answer automatically",
-    });
-    const researchTooltip = screen.getByRole("tooltip", {
-      name: "Uses latest information from the web",
     });
     const improveTooltip = screen.getByRole("tooltip", {
       name: "Helps you ask better for better results",
@@ -129,10 +123,8 @@ describe("PromptComposer", () => {
     expect(card).toContainElement(smartSwitch);
     expect(controls).toContainElement(attachButton);
     expect(featureControls).toContainElement(smartSwitch);
-    expect(featureControls).toContainElement(researchSwitch);
     expect(smartSwitch).toHaveAttribute("aria-describedby", smartTooltip.id);
-    expect(researchSwitch).toHaveAttribute("aria-checked", "true");
-    expect(researchSwitch).toHaveAttribute("aria-describedby", researchTooltip.id);
+    expect(screen.queryByRole("switch", { name: "Research mode" })).not.toBeInTheDocument();
     expect(
       screen.getByRole("switch", { name: "Prompt optimization" }),
     ).toHaveAttribute("aria-describedby", improveTooltip.id);
@@ -153,20 +145,11 @@ describe("PromptComposer", () => {
     expect(useChatStore.getState().attachments).toEqual([]);
   });
 
-  it("starts Ask mode with Web enabled and preserves a manual off choice", async () => {
-    const user = userEvent.setup();
-
+  it("keeps automatic web-search policy out of the Ask composer", () => {
     render(<PromptComposer models={DEFAULT_MODELS} />);
 
-    const researchSwitch = screen.getByRole("switch", { name: "Research mode" });
-    expect(researchSwitch).toHaveTextContent("Web");
-    expect(researchSwitch).toHaveAttribute("aria-checked", "true");
-    expect(useChatStore.getState().researchMode).toBe(true);
-
-    await user.click(researchSwitch);
-
-    expect(researchSwitch).toHaveAttribute("aria-checked", "false");
-    expect(useChatStore.getState().researchMode).toBe(false);
+    expect(screen.queryByRole("switch", { name: "Research mode" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Web")).not.toBeInTheDocument();
   });
 
   it("lets Smart users override Auto reasoning and resets explicit models to Low", async () => {
@@ -214,27 +197,15 @@ describe("PromptComposer", () => {
     expect(useChatStore.getState().mode).toBe("compare");
     expect(screen.getByLabelText("Compare model selectors")).toBeInTheDocument();
     expect(screen.queryByRole("switch", { name: "Smart routing" })).not.toBeInTheDocument();
-    const webSwitch = screen.getByRole("switch", { name: "Research mode" });
     const improveSwitch = screen.getByRole("switch", { name: "Prompt optimization" });
-    const compareSelectors = screen.getByLabelText("Compare model selectors");
     const featureControls = document.querySelector("#promptFeatureControls");
-    expect(webSwitch).toHaveTextContent("Web");
-    expect(webSwitch).not.toHaveTextContent("With sources");
-    expect(webSwitch.querySelector("svg circle")).not.toBeNull();
-    expect(webSwitch).toHaveAttribute(
-      "aria-describedby",
-      screen.getByRole("tooltip", {
-        name: "Uses latest information from the web",
-      }).id,
-    );
+    expect(screen.queryByRole("switch", { name: "Research mode" })).not.toBeInTheDocument();
     expect(improveSwitch).toHaveAttribute(
       "aria-describedby",
       screen.getByRole("tooltip", {
         name: "Helps you ask better for better results",
       }).id,
     );
-    expect(compareSelectors).not.toContainElement(webSwitch);
-    expect(featureControls).toContainElement(webSwitch);
     expect(featureControls).toContainElement(improveSwitch);
     expect(screen.queryByRole("checkbox", { name: "Compare" })).not.toBeInTheDocument();
 
@@ -249,21 +220,21 @@ describe("PromptComposer", () => {
     expect(card).toContainElement(screen.getByRole("button", { name: "Send message" }));
   });
 
-  it("shows a tapped feature tooltip for two seconds while toggling the chip", () => {
+  it("shows a tapped feature tooltip for two seconds while toggling Improve", () => {
     vi.useFakeTimers();
     render(<PromptComposer models={DEFAULT_MODELS} />);
 
-    const researchSwitch = screen.getByRole("switch", { name: "Research mode" });
+    const improveSwitch = screen.getByRole("switch", { name: "Prompt optimization" });
     const tooltip = screen.getByRole("tooltip", {
-      name: "Uses latest information from the web",
+      name: "Helps you ask better for better results",
     });
 
     const touchPointerUp = new Event("pointerup", { bubbles: true });
     Object.defineProperty(touchPointerUp, "pointerType", { value: "touch" });
-    fireEvent(researchSwitch, touchPointerUp);
-    fireEvent.click(researchSwitch);
+    fireEvent(improveSwitch, touchPointerUp);
+    fireEvent.click(improveSwitch);
 
-    expect(researchSwitch).toHaveAttribute("aria-checked", "false");
+    expect(improveSwitch).toHaveAttribute("aria-checked", "true");
     expect(tooltip).toHaveAttribute("data-touch-visible", "true");
 
     act(() => {

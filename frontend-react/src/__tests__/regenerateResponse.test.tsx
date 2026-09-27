@@ -29,8 +29,6 @@ describe("response regeneration", () => {
     useChatStore.setState({
       mode: "single",
       smartMode: true,
-      researchMode: false,
-      compareResearchMode: true,
       optimizeMode: false,
       askReasoningLevel: "auto",
       compareReasoningLevel: "low",
@@ -90,7 +88,7 @@ describe("response regeneration", () => {
         profile: "auto",
         reasoning: { mode: "auto", effort: "auto" },
       },
-      routing: { smart_mode: false, research_mode: true },
+      routing: { smart_mode: false, web_mode: "auto" },
       attachments: [{ file_id: "source-file" }],
       context: {
         session_id: "session-1",
@@ -155,7 +153,7 @@ describe("response regeneration", () => {
         profile: "auto",
         reasoning: { mode: "auto", effort: "auto" },
       },
-      routing: { smart_mode: false, research_mode: true },
+      routing: { smart_mode: false, web_mode: "auto" },
       context: {
         session_id: "session-1",
         new_session: false,
@@ -264,7 +262,7 @@ describe("response regeneration", () => {
         profile: "auto",
         reasoning: { mode: "auto", effort: "auto" },
       },
-      routing: { smart_mode: false, research_mode: true },
+      routing: { smart_mode: false, web_mode: "auto" },
       attachments: [{ file_id: "source-file" }],
     });
     const state = useChatStore.getState();
@@ -305,7 +303,7 @@ describe("response regeneration", () => {
       prompt: "Compare restored data",
       provider: "openai",
       model: "gpt-5.1",
-      routing: { smart_mode: false, research_mode: true },
+      routing: { smart_mode: false, web_mode: "auto" },
       context: {
         session_id: "session-1",
         new_session: false,

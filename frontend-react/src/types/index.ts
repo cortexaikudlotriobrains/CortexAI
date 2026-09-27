@@ -15,6 +15,8 @@ export interface UserContextRequest {
 
 export interface ChatRoutingRequest {
   smart_mode?: boolean;
+  web_mode?: "off" | "auto" | "required";
+  /** @deprecated Compatibility with pre-native-search clients. */
   research_mode?: boolean;
 }
 
@@ -304,7 +306,7 @@ export interface CreditTransaction {
   activity_id: string;
   query: string | null;
   operation_type: string;
-  item_type: "model" | "research" | "adjustment";
+  item_type: "model" | "research" | "tool" | "adjustment";
   provider: string | null;
   model: string | null;
   input_tokens: number;
@@ -854,8 +856,6 @@ export interface ChatTurn {
 export interface AppState {
   mode: ChatMode;
   smartMode: boolean;
-  researchMode: boolean;
-  compareResearchMode: boolean;
   optimizeMode: boolean;
   selectedModelKey: string;
   compareModelKeys: string[];

@@ -126,6 +126,16 @@ class BillableModelUsage:
             object.__setattr__(self, "input_tokens", max(0, int(self.prompt_tokens)))
 
 
+@dataclass(frozen=True)
+class BillableWebSearchUsage:
+    provider: str
+    backend: str
+    operations: int
+    fixed_credits: int
+    provider_cost_usd: float = 0.0
+    usage_estimated: bool = False
+
+
 class _CreditTransactionItem(TypedDict):
     item_type: str
     provider: str | None
@@ -250,6 +260,7 @@ def authorize_and_reserve_usage(
     operation_type: str,
     model_targets: Sequence[ModelTargetIntent],
     research_enabled: bool,
+    web_search_reservation_credits: int | None = None,
     smart_routing: bool = False,
     optimization_enabled: bool = False,
     attachment_count: int = 0,
@@ -274,6 +285,15 @@ def authorize_and_reserve_usage(
     )
     estimated_text = str(input_text or "") + (
         "x" * (_ATTACHMENT_ESTIMATE_CHARS * max(0, attachment_count))
+    )
+    if isinstance(web_search_reservation_credits, bool) or (
+        web_search_reservation_credits is not None and web_search_reservation_credits < 0
+    ):
+        raise ValueError("web_search_reservation_credits must be a nonnegative integer or None")
+    fixed_search_reservation = (
+        int(web_search_reservation_credits)
+        if web_search_reservation_credits is not None
+        else (ADVANCED_WEB_SEARCH_CREDITS if research_enabled else 0)
     )
     if research_enabled:
         estimated_text += "x" * _RESEARCH_CONTEXT_ESTIMATE_CHARS
@@ -353,11 +373,11 @@ def authorize_and_reserve_usage(
                 available_credits=max(
                     0,
                     remaining
-                    - (ADVANCED_WEB_SEARCH_CREDITS if research_enabled else 0),
+                    - fixed_search_reservation,
                 ),
             )
             reservation_credits = estimate.charge.total_credits + (
-                ADVANCED_WEB_SEARCH_CREDITS if research_enabled else 0
+                fixed_search_reservation
             )
             model_estimate = ReservedModelEstimate(
                 provider=candidate.provider,
@@ -380,7 +400,7 @@ def authorize_and_reserve_usage(
                         expected_input_credits=estimate.charge.input_credits,
                         expected_output_credits=estimate.charge.output_credits,
                         expected_research_credits=(
-                            ADVANCED_WEB_SEARCH_CREDITS if research_enabled else 0
+                            fixed_search_reservation
                         ),
                         expected_total_credits=reservation_credits,
                     )
@@ -429,7 +449,7 @@ def authorize_and_reserve_usage(
         candidates = tuple(_candidate_for_target(target) for target in normalized_targets)
         if not candidates:
             raise BillingConfigurationError("A credit reservation requires at least one model")
-        estimated_credits = ADVANCED_WEB_SEARCH_CREDITS if research_enabled else 0
+        estimated_credits = fixed_search_reservation
         remaining_for_models = max(0, allowances["ai_credits"].remaining - estimated_credits)
         for candidate_index, candidate in enumerate(candidates):
             remaining_candidates = max(1, len(candidates) - candidate_index)
@@ -580,6 +600,7 @@ def finalize_reserved_usage(
     model_usages: Sequence[BillableModelUsage] = (),
     research_provider_credits_used: int,
     research_usage_estimated: bool = False,
+    web_search_usages: Sequence[BillableWebSearchUsage] = (),
     optimization_performed: bool = False,
     file_analysis_performed: bool = False,
     uploaded_bytes: int = 0,
@@ -712,6 +733,43 @@ def finalize_reserved_usage(
                 }
             },
         )
+    for web_usage in web_search_usages:
+        operations = max(0, int(web_usage.operations or 0))
+        fixed_credits = max(0, int(web_usage.fixed_credits or 0))
+        if operations <= 0 or fixed_credits <= 0:
+            continue
+        total_credits += fixed_credits
+        transaction_items.append(
+            {
+                "item_type": "tool",
+                "provider": str(web_usage.provider or "").strip().lower() or None,
+                "model": None,
+                "input_tokens": 0,
+                "normal_input_tokens": 0,
+                "cached_input_tokens": 0,
+                "cache_write_tokens": 0,
+                "reasoning_tokens": 0,
+                "output_tokens": 0,
+                "input_credits": 0,
+                "normal_input_credits": 0,
+                "cached_input_credits": 0,
+                "cache_write_credits": 0,
+                "output_credits": 0,
+                "fixed_credits": fixed_credits,
+                "total_credits": fixed_credits,
+                "uncached_equivalent_credits": fixed_credits,
+                "cache_savings_credits": 0,
+                "provider_cost_usd": max(0.0, float(web_usage.provider_cost_usd or 0.0)),
+                "usage_estimated": bool(web_usage.usage_estimated),
+                "pricing_version": "web-search-2026-09-27",
+                "metadata": {
+                    "tool_kind": "web_search",
+                    "backend": str(web_usage.backend or "").strip().lower(),
+                    "operations": operations,
+                },
+            }
+        )
+
     research_credits = calculate_research_credit_charge(research_provider_credits_used)
     if research_credits:
         total_credits += research_credits
@@ -794,8 +852,11 @@ def _reconcile_transaction_items(
     remaining = max(0, billed_credits)
     reconciled: list[_CreditTransactionItem] = []
     unbilled_provider_cost = 0.0
-    # Research is prioritized because its normal two-credit cost is included in preflight.
-    ordered = sorted(items, key=lambda item: 0 if item.get("item_type") == "research" else 1)
+    # Fixed search/tool charges are prioritized because they are included in preflight.
+    ordered = sorted(
+        items,
+        key=lambda item: 0 if item.get("item_type") in {"research", "tool"} else 1,
+    )
     for original in ordered:
         item = original.copy()
         item_actual = max(0, int(item.get("total_credits") or 0))
@@ -817,7 +878,7 @@ def _reconcile_transaction_items(
         item["metadata"] = metadata
         item["provider_cost_usd"] = billed_cost
         item["total_credits"] = item_billed
-        if item.get("item_type") == "research":
+        if item.get("item_type") in {"research", "tool"}:
             item["fixed_credits"] = item_billed
             item["input_credits"] = 0
             item["output_credits"] = 0
