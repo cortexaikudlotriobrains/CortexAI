@@ -71,6 +71,7 @@ class HistoryEntry(BaseModel):
     completion_status: str = "complete"
     stop_cause: str = "unknown"
     response: str
+    error_code: Optional[str] = None
     latency_ms: Optional[int] = None
     prompt_tokens: Optional[int] = None
     completion_tokens: Optional[int] = None

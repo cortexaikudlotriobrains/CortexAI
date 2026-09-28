@@ -1841,6 +1841,64 @@ def test_chat_stream_returns_ndjson_events(client, caplog):
     assert "chat.stream.done_sent" in log_events
 
 
+def test_chat_stream_unexpected_failure_uses_public_error_contract(client, app):
+    def _raise_internal_error(*_args, **_kwargs):
+        raise RuntimeError("database password leaked from internal-host:5432")
+
+    app.state.fake_orchestrator.ask = _raise_internal_error
+    response = client.post(
+        "/v1/chat/stream",
+        json={"prompt": "hello", "provider": "openai", "model": "gpt-4o-mini"},
+        headers={"X-API-Key": "dev-key-1", "X-Request-ID": "req-chat-public"},
+        cookies={"cortex_session": "test-session-cookie"},
+    )
+
+    assert response.status_code == 200
+    events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+    error_event = next(event for event in events if event.get("type") == "error")
+    assert error_event == {
+        "type": "error",
+        "code": "internal_error",
+        "message": (
+            "CortexAI couldn't complete this request because of an unexpected problem. "
+            "Please try again."
+        ),
+        "retryable": True,
+        "request_id": "req-chat-public",
+    }
+    assert "password" not in response.text
+    assert "internal-host" not in response.text
+
+
+def test_unhandled_api_failure_returns_structured_public_error(app):
+    def _raise_internal_error(*_args, **_kwargs):
+        raise RuntimeError("secret DSN postgres://private-host/application")
+
+    app.state.fake_orchestrator.ask = _raise_internal_error
+    safe_client = TestClient(app, raise_server_exceptions=False)
+    response = safe_client.post(
+        "/v1/chat",
+        json={"prompt": "hello", "provider": "openai", "model": "gpt-4o-mini"},
+        headers={"X-API-Key": "dev-key-1", "X-Request-ID": "req-http-public"},
+        cookies={"cortex_session": "test-session-cookie"},
+    )
+
+    assert response.status_code == 500
+    assert response.headers["X-Request-ID"] == "req-http-public"
+    assert response.json() == {
+        "detail": {
+            "code": "internal_error",
+            "message": (
+                "CortexAI couldn't complete this request because of an unexpected problem. "
+                "Please try again."
+            ),
+            "retryable": True,
+            "request_id": "req-http-public",
+        }
+    }
+    assert "private-host" not in response.text
+
+
 def test_context_guardrail_soft_trims_oversized_history():
     from server.schemas.requests import ConversationHistoryItem, UserContextRequest
     from server.utils import MAX_CONTEXT_CHARS, validate_and_trim_context
@@ -2251,6 +2309,41 @@ def test_compare_stream_returns_ndjson_events(client, caplog):
     assert "compare.stream.provider_call_completed" in log_events
     assert "compare.stream.response_done_sent" in log_events
     assert "compare.stream.done_sent" in log_events
+
+
+def test_compare_stream_unexpected_failure_uses_public_error_contract(client, app):
+    def _raise_internal_error(*_args, **_kwargs):
+        raise RuntimeError("provider token leaked from private-worker")
+
+    app.state.fake_orchestrator.ask = _raise_internal_error
+    response = client.post(
+        "/v1/compare/stream",
+        json={
+            "prompt": "hello",
+            "targets": [
+                {"provider": "openai", "model": "gpt-4o-mini"},
+                {"provider": "gemini", "model": "gemini-2.5-flash"},
+            ],
+        },
+        headers={"X-API-Key": "dev-key-1", "X-Request-ID": "req-compare-public"},
+        cookies={"cortex_session": "test-session-cookie"},
+    )
+
+    assert response.status_code == 200
+    events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+    error_event = next(event for event in events if event.get("type") == "error")
+    assert error_event == {
+        "type": "error",
+        "code": "internal_error",
+        "message": (
+            "CortexAI couldn't complete this request because of an unexpected problem. "
+            "Please try again."
+        ),
+        "retryable": True,
+        "request_id": "req-compare-public",
+    }
+    assert "provider token" not in response.text
+    assert "private-worker" not in response.text
 
 
 def test_compare_stream_preserves_empty_length_response_as_incomplete(client, app):

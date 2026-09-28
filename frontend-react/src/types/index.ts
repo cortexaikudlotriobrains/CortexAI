@@ -443,6 +443,7 @@ export interface HistoryEntry {
   generation_policy_version?: string;
   completion_status?: "complete" | "incomplete" | "failed";
   stop_cause?: string;
+  error_code?: string;
   response: string;
   latency_ms?: number;
   prompt_tokens?: number;

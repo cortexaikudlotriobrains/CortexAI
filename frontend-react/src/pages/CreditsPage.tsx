@@ -6,6 +6,7 @@ import { SubscriptionBanner } from "../components/subscription/SubscriptionBanne
 import { SubscriptionPageShell } from "../components/subscription/SubscriptionPageShell";
 import { UsageAllowance } from "../components/subscription/UsageAllowance";
 import { getModelPresentation } from "../config/modelPresentation";
+import { presentError, type UserFacingError } from "../errors/userFacingError";
 import { useAuth } from "../hooks/useAuth";
 import { useSubscription } from "../hooks/useSubscription";
 import { getAccountMenuSubscriptionPresentation } from "../subscription/accountMenuPresentation";
@@ -21,7 +22,7 @@ export function CreditsPage() {
     subscriptionState.entitlements,
   );
   const [transactions, setTransactions] = useState<CreditTransaction[] | null>(null);
-  const [transactionsError, setTransactionsError] = useState<string | null>(null);
+  const [transactionsError, setTransactionsError] = useState<UserFacingError | null>(null);
   const [transactionsReloadToken, setTransactionsReloadToken] = useState(0);
   const authEnabled = cognitoConfig?.enabled ?? false;
 
@@ -39,9 +40,7 @@ export function CreditsPage() {
       .then((response) => setTransactions(response.items))
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === "AbortError") return;
-        setTransactionsError(
-          error instanceof Error ? error.message : "Recent credit activity could not load.",
-        );
+        setTransactionsError(presentError(error, "credits_load"));
       });
     return () => controller.abort();
   }, [loggedIn, subscriptionState.lastLoadedAt, transactionsReloadToken]);
@@ -136,7 +135,7 @@ function RecentCreditActivity({
   onRetry,
 }: {
   transactions: CreditTransaction[] | null;
-  error: string | null;
+  error: UserFacingError | null;
   onRetry: () => void;
 }) {
   const activities = transactions ? groupCreditTransactions(transactions).slice(0, 20) : null;
@@ -153,7 +152,7 @@ function RecentCreditActivity({
 
       {error ? (
         <div className={styles.activityMessage} role="alert">
-          <span>{error}</span>
+          <span><strong>{error.title}</strong> {error.message}</span>
           <button type="button" onClick={onRetry}>
             Retry
           </button>

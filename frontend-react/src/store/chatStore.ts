@@ -24,6 +24,7 @@ import {
 } from "../session/activeSession";
 import type { SubscriptionError } from "../subscription/subscriptionErrors";
 import { clearAttachmentUploads } from "../uploads/attachmentUploadQueue";
+import type { UserFacingError } from "../errors/userFacingError";
 
 interface BeginTurnInput {
   mode: ChatMode;
@@ -114,8 +115,8 @@ interface ChatStoreState {
   setStreamingText: (text: string) => void;
   appendStreamingText: (chunk: string) => void;
 
-  error: string | null;
-  setError: (err: string | null) => void;
+  error: UserFacingError | null;
+  setError: (err: UserFacingError | null) => void;
   subscriptionError: SubscriptionError | null;
   setSubscriptionError: (err: SubscriptionError | null) => void;
 
@@ -400,7 +401,7 @@ export const useChatStore = create<ChatStoreState>((set) => ({
     set((state) => ({ streamingText: state.streamingText + chunk })),
 
   error: null,
-  setError: (err) => set({ error: err }),
+  setError: (error) => set({ error }),
   subscriptionError: null,
   setSubscriptionError: (err) => set({ subscriptionError: err }),
 

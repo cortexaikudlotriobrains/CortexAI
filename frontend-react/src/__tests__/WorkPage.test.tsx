@@ -237,6 +237,29 @@ describe("WorkPage terminal event synchronization", () => {
     expect(askedAt).not.toHaveTextContent("ago");
   });
 
+  it("does not render a persisted Work exception message", async () => {
+    const failedRun = workRun({
+      status: "failed",
+      error_code: "provider_crash",
+      error_message: "Traceback: token=secret from internal-worker-7",
+      completed_at: "2026-08-24T23:00:13Z",
+    });
+    apiMocks.listWorkRuns.mockResolvedValue([failedRun]);
+    apiMocks.getWorkEvents.mockResolvedValue({ items: [], latest_sequence: 0 });
+
+    render(
+      <MemoryRouter initialEntries={["/work/work-session-1"]}>
+        <Routes>
+          <Route path="/work/:workSessionId" element={<WorkPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("Your instructions were kept. Review the settings and try again.")).toBeInTheDocument();
+    expect(screen.queryByText(/internal-worker-7/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/token=secret/)).not.toBeInTheDocument();
+  });
+
   it("does not flash the new-work landing while restoring a requested session", async () => {
     const sessionRequest = deferred<WorkSession>();
     apiMocks.getWorkSession.mockReturnValue(sessionRequest.promise);

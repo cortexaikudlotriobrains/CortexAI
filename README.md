@@ -918,7 +918,7 @@ See `docs/PROVIDER_NATIVE_WEB_SEARCH.md` for provider mappings, billing, rollout
 - Ask and Compare now share the same conversation session when the same `session_id` is reused.
 - Switching between Ask and Compare does not require creating a separate thread.
 - Compare turns still persist their per-target rows under a shared `request_group_id`, but the user-visible chat session can remain the same across both modes.
-- `GET /v1/history` intentionally returns persisted request rows rather than pre-grouped UI threads. Each row includes optional `session_id`, `session_title`, and `request_group_id`; clients group sidebar threads by `session_id` and Compare responses by `request_group_id`. Completed rows also return the persisted response-card `ai_credits` snapshot, its estimated flag, the input/output token split, and the shared Compare research-credit component so reopened Ask and Compare cards retain the same credit statistics shown live. Legacy rows without a snapshot derive model credits from their stored token split. A user-authored `session_title` overrides the first prompt as the sidebar label, while the legacy system placeholders (`API Chat` and `API Compare`) are ignored.
+- `GET /v1/history` intentionally returns persisted request rows rather than pre-grouped UI threads. Each row includes optional `session_id`, `session_title`, `request_group_id`, and nullable `error_code`; clients group sidebar threads by `session_id` and Compare responses by `request_group_id`, then use `error_code` rather than persisted exception text for failure presentation. Completed rows also return the persisted response-card `ai_credits` snapshot, its estimated flag, the input/output token split, and the shared Compare research-credit component so reopened Ask and Compare cards retain the same credit statistics shown live. Legacy rows without a snapshot derive model credits from their stored token split. A user-authored `session_title` overrides the first prompt as the sidebar label, while the legacy system placeholders (`API Chat` and `API Compare`) are ignored.
 - Compare history exposes each response's immutable `request_id` and current `response_version`. Regenerating a Compare response appends a new revision to the same logical response slot; restored history displays the latest revision without deleting the prior audit row.
 - `PATCH /v1/history/session/{session_id}` with `{"title":"..."}` renames one authenticated user's persisted session. Titles are trimmed, limited to 120 characters, and do not change the thread's latest-activity ordering.
 - `DELETE /v1/history?session_id=<id>` clears only that user-visible conversation thread. Omitting `session_id` clears all history for the authenticated identity. React per-thread delete calls `DELETE /v1/history/{entry_id}` for every persisted row in the selected thread.
@@ -989,6 +989,8 @@ Notes:
 - Chat `start` and `done` stream events include the active `session_id`.
 - Server logs include `chat.stream.*` body lifecycle events so mid-stream
   disconnects can be distinguished from normal HTTP request completion.
+- Terminal `error` events contain `code`, customer-safe `message`, `retryable`,
+  and `request_id`; they never contain the caught exception string.
 
 `/v1/compare/stream` events:
 - `start`
@@ -1008,6 +1010,7 @@ Notes:
 - The final compare `done` payload includes both `request_group_id` and `session_id`.
 - Server logs include `compare.stream.*` body lifecycle events with per-target
   provider-call progress and terminal stream reason.
+- Terminal `error` events use the same structured public error fields as Chat.
 
 ## BYOK (Bring Your Own Keys)
 
@@ -1104,11 +1107,27 @@ Common `detail.code` values:
 - `stripe_customer_required`
 - `billing_provider_unavailable`
 - `invalid_generation_budget`
+- `internal_error`
 
 Provider-model failures that originate from upstream APIs are normalized before
 they reach API/stream/frontend surfaces. `error.details.kind` carries the stable
 failure class when available, such as `transient_capacity`, `rate_limited`,
 `quota_exceeded`, `timeout`, `auth`, `bad_request`, or `provider_5xx`.
+
+Unexpected API failures return a stable public payload under `detail` instead of
+the exception text: `code`, a customer-safe `message`, `retryable`, and
+`request_id`. The same four fields are used by terminal Ask/Compare NDJSON
+`error` events, and the correlation id is also returned as `X-Request-ID` for
+non-streaming requests. Raw exception details remain server-log-only.
+
+The React client treats backend messages as diagnostic input, not display copy.
+`frontend-react/src/errors/userFacingError.ts` maps status/code/context into a
+short title, plain-language explanation, recovery action, and optional support
+code. Chat/model failures stay on the affected response card; history, Work,
+usage/export, credit, model-catalogue, and subscription failures use their own
+contextual recovery copy. Persisted history rows include nullable `error_code`
+so restored failures use the same mapping without replaying legacy raw error
+text.
 
 ## Output Guardrails (Current)
 

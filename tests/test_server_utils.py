@@ -5,6 +5,7 @@ from server.utils import (
     normalize_empty_success_response,
     redact_sensitive_headers,
     sanitize_provider_error_response,
+    unexpected_public_error,
     context_summary_payload,
     validate_and_trim_context,
 )
@@ -115,6 +116,20 @@ def test_redact_sensitive_headers_is_case_insensitive():
     assert redacted["x-api-key"] == "[REDACTED]"
     assert redacted["Authorization"] == "[REDACTED]"
     assert redacted["Content-Type"] == "application/json"
+
+
+def test_unexpected_public_error_is_stable_and_correlated():
+    payload = unexpected_public_error(request_id="req-public-1")
+
+    assert payload == {
+        "code": "internal_error",
+        "message": (
+            "CortexAI couldn't complete this request because of an unexpected problem. "
+            "Please try again."
+        ),
+        "retryable": True,
+        "request_id": "req-public-1",
+    }
 
 
 def test_sanitize_provider_error_response_hides_raw_transient_capacity_payload():

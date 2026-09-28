@@ -9,6 +9,7 @@ import { fetchCortexAnalysisRuns } from "../api/cortexAnalysis";
 import { buildHistoryThreads } from "../history/historyThreads";
 import { loadActiveSessionId, normalizeSessionId } from "../session/activeSession";
 import { useChatStore } from "../store/chatStore";
+import { presentError, userFacingMessage } from "../errors/userFacingError";
 import type { CortexAnalysisRun, HistoryEntry, HistoryThread } from "../types";
 
 interface LoadHistoryOptions {
@@ -46,7 +47,7 @@ export function useHistory() {
         setHistory(currentHistory.filter((entry) => entry.id !== id));
         return true;
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to delete history entry");
+        setError(presentError(err, "history_delete"));
         return false;
       }
     },
@@ -70,7 +71,7 @@ export function useHistory() {
         setHistory(currentHistory.filter((entry) => !removedIds.has(entry.id)));
         return true;
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to delete chat");
+        setError(presentError(err, "history_delete"));
         return false;
       }
     },
@@ -82,7 +83,10 @@ export function useHistory() {
       const sessionId = normalizeSessionId(thread.sessionId);
       const normalizedTitle = title.trim();
       if (!sessionId || !normalizedTitle) {
-        setError("This chat cannot be renamed");
+        setError(userFacingMessage("This chat can't be renamed", "Choose a non-empty title and try again.", {
+          code: "invalid_history_title",
+          context: "history_rename",
+        }));
         return false;
       }
 
@@ -98,7 +102,7 @@ export function useHistory() {
         );
         return true;
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to rename chat");
+        setError(presentError(err, "history_rename"));
         return false;
       }
     },
@@ -123,7 +127,7 @@ export function useHistory() {
         );
         return true;
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to clear history");
+        setError(presentError(err, "history_clear"));
         return false;
       }
     },

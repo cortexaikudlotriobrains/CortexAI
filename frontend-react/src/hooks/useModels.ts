@@ -2,13 +2,14 @@ import { useState, useEffect } from "react";
 import { fetchModelOptions, fetchModels } from "../api/catalog";
 import type { ModelCatalogItem } from "../types";
 import { DEFAULT_MODELS } from "../config/defaultModels";
+import { presentError, type UserFacingError } from "../errors/userFacingError";
 
 export type ModelCollectionSource = "options" | "catalog";
 
 interface UseModelsResult {
   models: ModelCatalogItem[];
   loading: boolean;
-  error: string | null;
+  error: UserFacingError | null;
 }
 
 export function useModels(
@@ -17,7 +18,7 @@ export function useModels(
 ): UseModelsResult {
   const [models, setModels] = useState<ModelCatalogItem[]>(DEFAULT_MODELS);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<UserFacingError | null>(null);
 
   useEffect(() => {
     if (!enabled) {
@@ -36,7 +37,7 @@ export function useModels(
       .catch((err: unknown) => {
         if (!cancelled) {
           setModels(DEFAULT_MODELS);
-          setError(err instanceof Error ? err.message : "Failed to load models");
+          setError(presentError(err, "models_load"));
         }
       })
       .finally(() => {

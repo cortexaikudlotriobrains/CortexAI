@@ -1,4 +1,4 @@
-import { post, streamPost } from "./client";
+import { apiClientErrorFromStreamEvent, post, streamPost } from "./client";
 import type { CompareRequest, CompareResponse, CompareStreamChunk, ChatResponse } from "../types";
 
 export async function sendCompare(request: CompareRequest): Promise<CompareResponse> {
@@ -55,8 +55,7 @@ export async function* streamCompare(
         };
         break;
       case "error":
-        yield { type: "error", error: String(event.message ?? "Unknown error") };
-        break;
+        throw apiClientErrorFromStreamEvent(event, "The comparison stream ended unexpectedly.");
     }
   }
 }

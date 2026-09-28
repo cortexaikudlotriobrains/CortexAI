@@ -205,7 +205,7 @@ function toChatResponse(entry: HistoryEntry): ChatResponse {
     },
     error: isError
       ? {
-          code: "persisted_error",
+          code: entry.error_code || "persisted_error",
           message: entry.response.replace(/^\[error\]\s*/, ""),
           provider: entry.provider,
           retryable: false,

@@ -46,6 +46,7 @@ from server.utils import (
     get_client_safe_error_display_text,
     normalize_empty_success_response,
     sanitize_provider_error_response,
+    unexpected_public_error,
     validate_and_trim_context,
 )
 from tools.web.native_policy import (
@@ -1475,6 +1476,7 @@ async def chat_stream(
             )
             raise
         except Exception as exc:
+            public_error = unexpected_public_error(request_id=req_id)
             if not billing_finalization_attempted:
                 if (
                     billing_reservation is not None
@@ -1508,8 +1510,8 @@ async def chat_stream(
                     error_response = persistence_service.build_error_response(
                         provider=target_provider,
                         model=target_model,
-                        message=str(exc),
-                        code="provider_error",
+                        message=str(public_error["message"]),
+                        code=str(public_error["code"]),
                         retryable=True,
                     )
                     _persist_chat_interaction(
@@ -1525,7 +1527,7 @@ async def chat_stream(
                     )
                 except Exception:
                     logger.exception("Chat stream error persistence failed in DB mode")
-            yield stream_log.record_event(_to_ndjson({"type": "error", "message": str(exc)}))
+            yield stream_log.record_event(_to_ndjson({"type": "error", **public_error}))
 
     return StreamingResponse(
         event_stream(),

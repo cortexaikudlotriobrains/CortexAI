@@ -23,6 +23,7 @@ import { useModels } from "../hooks/useModels";
 import { useSubscription } from "../hooks/useSubscription";
 import { useTheme } from "../hooks/useTheme";
 import { normalizeSessionId } from "../session/activeSession";
+import { presentError } from "../errors/userFacingError";
 import { useChatStore } from "../store/chatStore";
 import { useWorkStore } from "../store/workStore";
 import { getAccountMenuSubscriptionPresentation } from "../subscription/accountMenuPresentation";
@@ -53,7 +54,7 @@ export function ChatPage() {
   const accountBillingDestination = accountSubscription.billingDestination;
   const { models, loading: modelsLoading } = useModels(workspaceReady);
   const { removeThread } = useHistory();
-  const { submit, regenerate, cancel } = useChat();
+  const { regenerate, cancel } = useChat();
   const { theme, toggleTheme } = useTheme();
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>("chat");
   const [composerCollapsed, setComposerCollapsed] = useState(false);
@@ -116,9 +117,7 @@ export function ChatPage() {
       setMobilePanel("chat");
       setComposerCollapsed(true);
     } catch (historyError) {
-      setError(
-        historyError instanceof Error ? historyError.message : "Failed to load chat history",
-      );
+      setError(presentError(historyError, "history_load"));
     }
   };
 
@@ -317,15 +316,18 @@ export function ChatPage() {
               <ResultsSection />
               {error && (
                 <ErrorBanner
-                  message={error}
-                  onRetry={() => {
-                    setError(null);
-                    if (retryTurnId) {
-                      void regenerate(retryTurnId);
-                    } else {
-                      void submit();
-                    }
-                  }}
+                  title={error.title}
+                  message={error.message}
+                  actionLabel={error.actionLabel}
+                  requestId={error.requestId}
+                  onAction={
+                    error.context === "chat" && error.action === "retry" && retryTurnId
+                      ? () => {
+                          setError(null);
+                          void regenerate(retryTurnId);
+                        }
+                      : undefined
+                  }
                   onDismiss={() => setError(null)}
                 />
               )}

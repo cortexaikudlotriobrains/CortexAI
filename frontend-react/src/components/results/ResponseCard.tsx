@@ -17,6 +17,7 @@ import type {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { getModelPresentation } from "../../config/modelPresentation";
+import { presentResponseError } from "../../errors/userFacingError";
 import { remarkCitations } from "../../markdown/remarkCitations";
 import type { ChatResponse, ResponseRunStatus } from "../../types";
 import { formatAiCredits } from "../../utils/aiCredits";
@@ -66,13 +67,14 @@ export function ResponseCard({
   const copyTimerRef = useRef<number | null>(null);
   const hasError = !!response.error;
   const softError = response.error?.details?.kind === "transient_capacity";
+  const visibleError = response.error ? presentResponseError(response.error) : null;
   const badge = getModelBadge(response.provider, response.model);
   const modelPresentation = getModelPresentation(response.provider, response.model);
   const accent = resolveProviderAccent(response.provider, slotIndex);
   const loadingStatus = resolveLoadingStatus(response, !!isStreaming, hasError);
   const hasVisibleResponseText = response.text.trim().length > 0;
   const responseText = hasError
-    ? errorMessage(response)
+    ? visibleError?.message ?? "The model couldn't complete this request."
     : response.text || (loadingStatus ? "" : "(empty response)");
   const showLoading = !!loadingStatus && !hasVisibleResponseText;
   const elapsedMs = useElapsedMs(
@@ -210,7 +212,10 @@ export function ResponseCard({
         {hasError ? (
           <div className={styles.errorMsg}>
             <span aria-hidden="true">!</span>
-            {errorMessage(response)}
+            <div>
+              <strong>{visibleError?.title}</strong>
+              <p>{visibleError?.message}</p>
+            </div>
           </div>
         ) : showLoading ? (
           <ResponseLoadingState
@@ -714,13 +719,6 @@ function formatElapsedClock(durationMs: number) {
   return hours > 0
     ? `${hours}:${paddedMinutes}:${paddedSeconds}`
     : `${paddedMinutes}:${paddedSeconds}`;
-}
-
-function errorMessage(response: ChatResponse): string {
-  if (response.error?.details?.kind === "transient_capacity") {
-    return "This model is temporarily busy. Try again shortly or switch to another model.";
-  }
-  return response.error?.message || response.text || "The model returned an error.";
 }
 
 type CitationMarkdownProps = HTMLAttributes<HTMLElement> & {

@@ -48,10 +48,9 @@ export function toSubscriptionError(
   if (error instanceof ApiClientError) {
     const detail = structuredDetail(error.body);
     const code = detail.code ?? fallbackCode(error.status);
-    const fallback = detail.message ?? error.message ?? fallbackMessage;
     return new SubscriptionError({
       code,
-      message: displaySubscriptionMessage(code, detail.fields, fallback),
+      message: displaySubscriptionMessage(code, detail.fields, fallbackMessage),
       status: error.status,
       kind: errorKind(code, error.status),
       retryable: isRetryable(code, error.status),
@@ -71,7 +70,7 @@ export function toSubscriptionError(
 
   return new SubscriptionError({
     code: "subscription_request_failed",
-    message: error instanceof Error && error.message ? error.message : fallbackMessage,
+    message: fallbackMessage,
     status: null,
     kind: "unknown",
     retryable: false,
@@ -157,11 +156,33 @@ function displaySubscriptionMessage(
   fields: Record<string, unknown>,
   fallback: string,
 ): string {
-  if (code !== "insufficient_credits") return fallback;
-  const required = finiteNumber(fields.required);
-  const remaining = finiteNumber(fields.remaining);
-  if (required === null || remaining === null) return fallback;
-  return `This request is estimated to require ${formatAiCredits(required)} AI credits. You have ${formatAiCredits(remaining)} remaining.`;
+  if (code === "insufficient_credits") {
+    const required = finiteNumber(fields.required);
+    const remaining = finiteNumber(fields.remaining);
+    if (required !== null && remaining !== null) {
+      return `This request is estimated to require ${formatAiCredits(required)} AI credits. You have ${formatAiCredits(remaining)} remaining.`;
+    }
+    return "You do not have enough AI credits for this request. View your balance or choose a smaller request.";
+  }
+  const messages: Record<string, string> = {
+    billing_identity_not_found: "Your billing profile could not be found. Sign in again to continue.",
+    billing_authentication_required: "Sign in again to view your plan and billing information.",
+    session_auth_required: "Your session has expired. Sign in again to continue.",
+    monthly_allowance_exhausted: "You have used the AI credits included in this billing period.",
+    subscription_payment_required: "Your subscription needs attention before this feature can be used.",
+    feature_not_in_plan: "Your current plan does not include this feature.",
+    model_not_in_plan: "Your current plan does not include this model.",
+    invalid_subscription_plan: "That subscription plan is not available. Choose another plan.",
+    paid_subscription_plan_required: "Choose a paid plan to continue.",
+    invalid_model_selection: "That model is not available. Choose another model.",
+    billing_provider_unavailable: "The billing service is temporarily unavailable. Please try again.",
+    billing_not_configured: "Billing is not available in this environment.",
+    billing_database_required: "Billing information is unavailable right now.",
+    subscription_configuration_error: "Plan information is temporarily unavailable.",
+    invalid_billing_redirect: "The billing page could not be opened. Please try again.",
+    billing_service_unavailable: "The billing service is temporarily unavailable. Please try again.",
+  };
+  return messages[code] ?? fallback;
 }
 
 function finiteNumber(value: unknown): number | null {

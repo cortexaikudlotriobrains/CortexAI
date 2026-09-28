@@ -191,6 +191,47 @@
   padding: 22px 30px;
 }
 
+.exportError {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  border: 1px solid #fecaca;
+  border-radius: 12px;
+  background: #fff5f5;
+  color: #7f1d1d;
+  margin: 14px 30px 0;
+  padding: 10px 13px;
+  font: 500 12px/18px var(--font-sans);
+}
+
+.exportError > div {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-basis: 240px;
+  flex-direction: column;
+}
+
+.exportError strong {
+  color: #b91c1c;
+  font-size: 13px;
+}
+
+.exportError small {
+  color: #991b1b;
+  font: 500 10px/15px var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.exportError button {
+  border: 0;
+  background: transparent;
+  color: #b91c1c;
+  cursor: pointer;
+  font: 700 11px/1 var(--font-sans);
+}
+
 .loadingState {
   display: flex;
   flex-direction: column;

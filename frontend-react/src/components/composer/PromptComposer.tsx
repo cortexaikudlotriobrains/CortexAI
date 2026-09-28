@@ -7,6 +7,7 @@ import { AttachmentStrip } from "./AttachmentStrip";
 import { useChatStore } from "../../store/chatStore";
 import { useAttachmentUploadStore } from "../../store/attachmentUploadStore";
 import { attachmentUploadsBlockSubmission } from "../../uploads/attachmentUploadQueue";
+import { userFacingMessage } from "../../errors/userFacingError";
 import { useChat } from "../../hooks/useChat";
 import { isModelDropdownVisible } from "../../hooks/useSmartRouting";
 import type { ModelCatalogItem } from "../../types";
@@ -79,6 +80,11 @@ export function PromptComposer({
     attachmentUploadsBlockSubmission(uploadTasks) ||
     attachments.some((attachment) => attachment.status !== "ready");
   const uploadWaitMessage = "Waiting for attachments to finish uploading";
+  const uploadWaitError = userFacingMessage(
+    "Attachments are still uploading",
+    "Wait for every file to finish, then send your message.",
+    { code: "attachments_pending", context: "chat" },
+  );
 
   const lockedModelKeys = availableModels
     .filter((model) => modelAccessError(model, entitlements, plans) !== null)
@@ -100,7 +106,7 @@ export function PromptComposer({
 
   const handleSubmit = () => {
     if (uploadsPending) {
-      setError(uploadWaitMessage);
+      setError(uploadWaitError);
       return;
     }
     const accessError = submitAccessError({
@@ -241,7 +247,7 @@ export function PromptComposer({
 
       event.preventDefault();
       if (!streaming && uploadsPending) {
-        setError(uploadWaitMessage);
+        setError(uploadWaitError);
       } else if (!streaming && (prompt.trim() || attachments.length > 0)) {
         handleSubmit();
       }

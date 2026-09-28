@@ -296,6 +296,8 @@ describe("ResponseCard", () => {
     const header = document.querySelector("header");
     expect(header).toHaveTextContent("Failed after 8.2 sec");
     expect(header).not.toHaveTextContent("tokens");
+    expect(screen.getByText("The model couldn't complete this request")).toBeInTheDocument();
+    expect(screen.queryByText("Stream disconnected.")).not.toBeInTheDocument();
   });
 
   it("does not render legacy source controls when sources have no inline markers", () => {

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchUsageSummary, type UsageSummaryParams } from "../api/usage";
 import type { UsageSummary } from "../types";
+import { presentError, type UserFacingError } from "../errors/userFacingError";
 
 export interface UseUsageSummaryResult {
   summary: UsageSummary | null;
   loading: boolean;
-  error: string | null;
+  error: UserFacingError | null;
   reload: () => void;
 }
 
@@ -13,7 +14,7 @@ export function useUsageSummary(params: UsageSummaryParams = {}): UseUsageSummar
   const { from, to } = params;
   const [summary, setSummary] = useState<UsageSummary | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<UserFacingError | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
@@ -30,7 +31,7 @@ export function useUsageSummary(params: UsageSummaryParams = {}): UseUsageSummar
       })
       .catch((err: unknown) => {
         if (isAbortError(err)) return;
-        setError(err instanceof Error ? err.message : "Failed to load usage summary");
+        setError(presentError(err, "usage_load"));
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);

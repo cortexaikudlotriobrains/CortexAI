@@ -1,4 +1,4 @@
-import { post, streamPost } from "./client";
+import { apiClientErrorFromStreamEvent, post, streamPost } from "./client";
 import type { ChatRequest, ChatResponse, StreamChunk } from "../types";
 
 export async function* streamChat(
@@ -41,8 +41,7 @@ export async function* streamChat(
         yield { type: "done", session_id: asOptionalString(event.session_id) };
         break;
       case "error":
-        yield { type: "error", error: String(event.message ?? "Unknown error") };
-        break;
+        throw apiClientErrorFromStreamEvent(event, "The response stream ended unexpectedly.");
     }
   }
 }

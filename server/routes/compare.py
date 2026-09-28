@@ -54,6 +54,7 @@ from server.utils import (
     get_client_safe_error_display_text,
     normalize_empty_success_response,
     sanitize_provider_error_response,
+    unexpected_public_error,
     validate_and_trim_context,
 )
 from tools.web.native_policy import (
@@ -1120,6 +1121,8 @@ async def compare_stream(
             for task in tasks:
                 if not task.done():
                     task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
             if not billing_finalization_attempted:
                 partial_responses = _billable_stream_responses(
                     ordered_responses,
@@ -1157,9 +1160,12 @@ async def compare_stream(
             )
             raise
         except Exception as exc:
+            public_error = unexpected_public_error(request_id=req_id)
             for task in tasks:
                 if not task.done():
                     task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
             if not billing_finalization_attempted:
                 partial_responses = _billable_stream_responses(
                     ordered_responses,
@@ -1203,8 +1209,8 @@ async def compare_stream(
                         fallback_error = persistence_service.build_error_response(
                             provider="unknown",
                             model="unknown",
-                            message=str(exc),
-                            code="provider_error",
+                            message=str(public_error["message"]),
+                            code=str(public_error["code"]),
                             retryable=True,
                         )
                         partial_responses = [fallback_error]
@@ -1221,7 +1227,7 @@ async def compare_stream(
                     )
                 except Exception:
                     logger.exception("Compare stream error persistence failed in DB mode")
-            yield stream_log.record_event(_to_ndjson({"type": "error", "message": str(exc)}))
+            yield stream_log.record_event(_to_ndjson({"type": "error", **public_error}))
 
     return StreamingResponse(
         event_stream(),

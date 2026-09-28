@@ -137,6 +137,21 @@ describe("history threads", () => {
     expect(filterHistoryThreads(threads, "launch readiness")).toHaveLength(1);
   });
 
+  it("restores the persisted error category for safe response-card presentation", () => {
+    const [turn] = buildTurnsFromHistoryEntries([
+      entry({
+        response: "[error] Traceback from private-provider-host",
+        error_code: "provider_5xx",
+        completion_status: "failed",
+      }),
+    ]);
+
+    expect(turn.responses[0].error).toMatchObject({
+      code: "provider_5xx",
+      retryable: false,
+    });
+  });
+
   it.each(["API Chat", "API Compare", " api chat "])(
     "falls back to the first prompt for the generic session title %s",
     (sessionTitle) => {

@@ -785,6 +785,15 @@
   color: var(--error);
 }
 
+.errorMsg strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.errorMsg p {
+  margin: 0;
+}
+
 .actions {
   display: flex;
   flex: 0 0 auto;

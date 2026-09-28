@@ -9,6 +9,7 @@ import type {
   WorkSession,
   WorkWebMode,
 } from "../types";
+import type { UserFacingError } from "../errors/userFacingError";
 
 export interface WorkRunHistoryItem {
   run: WorkRun;
@@ -31,7 +32,7 @@ interface WorkStoreState {
   maxCreditBudget: number;
   loading: boolean;
   streaming: boolean;
-  error: string | null;
+  error: UserFacingError | null;
   setSessions: (sessions: WorkSession[]) => void;
   setSession: (session: WorkSession | null) => void;
   setHistory: (items: WorkRunHistoryItem[]) => void;
@@ -49,7 +50,7 @@ interface WorkStoreState {
   setMaxCreditBudget: (value: number) => void;
   setLoading: (loading: boolean) => void;
   setStreaming: (streaming: boolean) => void;
-  setError: (error: string | null) => void;
+  setError: (error: UserFacingError | null) => void;
   resetWorkspace: () => void;
 }
 

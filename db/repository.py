@@ -3116,6 +3116,7 @@ def get_llm_history_entries(
     resp_tokens_col = llm_responses.c.total_tokens if "total_tokens" in resp_cols else None
     resp_cost_col = llm_responses.c.estimated_cost if "estimated_cost" in resp_cols else None
     resp_error_col = llm_responses.c.error_message if "error_message" in resp_cols else None
+    resp_error_type_col = llm_responses.c.error_type if "error_type" in resp_cols else None
     resp_completion_status_col = (
         llm_responses.c.completion_status if "completion_status" in resp_cols else None
     )
@@ -3180,6 +3181,7 @@ def get_llm_history_entries(
     tokens_expr = resp_tokens_col if resp_tokens_col is not None else literal(None)
     cost_expr = resp_cost_col if resp_cost_col is not None else literal(None)
     error_expr = resp_error_col if resp_error_col is not None else literal(None)
+    error_code_expr = resp_error_type_col if resp_error_type_col is not None else literal(None)
     served_model_expr = resp_served_model_col if resp_served_model_col is not None else model_expr
     pricing_model_expr = (
         resp_pricing_model_col if resp_pricing_model_col is not None else served_model_expr
@@ -3297,6 +3299,7 @@ def get_llm_history_entries(
             tokens_expr.label("tokens"),
             cost_expr.label("cost"),
             error_expr.label("error_message"),
+            error_code_expr.label("error_code"),
             routing_trace_expr.label("routing_trace"),
         )
         .select_from(from_clause)
@@ -3394,6 +3397,11 @@ def get_llm_history_entries(
                 "completion_status": str(payload.get("completion_status") or "complete"),
                 "stop_cause": str(payload.get("stop_cause") or "unknown"),
                 "response": str(response_text),
+                "error_code": (
+                    str(payload["error_code"])
+                    if payload.get("error_code") is not None
+                    else None
+                ),
                 "latency_ms": payload.get("latency_ms"),
                 "prompt_tokens": payload.get("prompt_tokens"),
                 "cached_input_tokens": payload.get("cached_input_tokens"),

@@ -1,4 +1,12 @@
-import { ApiClientError, buildHeaders, del, get, post, postWithHeaders } from "./client";
+import {
+  ApiClientError,
+  apiClientErrorFromResponse,
+  buildHeaders,
+  del,
+  get,
+  post,
+  postWithHeaders,
+} from "./client";
 import type {
   ToolCatalogItem,
   ToolConnection,
@@ -172,7 +180,13 @@ export async function streamWorkEvents(
       },
     );
     if (!response.ok || !response.body) {
-      throw new ApiClientError(response.status, response.statusText || "Work stream failed");
+      if (!response.ok) {
+        throw await apiClientErrorFromResponse(response, "The Work stream could not connect.");
+      }
+      throw new ApiClientError(0, "The Work stream could not connect.", undefined, {
+        code: "work_stream_unavailable",
+        retryable: true,
+      });
     }
     const reader = response.body.getReader();
     const decoder = new TextDecoder();

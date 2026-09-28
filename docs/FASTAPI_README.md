@@ -693,6 +693,8 @@ Notes:
   the HTTP response body active, is ignored by the React UI, and does not call
   provider APIs or consume model tokens.
 - Server logs emit `chat.stream.*` lifecycle events from inside the response body generator, including provider-call start/completion and terminal stream reason.
+- Terminal `error` includes `code`, customer-safe `message`, `retryable`, and
+  `request_id`; implementation exception text is never written to the stream.
 
 ## Compare API
 
@@ -802,6 +804,7 @@ Notes:
 - `heartbeat` may appear while Compare targets are pending and has the same
   keep-alive semantics as chat streaming.
 - Server logs emit `compare.stream.*` lifecycle events from inside the response body generator, including per-target provider-call progress and terminal stream reason.
+- Terminal `error` uses the same structured public fields as the Chat stream.
 
 ### Cortex Analysis API
 
@@ -911,6 +914,9 @@ Applied in `server/utils.py`:
 - Empty length-limited responses remain successful-but-incomplete billable work, even when reasoning consumed the allowance before visible output. Unexplained empty successes still normalize to provider errors.
 - Provider-native availability failures are sanitized before DTO/stream output. Upstream 503/high-demand/overloaded errors are tagged as `error.details.kind="transient_capacity"` and rendered as `This model is temporarily busy. Try again shortly or switch to another model.` instead of raw provider JSON.
 - Smart Ask keeps the existing automatic fallback loop for retryable provider failures. Manual Ask and Compare keep the user-selected model targets and return safe per-model errors when those explicit targets are unavailable.
+- Unhandled API failures return `{"detail":{"code":"internal_error","message":"...","retryable":true,"request_id":"..."}}`; the raw exception remains in correlated server logs. Ask/Compare stream failures emit those same four fields in the terminal NDJSON `error` event instead of `str(exc)`.
+- React normalizes transport errors by stable code, HTTP status, and operation context in `frontend-react/src/errors/userFacingError.ts`. UI surfaces never render an arbitrary backend `detail`, exception message, Work `error_message`, or persisted provider error directly. They show contextual recovery copy and expose `request_id` only as an optional support code.
+- History responses include nullable `error_code` from `llm_responses.error_type`, allowing restored response cards to preserve the safe failure category without replaying stored exception text.
 - CortexAI does not attempt to determine whether a non-empty successful LLM answer is fabricated. Web research provides optional grounding; provider-native safety/filter outcomes remain authoritative.
 
 Security/logging:
