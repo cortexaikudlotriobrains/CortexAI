@@ -160,6 +160,13 @@ REQUIRED_BILLING_SCHEMA: Mapping[str, frozenset[str]] = {
     ),
 }
 
+REQUIRED_BILLING_CHECK_VALUES: Mapping[tuple[str, str], frozenset[str]] = {
+    (
+        "credit_transactions",
+        "ck_credit_transactions_item_type",
+    ): frozenset({"'model'", "'research'", "'tool'", "'adjustment'"}),
+}
+
 
 def validate_billing_schema(
     *,
@@ -184,6 +191,26 @@ def validate_billing_schema(
         }
         for column_name in sorted(required_columns - available_columns):
             missing.append(f"column {target_schema}.{table_name}.{column_name}")
+
+    for (table_name, constraint_name), required_fragments in (
+        REQUIRED_BILLING_CHECK_VALUES.items()
+    ):
+        if table_name not in available_tables:
+            continue
+        constraints = inspector.get_check_constraints(table_name, schema=target_schema)
+        constraint = next(
+            (
+                item
+                for item in constraints
+                if str(item.get("name") or "") == constraint_name
+            ),
+            None,
+        )
+        sql_text = str((constraint or {}).get("sqltext") or "").lower()
+        if constraint is None or any(
+            fragment not in sql_text for fragment in required_fragments
+        ):
+            missing.append(f"constraint {target_schema}.{table_name}.{constraint_name}")
 
     if missing:
         raise BillingSchemaPreflightError(tuple(missing))

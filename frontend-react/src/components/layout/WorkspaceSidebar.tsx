@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { listWorkSessions } from "../../api/work";
 import { getRuntimeConfig } from "../../config/runtimeConfig";
 import { loadCompleteHistoryThread } from "../../history/loadHistoryThread";
+import { presentError } from "../../errors/userFacingError";
 import { useChat } from "../../hooks/useChat";
 import { useHistory } from "../../hooks/useHistory";
 import { useChatStore } from "../../store/chatStore";
@@ -91,9 +92,7 @@ export function WorkspaceSidebar({
       onChatThreadSelected?.();
       if (activeView !== "chat") navigate("/");
     } catch (historyError) {
-      setError(
-        historyError instanceof Error ? historyError.message : "Failed to load chat history",
-      );
+      setError(presentError(historyError, "history_load"));
       if (activeView !== "chat") navigate("/");
     }
   };

@@ -8,7 +8,12 @@ from config.cache_optimization import (
     openai_extended_prompt_cache_enabled,
     openai_prompt_cache_enabled,
 )
+from config.web_search import load_native_web_search_config
 from models.unified_response import TokenUsage, UnifiedResponse
+from tools.web.provider_metadata import (
+    build_web_search_metadata,
+    extract_responses_web_search,
+)
 from utils.cost_calculator import CostCalculator
 from utils.logger import get_logger
 
@@ -81,6 +86,13 @@ class OpenAIClient(BaseAIClient):
         reasoning_effort = str(kwargs.get("reasoning_effort") or "").strip().lower()
         response_format = kwargs.get("response_format")
         attachments = self._normalize_inference_attachments(kwargs.pop("attachments", None))
+        web_search_policy = kwargs.pop("web_search_policy", {}) or {}
+        kwargs.pop("web_search_executor", None)
+        web_config = load_native_web_search_config()
+        web_search_enabled = (
+            web_config.provider_enabled("openai")
+            and str(web_search_policy.get("mode") or "off") != "off"
+        )
 
         try:
             # Normalize input to messages format
@@ -101,12 +113,17 @@ class OpenAIClient(BaseAIClient):
                 reasoning_mode=reasoning_mode,
                 reasoning_effort=reasoning_effort,
                 cache_context=cache_context,
+                web_search_policy=web_search_policy if web_search_enabled else None,
             )
 
             latency_ms = self._measure_latency(start_time)
 
             if endpoint_used == "responses":
                 text = self._extract_responses_text(response)
+                text, search_operations, search_sources = extract_responses_web_search(
+                    response,
+                    text=text,
+                )
                 token_usage = self._extract_responses_usage(response)
                 served_model = self._served_model(self._field(response, "model", model), model)
                 finish_reason = self._normalize_finish_reason(
@@ -115,6 +132,8 @@ class OpenAIClient(BaseAIClient):
                 )
                 raw = self._serialize_raw_response(response) if save_full else None
             else:
+                search_operations = 0
+                search_sources = []
                 # Extract text
                 text = self._extract_chat_completions_text(response)
 
@@ -177,6 +196,20 @@ class OpenAIClient(BaseAIClient):
 
             metadata = {"endpoint": endpoint_used}
             metadata["pricing_unknown"] = bool(cost.get("pricing_unknown", False))
+            metadata.update(
+                build_web_search_metadata(
+                    provider="openai",
+                    backend="web_search",
+                    requested_mode=str(web_search_policy.get("requested_mode") or "off"),
+                    effective_mode=(
+                        str(web_search_policy.get("mode") or "off")
+                        if web_search_enabled
+                        else "off"
+                    ),
+                    operations=search_operations,
+                    sources=search_sources,
+                )
+            )
             if adaptive_retry:
                 metadata["adaptive_retry"] = adaptive_retry
 
@@ -248,8 +281,11 @@ class OpenAIClient(BaseAIClient):
         reasoning_mode: str,
         reasoning_effort: str,
         cache_context: "CacheContext",
+        web_search_policy: dict[str, Any] | None = None,
     ) -> tuple[Any, str, dict[str, Any] | None]:
-        if self._should_use_responses_api_for_model(model, attachments=attachments):
+        if web_search_policy or self._should_use_responses_api_for_model(
+            model, attachments=attachments
+        ):
             payload = self._build_responses_payload(
                 model=model,
                 normalized_messages=normalized_messages,
@@ -259,6 +295,7 @@ class OpenAIClient(BaseAIClient):
                 attachments=attachments,
                 reasoning_mode=reasoning_mode,
                 reasoning_effort=reasoning_effort,
+                web_search_policy=web_search_policy,
             )
             self._apply_prompt_cache_options(payload, cache_context)
             return self._create_openai_response_with_compat_retries(
@@ -322,6 +359,7 @@ class OpenAIClient(BaseAIClient):
                     attachments=attachments,
                     reasoning_mode=reasoning_mode,
                     reasoning_effort=reasoning_effort,
+                    web_search_policy=None,
                 )
                 self._apply_prompt_cache_options(payload, cache_context)
                 logger.warning(
@@ -411,6 +449,7 @@ class OpenAIClient(BaseAIClient):
         attachments: list[dict[str, Any]],
         reasoning_mode: str,
         reasoning_effort: str,
+        web_search_policy: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": model,
@@ -435,6 +474,18 @@ class OpenAIClient(BaseAIClient):
             reasoning["mode"] = "pro"
         if reasoning:
             payload["reasoning"] = reasoning
+        if web_search_policy:
+            payload["tools"] = [{"type": "web_search"}]
+            payload["tool_choice"] = (
+                "required"
+                if str(web_search_policy.get("mode") or "auto") == "required"
+                else "auto"
+            )
+            payload["max_tool_calls"] = max(
+                1,
+                min(3, int(web_search_policy.get("max_operations") or 3)),
+            )
+            payload["include"] = ["web_search_call.action.sources"]
         return payload
 
     @staticmethod

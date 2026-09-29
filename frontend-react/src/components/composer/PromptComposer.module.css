@@ -75,25 +75,40 @@
 }
 
 .composerControls {
-  display: grid;
+  display: flex;
   min-width: 0;
   grid-column: 1 / -1;
-  grid-template-columns: 36px minmax(0, 1fr) 42px;
+  flex-wrap: wrap;
   align-items: center;
   column-gap: 9px;
   row-gap: 8px;
 }
 
 .featureControls {
+  display: flex;
   min-width: 0;
-  grid-column: 2;
+  flex: 0 0 auto;
+}
+
+.featureControlRow {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
 }
 
 .actions {
   display: flex;
-  grid-column: 3;
   align-items: center;
-  justify-self: end;
+  margin-left: auto;
+}
+
+.optionsChips {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
 }
 
 .screenReaderOnly {
@@ -108,16 +123,16 @@
 
 .submitButton {
   display: inline-flex;
-  width: 42px;
-  height: 42px;
-  flex: 0 0 42px;
+  width: 48px;
+  height: 48px;
+  flex: 0 0 48px;
   align-items: center;
   justify-content: center;
   border: 0;
   border-radius: 12px;
-  background: var(--cx-accent);
-  box-shadow: var(--cx-shadow-accent);
-  color: #ffffff;
+  background: var(--cx-feature-active-bg);
+  box-shadow: 0 8px 18px -8px rgba(11, 18, 32, .58);
+  color: var(--cx-feature-active-fg);
   cursor: pointer;
   transition:
     background-color 160ms ease,
@@ -126,7 +141,7 @@
 }
 
 .submitButton:hover:not(:disabled) {
-  background: var(--cx-accent-hover);
+  background: var(--cx-feature-active-hover);
   transform: translateY(-1px);
 }
 
@@ -164,6 +179,12 @@
   .card {
     max-width: 860px;
   }
+
+  .submitButton {
+    width: 44px;
+    height: 44px;
+    flex-basis: 44px;
+  }
 }
 
 @media (max-width: 767px) {
@@ -186,7 +207,6 @@
   }
 
   .composerControls {
-    grid-template-columns: auto minmax(0, 1fr) auto;
     column-gap: 11px;
   }
 
@@ -199,17 +219,22 @@
   }
 
   .submitButton {
-    width: 36px;
-    height: 36px;
-    flex: 0 0 36px;
-    border-radius: 999px;
-    box-shadow: 0 6px 14px -6px rgba(91, 91, 214, .7);
+    width: 44px;
+    height: 44px;
+    flex: 0 0 44px;
+    border-radius: 12px;
   }
 
   .submitButton svg {
     width: 18px;
     height: 18px;
-    transform: rotate(-90deg);
+  }
+
+  .optionsChips {
+    order: -1;
+    width: 100%;
+    flex: 1 0 100%;
+    overflow: hidden;
   }
 }
 
@@ -221,6 +246,10 @@
 
   .composerControls {
     column-gap: 10px;
+  }
+
+  .featureControlRow {
+    gap: 5px;
   }
 }
 
@@ -235,11 +264,6 @@
     column-gap: 9px;
   }
 
-  .submitButton {
-    width: 36px;
-    height: 36px;
-    flex-basis: 36px;
-  }
 }
 
 @keyframes mobileModelRowIn {

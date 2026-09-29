@@ -82,6 +82,12 @@ class FakeOrchestrator:
         self, prompt: str, model_type: str | None = None, context=None, **kwargs
     ) -> UnifiedResponse:
         self.ask_calls += 1
+        routing_mode = (
+            "smart"
+            if str(kwargs.get("routing_mode") or "").strip().lower() == "smart"
+            and not model_type
+            else "explicit"
+        )
         return UnifiedResponse(
             request_id="req_guardrail_ask_1",
             text="ok",
@@ -95,7 +101,7 @@ class FakeOrchestrator:
             metadata={
                 **self._metadata_for_research_mode(kwargs.get("research_mode")),
                 "routing": {
-                    "mode": "smart",
+                    "mode": routing_mode,
                     "initial_tier": "T1",
                     "final_tier": "T1",
                     "attempt_count": 1,
@@ -1940,7 +1946,7 @@ def test_history_includes_web_source_items_when_research_is_used(
             "prompt": "Use web research and keep citations",
             "provider": "openai",
             "model": "gpt-4o-mini",
-            "routing": {"research_mode": True, "smart_mode": True},
+            "routing": {"research_mode": True},
         },
     )
     assert response.status_code == 200
@@ -1953,6 +1959,7 @@ def test_history_includes_web_source_items_when_research_is_used(
     assert history_response.status_code == 200
     payload = history_response.json()
     assert payload
+    assert payload[0]["routing_mode"] == "explicit"
     assert payload[0]["web_source_items"] == [
         {"title": "Example Source", "url": "https://example.com/report"}
     ]

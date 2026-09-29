@@ -23,15 +23,18 @@ SENSITIVE_HEADERS = {"x-api-key", "authorization", "cookie", "set-cookie"}
 logger = get_logger(__name__)
 CONTEXT_SUMMARY_PREFIX = "[Cortex conversation summary]"
 CLIENT_SAFE_PROVIDER_ERROR_MESSAGES = {
-    "timeout": "The provider request timed out. Please retry in a moment.",
-    "auth": "Provider authentication failed. Check the configured API key.",
-    "rate_limited": "The provider is rate limiting requests. Please retry in a moment.",
-    "quota_exceeded": "Provider quota is exhausted. Check billing or API key limits.",
-    "bad_request": "The provider rejected the request. Check the selected model and request settings.",
+    "timeout": "The model took too long to respond. Please try again.",
+    "auth": "This model is unavailable because its provider connection needs attention. Try another model or contact support.",
+    "rate_limited": "This model is receiving too many requests. Try again shortly or switch models.",
+    "quota_exceeded": "This model is temporarily unavailable. Try another model or contact support.",
+    "bad_request": "The model could not process this request. Please revise it and try again.",
     "transient_capacity": "This model is temporarily busy. Try again shortly or switch to another model.",
-    "provider_5xx": "The provider is temporarily unavailable. Please retry in a moment.",
-    "unknown": "The provider request failed unexpectedly. Please retry or choose another model.",
+    "provider_5xx": "This model is temporarily unavailable. Please try again or choose another model.",
+    "unknown": "The model could not complete this request. Please try again or choose another model.",
 }
+UNEXPECTED_PUBLIC_ERROR_MESSAGE = (
+    "CortexAI couldn't complete this request because of an unexpected problem. Please try again."
+)
 
 
 def validate_and_trim_context(context_req):
@@ -391,6 +394,16 @@ def get_client_safe_error_display_text(error: NormalizedError) -> str:
     if kind == "transient_capacity":
         return message
     return f"Error: {message}"
+
+
+def unexpected_public_error(*, request_id: str) -> dict[str, object]:
+    """Return the stable public payload used when a stream fails unexpectedly."""
+    return {
+        "code": "internal_error",
+        "message": UNEXPECTED_PUBLIC_ERROR_MESSAGE,
+        "retryable": True,
+        "request_id": str(request_id or ""),
+    }
 
 
 def sanitize_provider_error_response(response: UnifiedResponse) -> UnifiedResponse:

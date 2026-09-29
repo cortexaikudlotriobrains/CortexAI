@@ -262,16 +262,16 @@ class CortexOrchestrator:
         if requested_model and self._model_registry:
             identity = self._model_registry.resolve_model_identity(model_type, requested_model)
         runtime_model = (
-            str(identity.get("runtime_model") or "").strip()
-            if isinstance(identity, dict)
-            else ""
+            str(identity.get("runtime_model") or "").strip() if isinstance(identity, dict) else ""
         ) or requested_model
         key_scope = (
             hashlib.sha256(api_key_override.encode("utf-8")).hexdigest()[:12]
             if api_key_override
             else "env"
         )
-        cache_key = f"{model_type}:{requested_model or 'default'}:{runtime_model or 'default'}:{key_scope}"
+        cache_key = (
+            f"{model_type}:{requested_model or 'default'}:{runtime_model or 'default'}:{key_scope}"
+        )
         if cache_key in self._client_cache:
             return self._client_cache[cache_key]
 
@@ -334,7 +334,8 @@ If a system message containing "WEB RESEARCH SOURCES:" is present:
 - If an exact detail is missing, state what is missing and suggest one focused follow-up search query.
 
 If no web source excerpts are present:
-- For current-data requests, say you do not have current data.
+- Use the provider web-search tool when it is available and current information is needed.
+- If no web-search tool is available, say you do not have current data.
 - For general knowledge, answer from training data.
 
 Never fabricate numbers, dates, percentages, or citations.
@@ -407,6 +408,7 @@ Never claim you performed web browsing yourself; the system handles retrieval.
         prompt: str,
         context: UserContext | None = None,
         research_mode: str = "auto",
+        use_shared_research: bool = True,
     ) -> dict[str, Any]:
         """Build one optimized/research-injected message payload for a turn."""
         optimized_prompt, opt_metadata = self._optimize_prompt_if_enabled(
@@ -417,15 +419,17 @@ Never claim you performed web browsing yourself; the system handles retrieval.
             logger.debug("Using optimized prompt for request")
 
         messages = self._build_messages(optimized_prompt, context, research_mode=research_mode)
-        if self.research_service:
+        if use_shared_research and self.research_service:
             messages, research_metadata = self._apply_research_if_needed(
                 prompt=optimized_prompt,
                 messages=messages,
                 research_mode=research_mode,
                 context=context,
             )
-        else:
+        elif use_shared_research:
             research_metadata = self._empty_research_metadata("service_not_configured")
+        else:
+            research_metadata = self._empty_research_metadata("provider_native")
 
         return {
             "prompt": optimized_prompt,
@@ -751,9 +755,7 @@ Never claim you performed web browsing yourself; the system handles retrieval.
             save_research_state(new_state)
 
             # Inject research
-            injected_messages = self._inject_reference_context(
-                messages, research_ctx.injected_text
-            )
+            injected_messages = self._inject_reference_context(messages, research_ctx.injected_text)
 
             metadata = {
                 "research_used": True,
@@ -822,6 +824,8 @@ Never claim you performed web browsing yourself; the system handles retrieval.
             allowed_billing_classes=allowed_billing_classes,
             allowed_models=allowed_models,
             min_context_limit=raw.get("min_context_limit"),
+            reasoning_mode=raw.get("reasoning_mode"),
+            reasoning_effort=raw.get("reasoning_effort"),
             json_only=bool(raw.get("json_only", False)),
             strict_format=bool(raw.get("strict_format", False)),
         )
@@ -1155,6 +1159,7 @@ Never claim you performed web browsing yourself; the system handles retrieval.
         routing_constraints: RoutingConstraints | None,
         provider_api_keys: dict[str, str] | None = None,
         candidate_authorizer: Callable[[str, str], bool] | None = None,
+        generation_resolver: Callable[[str, str], Any] | None = None,
         **kwargs,
     ) -> UnifiedResponse:
         if not self._smart_router or not self._model_registry or not self._validator:
@@ -1228,6 +1233,8 @@ Never claim you performed web browsing yourself; the system handles retrieval.
                     break
                 current_tier = next_tier
                 candidates = self._model_registry.get_candidates(current_tier, routing_constraints)
+                if not candidates:
+                    continue
                 selection = self._selector.select(features, candidates, routing_constraints)
                 current_candidates = [
                     selection.primary_candidate,
@@ -1262,11 +1269,23 @@ Never claim you performed web browsing yourself; the system handles retrieval.
                         }
                     )
                     continue
+            attempt_kwargs = dict(kwargs)
+            if generation_resolver is not None:
+                resolved_generation = generation_resolver(
+                    candidate.provider,
+                    candidate.model_name,
+                )
+                for key in ("max_tokens", "reasoning_mode", "reasoning_effort"):
+                    attempt_kwargs.pop(key, None)
+                provider_kwargs = getattr(resolved_generation, "provider_kwargs", None)
+                if callable(provider_kwargs):
+                    attempt_kwargs.update(provider_kwargs())
+
             resp = self._invoke_candidate(
                 candidate,
                 messages,
                 provider_api_keys=provider_api_keys,
-                **kwargs,
+                **attempt_kwargs,
             )
             prev_response = last_response
             last_response = resp
@@ -1324,6 +1343,10 @@ Never claim you performed web browsing yourself; the system handles retrieval.
                 routing_md["fallback_used"] = True
                 current_tier = decision.next_tier
                 candidates = self._model_registry.get_candidates(current_tier, routing_constraints)
+                if not candidates:
+                    attempt_index += 1
+                    current_candidates = []
+                    continue
                 selection = self._selector.select(features, candidates, routing_constraints)
                 current_candidates = [
                     selection.primary_candidate,
@@ -1357,6 +1380,45 @@ Never claim you performed web browsing yourself; the system handles retrieval.
 
         return final_response
 
+    def _execute_provider_search(self, query: str) -> dict[str, Any]:
+        """Execute one DeepSeek-requested Tavily search without shared injection."""
+        normalized_query = str(query or "").strip()
+        if not normalized_query:
+            return {
+                "ok": False,
+                "error": "search_query_required",
+                "sources": [],
+                "provider_credits_used": 0,
+                "provider_credits_estimated": False,
+            }
+        if self.research_service is None:
+            return {
+                "ok": False,
+                "error": "tavily_not_configured",
+                "sources": [],
+                "provider_credits_used": 0,
+                "provider_credits_estimated": False,
+            }
+
+        result = self.research_service.build(normalized_query, use_cache=False)
+        sources = [
+            {
+                "title": source.title,
+                "url": source.url,
+                "excerpt": source.excerpt,
+            }
+            for source in (result.sources or [])[:5]
+        ]
+        return {
+            "ok": bool(result.used and sources),
+            "error": result.error,
+            "query": result.search_query or normalized_query,
+            "content": result.injected_text,
+            "sources": sources,
+            "provider_credits_used": max(0, int(result.provider_credits_used or 0)),
+            "provider_credits_estimated": bool(result.provider_credits_estimated),
+        }
+
     # ---------- public API ----------
     def ask(
         self,
@@ -1375,10 +1437,14 @@ Never claim you performed web browsing yourself; the system handles retrieval.
             if not isinstance(provider_api_keys, dict):
                 provider_api_keys = {}
             candidate_authorizer = kwargs.pop("_smart_candidate_authorizer", None)
+            candidate_generation_resolver = kwargs.pop("_smart_generation_resolver", None)
             prepared_messages = kwargs.pop("_prepared_messages", None)
             prepared_research_metadata = kwargs.pop("_prepared_research_metadata", None)
             prepared_opt_metadata = kwargs.pop("_prepared_opt_metadata", None)
             prepared_prompt = kwargs.pop("_prepared_prompt", None)
+            native_web_search = bool(kwargs.pop("_native_web_search", False))
+            if native_web_search:
+                kwargs.setdefault("web_search_executor", self._execute_provider_search)
 
             if prepared_messages is not None:
                 optimized_prompt = str(prepared_prompt or prompt)
@@ -1396,6 +1462,7 @@ Never claim you performed web browsing yourself; the system handles retrieval.
                     prompt=prompt,
                     context=context,
                     research_mode=research_mode,
+                    use_shared_research=not native_web_search,
                 )
                 optimized_prompt = prepared_turn["prompt"]
                 messages = prepared_turn["messages"]
@@ -1490,6 +1557,11 @@ Never claim you performed web browsing yourself; the system handles retrieval.
                     candidate_authorizer=(
                         candidate_authorizer if callable(candidate_authorizer) else None
                     ),
+                    generation_resolver=(
+                        candidate_generation_resolver
+                        if callable(candidate_generation_resolver)
+                        else None
+                    ),
                     **kwargs,
                 )
             else:
@@ -1543,7 +1615,12 @@ Never claim you performed web browsing yourself; the system handles retrieval.
 
             # Merge research and optimization metadata into response
             md = resp.metadata or {}
-            merged_md = {**md, **research_metadata, **opt_metadata, "research_mode": research_mode}
+            merged_md = {
+                **research_metadata,
+                **md,
+                **opt_metadata,
+                "research_mode": research_mode,
+            }
             resp = replace(resp, metadata=merged_md)
 
             if record_direct_circuit:
@@ -1592,6 +1669,9 @@ Never claim you performed web browsing yourself; the system handles retrieval.
         per_client_generation = kwargs.pop("_per_client_generation", {}) or {}
         if not isinstance(per_client_generation, dict):
             per_client_generation = {}
+        native_web_search = bool(kwargs.pop("_native_web_search", False))
+        if native_web_search:
+            kwargs.setdefault("web_search_executor", self._execute_provider_search)
 
         def with_turn_metadata(response: UnifiedResponse) -> UnifiedResponse:
             normalized = self._normalize_empty_success_response(response)
@@ -1599,13 +1679,11 @@ Never claim you performed web browsing yourself; the system handles retrieval.
             return replace(
                 normalized,
                 metadata={
-                    **metadata,
                     **research_metadata,
+                    **metadata,
                     "research_mode": research_mode,
                     "provider_cost_owner": (
-                        "customer"
-                        if provider_api_keys.get(response.provider.lower())
-                        else "cortex"
+                        "customer" if provider_api_keys.get(response.provider.lower()) else "cortex"
                     ),
                 },
             )
@@ -1621,15 +1699,16 @@ Never claim you performed web browsing yourself; the system handles retrieval.
 
             messages = self._build_messages(optimized_prompt, context, research_mode=research_mode)
 
-            # Apply research ONCE for all models (compare fairness)
-            if self.research_service:
+            # Legacy rollback mode shares one Tavily pack. Native mode gives
+            # every provider its own isolated tool/search execution.
+            if not native_web_search and self.research_service:
                 messages, research_metadata = self._apply_research_if_needed(
                     prompt=optimized_prompt,
                     messages=messages,
                     research_mode=research_mode,
                     context=context,
                 )
-            else:
+            elif not native_web_search:
                 research_metadata = {
                     "research_used": False,
                     "research_reused": False,
@@ -1639,6 +1718,8 @@ Never claim you performed web browsing yourself; the system handles retrieval.
                     "research_error": "service_not_configured",
                     "sources": [],
                 }
+            else:
+                research_metadata = self._empty_research_metadata("provider_native")
 
             kwargs.setdefault(
                 "_cache_scope",
@@ -1700,7 +1781,8 @@ Never claim you performed web browsing yourself; the system handles retrieval.
                         token_tracker.update(r)
                 return MultiUnifiedResponse.from_responses(request_group_id, prompt, responses)
 
-            # Execute comparisons with research-injected messages (parallel inside MultiModelOrchestrator)
+            # Execute comparisons in parallel. In native mode the same prompt
+            # is shared, but evidence and citations are provider-specific.
             result = self._multi_orchestrator.get_comparisons_sync(
                 prompt=prompt,
                 clients=clients,

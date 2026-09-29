@@ -153,15 +153,21 @@ describe("ResultsSection layout states", () => {
     const turn = compareTurn("compare-metrics", "Compare metrics");
     turn.responses = [
       response("compare-metrics-openai", "openai", "gpt-5.1", {
-        latency_ms: 640,
+        latency_ms: 100,
+        started_at: "2026-06-09T00:00:00.000Z",
+        first_visible_at: "2026-06-09T00:00:00.640Z",
         estimated_cost: 0.0018,
       }),
       response("compare-metrics-claude", "claude", "claude-sonnet-4-5", {
-        latency_ms: 320,
+        latency_ms: 900,
+        started_at: "2026-06-09T00:00:00.000Z",
+        first_visible_at: "2026-06-09T00:00:00.320Z",
         estimated_cost: 0.0024,
       }),
       response("compare-metrics-deepseek", "deepseek", "deepseek-chat", {
-        latency_ms: 510,
+        latency_ms: 50,
+        started_at: "2026-06-09T00:00:00.000Z",
+        first_visible_at: "2026-06-09T00:00:00.510Z",
         estimated_cost: 0.0005,
       }),
     ];

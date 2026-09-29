@@ -1,12 +1,22 @@
 import styles from "./ErrorBanner.module.css";
 
 interface ErrorBannerProps {
+  title: string;
   message: string;
-  onRetry?: () => void;
+  actionLabel?: string;
+  requestId?: string;
+  onAction?: () => void;
   onDismiss: () => void;
 }
 
-export function ErrorBanner({ message, onRetry, onDismiss }: ErrorBannerProps) {
+export function ErrorBanner({
+  title,
+  message,
+  actionLabel,
+  requestId,
+  onAction,
+  onDismiss,
+}: ErrorBannerProps) {
   return (
     <div
       id="errorBanner"
@@ -19,13 +29,14 @@ export function ErrorBanner({ message, onRetry, onDismiss }: ErrorBannerProps) {
         <span className={styles.icon}>!</span>
       </span>
       <div className={styles.content}>
-        <p id="errorTitle" className={styles.title}>Something went wrong</p>
+        <p id="errorTitle" className={styles.title}>{title}</p>
         <p id="errorMsg" className={styles.message}>
           <span id="errorText">{message}</span>
         </p>
-        {onRetry && (
-          <button id="errorRetry" className={styles.retryBtn} type="button" onClick={onRetry}>
-            Retry
+        {requestId && <p className={styles.supportCode}>Support code: {requestId}</p>}
+        {onAction && (
+          <button id="errorRetry" className={styles.retryBtn} type="button" onClick={onAction}>
+            {actionLabel ?? "Try again"}
           </button>
         )}
       </div>

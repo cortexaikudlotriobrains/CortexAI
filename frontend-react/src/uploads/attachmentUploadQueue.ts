@@ -218,7 +218,7 @@ function applyInitialServerFile(clientId: string, file: FileUploadResponse): voi
     return;
   }
   if (file.status === "failed") {
-    failTask(clientId, "processing", file.error_message || "File processing failed.", file.error_code);
+    failTask(clientId, "processing", friendlyProcessingError(file.error_code), file.error_code);
     return;
   }
   patchTask(clientId, { state: "processing", progress: 100 });
@@ -318,7 +318,7 @@ async function completeAndPoll(clientId: string): Promise<void> {
     failTask(
       clientId,
       "processing",
-      result.error_message || "File processing failed.",
+      friendlyProcessingError(result.error_code),
       result.error_code,
     );
     return;
@@ -346,7 +346,7 @@ async function pollProcessingFile(clientId: string): Promise<void> {
         failTask(
           clientId,
           "processing",
-          result.error_message || "File processing failed.",
+          friendlyProcessingError(result.error_code),
           result.error_code,
         );
         return;
@@ -450,6 +450,19 @@ function friendlyCompletionError(error: unknown): string {
     return "This file type is not supported.";
   }
   return "The uploaded file could not be verified.";
+}
+
+function friendlyProcessingError(errorCode?: string | null): string {
+  const code = String(errorCode || "").trim().toLowerCase();
+  if (["invalid_mime_type", "unsupported_file_type"].includes(code)) {
+    return "This file type is not supported.";
+  }
+  if (code === "empty_file") return "The selected file is empty.";
+  if (code === "file_too_large") return "This file is too large to upload.";
+  if (code === "attachment_upload_mismatch") {
+    return "The uploaded file could not be verified. Retry the upload.";
+  }
+  return "This file could not be processed. Retry the upload.";
 }
 
 function apiErrorCode(error: unknown): string | undefined {

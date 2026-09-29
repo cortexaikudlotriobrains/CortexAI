@@ -29,8 +29,6 @@ describe("suggested follow-up submission", () => {
     useChatStore.setState({
       mode: "single",
       smartMode: true,
-      researchMode: false,
-      compareResearchMode: true,
       optimizeMode: true,
       selectedModelKey: "openai:gpt-5.1",
       compareModelKeys: [
@@ -78,7 +76,7 @@ describe("suggested follow-up submission", () => {
     expect(streamChat).toHaveBeenCalledTimes(1);
     expect(vi.mocked(streamChat).mock.calls[0]?.[0]).toMatchObject({
       prompt: "Evidence summary",
-      routing: { smart_mode: true, research_mode: false },
+      routing: { smart_mode: true, web_mode: "auto" },
       attachments: undefined,
       context: {
         session_id: "session-1",

@@ -18,8 +18,6 @@ describe("Smart routing response identity", () => {
     useChatStore.setState({
       mode: "single",
       smartMode: true,
-      researchMode: false,
-      compareResearchMode: true,
       optimizeMode: false,
       selectedModelKey: "openai:gpt-5.1",
       compareModelKeys: [
@@ -68,6 +66,7 @@ describe("Smart routing response identity", () => {
     act(() => {
       submission = result.current.submit();
     });
+    expect(useChatStore.getState().prompt).toBe("");
 
     await waitFor(() => {
       const response = useChatStore.getState().turns[0]?.responses[0];

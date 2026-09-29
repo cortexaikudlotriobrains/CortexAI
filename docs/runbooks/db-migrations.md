@@ -83,6 +83,7 @@ psql "$env:MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260811_
 psql "$env:MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260820_add_cortex_work_mode.sql
 psql "$env:MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260829_add_work_web_output_and_model_identity.sql
 psql "$env:MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260905_add_subscription_grants.sql
+psql "$env:MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260927_add_tool_credit_transaction_item.sql
 ```
 
 The `20260727` script alters `llm_requests`, so the migration connection must
@@ -532,6 +533,44 @@ call.
 Work Package 8 also requires no new migration. Its verified Stripe webhook lifecycle uses the existing `billing_webhook_events`, `subscriptions`, `usage_periods`, and `usage_counters` columns from `20260718_add_b2c_billing_foundation.sql`. Apply and verify that migration before registering the Stripe webhook endpoint; otherwise verified events return a non-2xx response and remain retryable at Stripe.
 
 Reservation, provider execution, and settlement are deliberately separate transactions. During a rolling deployment, do not drop or rewrite the additive billing tables. If the new API must be rolled back, redeploy the prior application version and retain the billing rows for audit/reconciliation; stale `reserved` rows can be handled by the reviewed cleanup flow above.
+
+### Provider-native web-search tool items
+
+Migration:
+
+`db/migrations/20260927_add_tool_credit_transaction_item.sql`
+
+Apply this after `20260729_add_unified_ai_credits.sql` and before enabling
+`NATIVE_WEB_SEARCH_MODE=enabled`:
+
+```powershell
+psql "$env:MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260927_add_tool_credit_transaction_item.sql
+```
+
+The migration replaces only the `credit_transactions.item_type` check so it
+accepts `tool` in addition to `model`, `research`, and `adjustment`. It does not
+rewrite existing ledger rows. The migration role must own
+`public.credit_transactions`.
+
+Verify the constraint and recent tool rows:
+
+```sql
+SELECT pg_get_constraintdef(oid)
+FROM pg_constraint
+WHERE conrelid = 'public.credit_transactions'::regclass
+  AND conname = 'ck_credit_transactions_item_type';
+
+SELECT provider, fixed_credits, provider_cost_usd, metadata, created_at
+FROM public.credit_transactions
+WHERE item_type = 'tool'
+ORDER BY created_at DESC
+LIMIT 20;
+```
+
+The expected constraint includes `tool`. After deployment, each settled search
+row must contain `metadata.tool_kind='web_search'`, its backend, and its actual
+operation count. Rollback is `NATIVE_WEB_SEARCH_MODE=off` plus the prior
+application build; retain the expanded constraint and immutable ledger rows.
 
 ### Billing rollback
 

@@ -170,7 +170,9 @@ class TestProviderContractCompliance:
     def test_openai_defaults_to_2048_max_tokens_when_not_provided(self, mock_openai):
         """OpenAI chat path should use the repository default output cap when caller omits max_tokens."""
         mock_response = Mock()
-        mock_response.choices = [Mock(message=Mock(content="Default cap response"), finish_reason="stop")]
+        mock_response.choices = [
+            Mock(message=Mock(content="Default cap response"), finish_reason="stop")
+        ]
         mock_response.usage = Mock(prompt_tokens=10, completion_tokens=20, total_tokens=30)
         mock_openai.return_value.chat.completions.create.return_value = mock_response
 
@@ -209,7 +211,9 @@ class TestProviderContractCompliance:
         Downstream orchestrator tests assert this shape is normalized to provider_error.
         """
         mock_response = Mock()
-        mock_response.choices = [Mock(message=Mock(content="", refusal=None), finish_reason="length")]
+        mock_response.choices = [
+            Mock(message=Mock(content="", refusal=None), finish_reason="length")
+        ]
         mock_response.usage = Mock(prompt_tokens=1200, completion_tokens=500, total_tokens=1700)
         mock_openai.return_value.chat.completions.create.return_value = mock_response
 
@@ -246,7 +250,9 @@ class TestProviderContractCompliance:
         assert response.text == ""
 
     @patch("openai.OpenAI")
-    def test_openai_retries_with_max_completion_tokens_when_max_tokens_unsupported(self, mock_openai):
+    def test_openai_retries_with_max_completion_tokens_when_max_tokens_unsupported(
+        self, mock_openai
+    ):
         """Test OpenAI fallback for model families that reject max_tokens."""
         mock_success = Mock()
         mock_success.choices = [Mock(message=Mock(content="Recovered"), finish_reason="stop")]
@@ -257,7 +263,10 @@ class TestProviderContractCompliance:
             "'Unsupported parameter: \\'max_tokens\\' is not supported with this model. "
             "Use \\'max_completion_tokens\\' instead.'}}"
         )
-        mock_openai.return_value.chat.completions.create.side_effect = [unsupported_error, mock_success]
+        mock_openai.return_value.chat.completions.create.side_effect = [
+            unsupported_error,
+            mock_success,
+        ]
 
         client = OpenAIClient(api_key="test-key", model_name="gpt-5.1")
         response = client.get_completion("Test prompt", max_tokens=321)
@@ -319,7 +328,9 @@ class TestProviderContractCompliance:
         mock_openai.return_value.responses.create.return_value = mock_response
 
         client = OpenAIClient(api_key="test-key", model_name="gpt-4o")
-        response = client.get_completion("Test prompt", model="future-non-chat-model", max_tokens=123)
+        response = client.get_completion(
+            "Test prompt", model="future-non-chat-model", max_tokens=123
+        )
 
         assert response.is_success
         assert response.text == "Recovered through responses API"
@@ -469,6 +480,24 @@ class TestProviderContractCompliance:
         assert payload["reasoning_effort"] == "max"
         assert "temperature" not in payload
 
+    @patch("openai.OpenAI")
+    def test_deepseek_preserves_low_reasoning_effort(self, mock_openai):
+        mock_response = Mock()
+        mock_response.choices = [Mock(message=Mock(content="Quick answer"), finish_reason="stop")]
+        mock_response.usage = Mock(prompt_tokens=10, completion_tokens=20, total_tokens=30)
+        mock_openai.return_value.chat.completions.create.return_value = mock_response
+
+        client = DeepSeekClient(api_key="test-key", model_name="deepseek-v4-flash")
+        response = client.get_completion(
+            "Test prompt",
+            reasoning_mode="thinking",
+            reasoning_effort="low",
+        )
+
+        assert response.is_success
+        payload = mock_openai.return_value.chat.completions.create.call_args.kwargs
+        assert payload["reasoning_effort"] == "low"
+
     @patch("api.claude_client.anthropic.Anthropic")
     def test_claude_receives_adaptive_thinking_and_effort(self, mock_anthropic):
         mock_response = Mock()
@@ -500,9 +529,7 @@ class TestProviderContractCompliance:
         assert "temperature" not in payload
 
     @patch("api.claude_client.anthropic.Anthropic")
-    def test_all_registry_claude_models_build_compatible_default_payloads(
-        self, mock_anthropic
-    ):
+    def test_all_registry_claude_models_build_compatible_default_payloads(self, mock_anthropic):
         mock_response = Mock()
         mock_response.content = [Mock(type="text", text="Claude answer")]
         mock_response.usage = Mock(
@@ -545,14 +572,10 @@ class TestProviderContractCompliance:
             else:
                 assert budget.effective_reasoning_mode == "adaptive"
                 assert payload["thinking"] == {"type": "adaptive"}
-                assert payload["output_config"]["effort"] == (
-                    budget.effective_reasoning_effort
-                )
+                assert payload["output_config"]["effort"] == (budget.effective_reasoning_effort)
 
     @patch("api.claude_client.anthropic.Anthropic")
-    def test_claude_45_keeps_custom_temperature_when_thinking_is_off(
-        self, mock_anthropic
-    ):
+    def test_claude_45_keeps_custom_temperature_when_thinking_is_off(self, mock_anthropic):
         mock_response = Mock()
         mock_response.content = [Mock(type="text", text="Claude answer")]
         mock_response.usage = Mock(
@@ -565,9 +588,7 @@ class TestProviderContractCompliance:
         mock_response.model = "claude-haiku-4-5"
         mock_anthropic.return_value.messages.create.return_value = mock_response
 
-        response = ClaudeClient(
-            api_key="test-key", model_name="claude-haiku-4-5"
-        ).get_completion(
+        response = ClaudeClient(api_key="test-key", model_name="claude-haiku-4-5").get_completion(
             "Test prompt",
             reasoning_mode="off",
             reasoning_effort="none",
@@ -590,7 +611,10 @@ class TestProviderContractCompliance:
         mock_success = Mock()
         mock_success.choices = [Mock(message=Mock(content="Recovered"), finish_reason="stop")]
         mock_success.usage = Mock(prompt_tokens=8, completion_tokens=13, total_tokens=21)
-        mock_openai.return_value.chat.completions.create.side_effect = [unsupported_temp, mock_success]
+        mock_openai.return_value.chat.completions.create.side_effect = [
+            unsupported_temp,
+            mock_success,
+        ]
 
         client = DeepSeekClient(api_key="test-key", model_name="deepseek-chat")
         response = client.get_completion(
@@ -632,7 +656,9 @@ class TestProviderContractCompliance:
     @patch("openai.OpenAI")
     def test_deepseek_accepts_text_materialized_attachments(self, mock_openai):
         mock_response = Mock()
-        mock_response.choices = [Mock(message=Mock(content="Processed text attachment"), finish_reason="stop")]
+        mock_response.choices = [
+            Mock(message=Mock(content="Processed text attachment"), finish_reason="stop")
+        ]
         mock_response.usage = Mock(prompt_tokens=10, completion_tokens=20, total_tokens=30)
         mock_openai.return_value.chat.completions.create.return_value = mock_response
 
@@ -673,6 +699,24 @@ class TestProviderContractCompliance:
         assert response.is_success
 
     @patch("openai.OpenAI")
+    def test_grok_receives_resolved_reasoning_effort(self, mock_openai):
+        mock_response = Mock()
+        mock_response.choices = [Mock(message=Mock(content="Deep answer"), finish_reason="stop")]
+        mock_response.usage = Mock(prompt_tokens=10, completion_tokens=20, total_tokens=30)
+        mock_openai.return_value.chat.completions.create.return_value = mock_response
+
+        client = GrokClient(api_key="test-key", model_name="grok-4.3")
+        response = client.get_completion(
+            "Test prompt",
+            reasoning_mode="reasoning",
+            reasoning_effort="xhigh",
+        )
+
+        assert response.is_success
+        payload = mock_openai.return_value.chat.completions.create.call_args.kwargs
+        assert payload["reasoning_effort"] == "xhigh"
+
+    @patch("openai.OpenAI")
     def test_grok_retries_without_unsupported_parameter(self, mock_openai):
         """Grok should retry once when provider rejects an optional parameter."""
         unsupported_temp = Exception(
@@ -682,7 +726,10 @@ class TestProviderContractCompliance:
         mock_success = Mock()
         mock_success.choices = [Mock(message=Mock(content="Recovered"), finish_reason="stop")]
         mock_success.usage = Mock(prompt_tokens=6, completion_tokens=9, total_tokens=15)
-        mock_openai.return_value.chat.completions.create.side_effect = [unsupported_temp, mock_success]
+        mock_openai.return_value.chat.completions.create.side_effect = [
+            unsupported_temp,
+            mock_success,
+        ]
 
         client = GrokClient(api_key="test-key", model_name="grok-4-latest")
         response = client.get_completion("Test prompt", temperature=0.3, max_tokens=120)
@@ -752,7 +799,10 @@ class TestProviderContractCompliance:
             prompt_token_count=4, candidates_token_count=7, total_token_count=11
         )
         mock_response.candidates = [Mock(finish_reason="STOP")]
-        mock_genai.return_value.models.generate_content.side_effect = [unsupported_temp, mock_response]
+        mock_genai.return_value.models.generate_content.side_effect = [
+            unsupported_temp,
+            mock_response,
+        ]
 
         client = GeminiClient(api_key="test-key", model_name="gemini-1.5-flash")
         response = client.get_completion("Test prompt", temperature=0.4, max_output_tokens=222)
@@ -762,8 +812,12 @@ class TestProviderContractCompliance:
         assert response.metadata["endpoint"] == "models.generate_content"
         assert response.metadata["adaptive_retry"]["dropped_param"] == "temperature"
         assert mock_genai.return_value.models.generate_content.call_count == 2
-        first_config = mock_genai.return_value.models.generate_content.call_args_list[0].kwargs["config"]
-        second_config = mock_genai.return_value.models.generate_content.call_args_list[1].kwargs["config"]
+        first_config = mock_genai.return_value.models.generate_content.call_args_list[0].kwargs[
+            "config"
+        ]
+        second_config = mock_genai.return_value.models.generate_content.call_args_list[1].kwargs[
+            "config"
+        ]
         assert first_config["temperature"] == 0.4
         assert "temperature" not in second_config
 
@@ -885,9 +939,7 @@ class TestProviderCacheAdapters:
         assert "prompt_cache_key" not in second.kwargs
 
     @patch("openai.OpenAI")
-    def test_openai_prompt_cache_key_is_absent_when_flag_disabled(
-        self, mock_openai, monkeypatch
-    ):
+    def test_openai_prompt_cache_key_is_absent_when_flag_disabled(self, mock_openai, monkeypatch):
         monkeypatch.setenv("OPENAI_PROMPT_CACHE_ENABLED", "false")
         mock_openai.return_value.responses.create.return_value = Mock(
             output_text="answer",
@@ -926,9 +978,9 @@ class TestProviderCacheAdapters:
         )
 
         assert response.is_success
-        assert mock_anthropic.return_value.messages.create.call_args.kwargs[
-            "cache_control"
-        ] == {"type": "ephemeral"}
+        assert mock_anthropic.return_value.messages.create.call_args.kwargs["cache_control"] == {
+            "type": "ephemeral"
+        }
         assert response.token_usage.prompt_tokens == 100
         assert response.token_usage.cached_input_tokens == 70
         assert response.token_usage.cache_write_tokens == 10
@@ -953,9 +1005,9 @@ class TestProviderCacheAdapters:
         )
 
         assert response.is_success
-        header = mock_openai.return_value.chat.completions.create.call_args.kwargs[
-            "extra_headers"
-        ]["x-grok-conv-id"]
+        header = mock_openai.return_value.chat.completions.create.call_args.kwargs["extra_headers"][
+            "x-grok-conv-id"
+        ]
         assert header.startswith("cortex_pc_")
         assert "person@example.com" not in header
         assert len(header) == len("cortex_pc_") + 64
@@ -973,15 +1025,13 @@ class TestProviderCacheAdapters:
         )
         mock_response.candidates = [Mock(finish_reason="STOP")]
         mock_genai.return_value.models.generate_content.return_value = mock_response
-        response = GeminiClient(
-            api_key="test-key", model_name="gemini-2.5-flash"
-        ).get_completion("Test prompt")
+        response = GeminiClient(api_key="test-key", model_name="gemini-2.5-flash").get_completion(
+            "Test prompt"
+        )
         assert response.token_usage.cached_input_tokens == 80
 
     @patch("openai.OpenAI")
-    def test_deepseek_maps_compatible_cache_hit_fields_without_parameters(
-        self, mock_openai
-    ):
+    def test_deepseek_maps_compatible_cache_hit_fields_without_parameters(self, mock_openai):
         mock_response = Mock()
         mock_response.choices = [Mock(message=Mock(content="Cached"), finish_reason="stop")]
         mock_response.usage = Mock(
@@ -991,9 +1041,9 @@ class TestProviderCacheAdapters:
             prompt_tokens_details=Mock(cached_tokens=75, cache_write_tokens=0),
         )
         mock_openai.return_value.chat.completions.create.return_value = mock_response
-        response = DeepSeekClient(
-            api_key="test-key", model_name="deepseek-chat"
-        ).get_completion("Test prompt")
+        response = DeepSeekClient(api_key="test-key", model_name="deepseek-chat").get_completion(
+            "Test prompt"
+        )
         payload = mock_openai.return_value.chat.completions.create.call_args.kwargs
         assert "prompt_cache_key" not in payload
         assert response.token_usage.cached_input_tokens == 75
@@ -1081,7 +1131,9 @@ class TestCompareDtoCompatibility:
                         provider="openai",
                         model="gpt-4o-mini",
                         latency_ms=10,
-                        token_usage=TokenUsage(prompt_tokens=1, completion_tokens=2, total_tokens=3),
+                        token_usage=TokenUsage(
+                            prompt_tokens=1, completion_tokens=2, total_tokens=3
+                        ),
                         estimated_cost=0.00001,
                         finish_reason="stop",
                         error=None,

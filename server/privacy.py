@@ -208,6 +208,20 @@ def sanitize_routing_payload_for_storage(
         if web_source_items:
             base["web_source_items"] = web_source_items
             base["web_sources"] = len(web_source_items)
+        raw_web_search = routing_metadata.get("web_search")
+        if isinstance(raw_web_search, dict):
+            base["web_search"] = {
+                key: raw_web_search.get(key)
+                for key in (
+                    "provider",
+                    "backend",
+                    "requested_mode",
+                    "effective_mode",
+                    "status",
+                    "operations",
+                    "usage_estimated",
+                )
+            }
         return base, slim_attempts, {}
 
     if redact_pii_enabled():

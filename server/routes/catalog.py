@@ -8,6 +8,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from config.provider_catalog import get_provider_catalog, get_provider_ids
 from orchestrator.model_registry import ModelRegistry
+from orchestrator.reasoning_capabilities import (
+    default_reasoning_level,
+    normalized_reasoning_levels,
+)
 from server.dependencies import AuthResult, get_auth
 from server.routes.session_auth import SessionScopedAuthGuard
 from server.schemas.responses import (
@@ -66,6 +70,7 @@ def _validate_provider_or_400(provider: str | None) -> str | None:
 
 
 def _model_to_dto(candidate) -> ModelCatalogItemDTO:
+    reasoning_levels = normalized_reasoning_levels(candidate)
     return ModelCatalogItemDTO(
         provider=candidate.provider,
         model=candidate.model_name,
@@ -103,6 +108,9 @@ def _model_to_dto(candidate) -> ModelCatalogItemDTO:
         reasoning_efforts=list(candidate.reasoning_efforts or []),
         reasoning_disable_supported=bool(candidate.reasoning_disable_supported),
         reasoning_counts_against_output=bool(candidate.reasoning_counts_against_output),
+        reasoning_levels=reasoning_levels,
+        default_reasoning_level=default_reasoning_level(candidate),
+        reasoning_controllable=bool(reasoning_levels),
         pricing_source_url=candidate.pricing_source_url,
         lifecycle_source_url=candidate.lifecycle_source_url,
         source_verified_at=candidate.source_verified_at,

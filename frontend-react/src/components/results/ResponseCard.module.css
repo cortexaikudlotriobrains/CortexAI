@@ -188,6 +188,34 @@
   color: var(--cx-success-text);
 }
 
+.reasoningMetric {
+  font-weight: 700;
+}
+
+.reasoningLow {
+  border-color: var(--cx-success-border);
+  background: var(--cx-success-soft);
+  color: var(--cx-success-text);
+}
+
+.reasoningMedium {
+  border-color: color-mix(in srgb, var(--cx-prov-c) 28%, transparent);
+  background: var(--cx-prov-c-soft);
+  color: var(--cx-prov-c);
+}
+
+.reasoningHigh {
+  border-color: color-mix(in srgb, var(--cx-warn-text) 30%, transparent);
+  background: var(--cx-warn-soft);
+  color: var(--cx-warn-text);
+}
+
+.reasoningMax {
+  border-color: color-mix(in srgb, var(--cx-prov-d) 28%, transparent);
+  background: var(--cx-prov-d-soft);
+  color: var(--cx-prov-d);
+}
+
 .winnerLabel {
   color: inherit;
   font-weight: 700;
@@ -783,6 +811,15 @@
   display: flex;
   gap: 12px;
   color: var(--error);
+}
+
+.errorMsg strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.errorMsg p {
+  margin: 0;
 }
 
 .actions {

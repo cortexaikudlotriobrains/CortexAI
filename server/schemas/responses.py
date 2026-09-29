@@ -72,6 +72,7 @@ class ChatResponseDTO(BaseModel):
     replacement_model: Optional[str] = None
     migration_reason: Optional[str] = None
     reasoning_mode: Optional[str] = None
+    routing_mode: Optional[str] = None
     latency_ms: int
     token_usage: TokenUsageDTO
     estimated_cost: float
@@ -138,6 +139,12 @@ class ChatResponseDTO(BaseModel):
             if isinstance(generation_budget_raw, dict)
             else None
         )
+        routing_raw = metadata.get("routing")
+        routing_mode = (
+            str(routing_raw.get("mode") or "").strip().lower() or None
+            if isinstance(routing_raw, dict)
+            else None
+        )
         completion_status = str(metadata.get("completion_status") or "")
         stop_cause = str(metadata.get("stop_cause") or "")
         if completion_status not in {"complete", "incomplete", "failed"}:
@@ -172,6 +179,7 @@ class ChatResponseDTO(BaseModel):
             replacement_model=getattr(ur, "replacement_model", None),
             migration_reason=getattr(ur, "migration_reason", None),
             reasoning_mode=getattr(ur, "reasoning_mode", None),
+            routing_mode=routing_mode,
             latency_ms=ur.latency_ms,
             token_usage=TokenUsageDTO(
                 prompt_tokens=ur.token_usage.prompt_tokens,
@@ -308,6 +316,9 @@ class ModelCatalogItemDTO(BaseModel):
     reasoning_efforts: List[str] = Field(default_factory=list)
     reasoning_disable_supported: bool = True
     reasoning_counts_against_output: bool = True
+    reasoning_levels: List[str] = Field(default_factory=list)
+    default_reasoning_level: Optional[str] = None
+    reasoning_controllable: bool = False
     pricing_source_url: Optional[str] = None
     lifecycle_source_url: Optional[str] = None
     source_verified_at: Optional[str] = None

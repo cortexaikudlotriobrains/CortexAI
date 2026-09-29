@@ -5,7 +5,15 @@ from typing import Any
 from google import genai
 
 from config.cache_optimization import cache_friendly_prompt_ordering_enabled
+from config.web_search import load_native_web_search_config
 from models.unified_response import TokenUsage, UnifiedResponse
+from tools.web.provider_metadata import (
+    build_web_search_metadata,
+    field_value,
+    insert_numbered_citations,
+    normalize_web_sources,
+    sequence_value,
+)
 from utils.cost_calculator import CostCalculator
 from utils.logger import get_logger
 
@@ -143,6 +151,13 @@ class GeminiClient(BaseAIClient):
         reasoning_mode = str(kwargs.get("reasoning_mode") or "").strip().lower()
         reasoning_effort = str(kwargs.get("reasoning_effort") or "").strip().lower()
         attachments = self._normalize_inference_attachments(kwargs.pop("attachments", None))
+        web_search_policy = kwargs.pop("web_search_policy", {}) or {}
+        kwargs.pop("web_search_executor", None)
+        web_config = load_native_web_search_config()
+        web_search_enabled = (
+            web_config.provider_enabled("gemini")
+            and str(web_search_policy.get("mode") or "off") != "off"
+        )
 
         try:
             # Normalize input to messages format
@@ -171,11 +186,62 @@ class GeminiClient(BaseAIClient):
                 config["thinking_config"] = {"thinking_level": reasoning_effort}
 
             adaptive_retry = None
+            endpoint = "models.generate_content"
             try:
-                response = self.client.models.generate_content(
-                    model=model_name, contents=gemini_contents, config=config
-                )
+                if web_search_enabled:
+                    cap = max(
+                        1, min(3, int(web_search_policy.get("max_operations") or 3))
+                    )
+                    web_instruction = (
+                        f"Use no more than {cap} Google Search queries. "
+                        + (
+                            "Google Search is required for this request."
+                            if str(web_search_policy.get("mode") or "auto") == "required"
+                            else "Search only when current or externally verifiable information is needed."
+                        )
+                    )
+                    interaction_config: dict[str, Any] = {
+                        "max_output_tokens": max_output_tokens,
+                        "tool_choice": {
+                            "allowed_tools": {
+                                "mode": (
+                                    "any"
+                                    if str(web_search_policy.get("mode") or "auto")
+                                    == "required"
+                                    else "auto"
+                                ),
+                                "tools": ["google_search"],
+                            }
+                        },
+                    }
+                    # Gemini 3.5 rejects legacy sampling controls on Interactions
+                    # requests. Keep native-search payloads model-compatible instead
+                    # of turning an otherwise valid Google Search request into a 400.
+                    if not str(model_name).strip().lower().startswith("gemini-3.5"):
+                        interaction_config["temperature"] = temperature
+                    if reasoning_effort and reasoning_effort != "none":
+                        interaction_config["thinking_level"] = reasoning_effort
+                    response = self.client.interactions.create(
+                        model=model_name,
+                        input=self._build_interactions_input(
+                            normalized_messages,
+                            attachments=binary_attachments,
+                        ),
+                        system_instruction="\n\n".join(
+                            part for part in (system_instruction, web_instruction) if part
+                        ),
+                        tools=[{"type": "google_search"}],
+                        generation_config=interaction_config,
+                        store=False,
+                    )
+                    endpoint = "interactions.create"
+                else:
+                    response = self.client.models.generate_content(
+                        model=model_name, contents=gemini_contents, config=config
+                    )
             except Exception as request_exc:
+                if web_search_enabled:
+                    raise
                 dropped_param, retry_config = self._build_retry_payload_without_unsupported_parameter(
                     config,
                     request_exc,
@@ -207,11 +273,38 @@ class GeminiClient(BaseAIClient):
             latency_ms = self._measure_latency(start_time)
 
             # Extract text
-            text = response.text if hasattr(response, "text") else ""
+            if endpoint == "interactions.create":
+                text, search_operations, search_sources = self._extract_interaction_search(
+                    response
+                )
+            else:
+                text = response.text if hasattr(response, "text") else ""
+                text, search_operations, search_sources = self._extract_grounding(
+                    response,
+                    text=str(text or ""),
+                )
 
             # Extract token usage
             token_usage = TokenUsage()
-            if hasattr(response, "usage_metadata"):
+            if endpoint == "interactions.create":
+                usage = field_value(response, "usage")
+                prompt_tokens = self._usage_int(field_value(usage, "total_input_tokens", 0))
+                output_tokens = self._usage_int(field_value(usage, "total_output_tokens", 0))
+                reasoning_tokens = self._usage_int(
+                    field_value(usage, "total_reasoning_tokens", 0)
+                )
+                cached_input_tokens = self._usage_int(
+                    field_value(usage, "total_cached_tokens", 0)
+                )
+                total_tokens = self._usage_int(field_value(usage, "total_tokens", 0))
+                token_usage = TokenUsage(
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=output_tokens,
+                    total_tokens=total_tokens or prompt_tokens + output_tokens,
+                    cached_input_tokens=cached_input_tokens,
+                    reasoning_tokens=reasoning_tokens,
+                )
+            elif hasattr(response, "usage_metadata"):
                 usage_metadata = response.usage_metadata
                 cached_input_tokens = self._usage_int(
                     getattr(usage_metadata, "cached_content_token_count", 0)
@@ -239,7 +332,12 @@ class GeminiClient(BaseAIClient):
                 )
 
             served_model = self._served_model(
-                getattr(response, "model_version", model_name), model_name
+                (
+                    field_value(response, "model", model_name)
+                    if endpoint == "interactions.create"
+                    else getattr(response, "model_version", model_name)
+                ),
+                model_name,
             )
 
             # Calculate cost
@@ -258,17 +356,28 @@ class GeminiClient(BaseAIClient):
 
             # Extract finish reason from Gemini response
             finish_reason_raw = None
-            if hasattr(response, "candidates") and response.candidates:
+            if endpoint == "interactions.create":
+                finish_reason_raw = field_value(response, "status")
+            elif hasattr(response, "candidates") and response.candidates:
                 candidate = response.candidates[0]
                 if hasattr(candidate, "finish_reason"):
                     finish_reason_raw = str(candidate.finish_reason)
 
             # Normalize finish reason
-            finish_reason = self._normalize_finish_reason(finish_reason_raw, provider="gemini")
+            finish_reason = self._normalize_finish_reason(
+                "stop" if str(finish_reason_raw or "").lower() == "completed" else finish_reason_raw,
+                provider="gemini",
+            )
 
             # Build raw response if requested
             raw = None
-            if save_full:
+            if save_full and endpoint == "interactions.create":
+                raw = (
+                    response.model_dump()
+                    if hasattr(response, "model_dump")
+                    else (response if isinstance(response, dict) else None)
+                )
+            elif save_full:
                 raw = {
                     "text": text,
                     "usage_metadata": (
@@ -300,6 +409,25 @@ class GeminiClient(BaseAIClient):
                 },
             )
 
+            metadata = {
+                "endpoint": endpoint,
+                "pricing_unknown": bool(cost.get("pricing_unknown", False)),
+                **build_web_search_metadata(
+                    provider="gemini",
+                    backend="google_search",
+                    requested_mode=str(web_search_policy.get("requested_mode") or "off"),
+                    effective_mode=(
+                        str(web_search_policy.get("mode") or "off")
+                        if web_search_enabled
+                        else "off"
+                    ),
+                    operations=search_operations,
+                    sources=search_sources,
+                ),
+            }
+            if adaptive_retry:
+                metadata["adaptive_retry"] = adaptive_retry
+
             return UnifiedResponse(
                 request_id=request_id,
                 text=text,
@@ -310,18 +438,7 @@ class GeminiClient(BaseAIClient):
                 estimated_cost=estimated_cost,
                 finish_reason=finish_reason,
                 error=None,
-                metadata=(
-                    {
-                        "endpoint": "models.generate_content",
-                        "adaptive_retry": adaptive_retry,
-                        "pricing_unknown": bool(cost.get("pricing_unknown", False)),
-                    }
-                    if adaptive_retry
-                    else {
-                        "endpoint": "models.generate_content",
-                        "pricing_unknown": bool(cost.get("pricing_unknown", False)),
-                    }
-                ),
+                metadata=metadata,
                 raw=raw,
                 **self._response_audit_fields(
                     served_model=served_model,
@@ -350,6 +467,189 @@ class GeminiClient(BaseAIClient):
             return self._create_error_response(
                 request_id=request_id, error=error, latency_ms=latency_ms, model=model_name
             )
+
+    @staticmethod
+    def _extract_grounding(
+        response: Any,
+        *,
+        text: str,
+    ) -> tuple[str, int, list[dict[str, str]]]:
+        candidates = sequence_value(field_value(response, "candidates", []))
+        if not candidates:
+            return text, 0, []
+        grounding = field_value(candidates[0], "grounding_metadata")
+        queries = sequence_value(field_value(grounding, "web_search_queries", []))
+        chunks = sequence_value(field_value(grounding, "grounding_chunks", []))
+        raw_sources: list[dict[str, str]] = []
+        chunk_urls: list[str] = []
+        for chunk in chunks:
+            web = field_value(chunk, "web", {})
+            url = str(field_value(web, "uri", "") or field_value(web, "url", "") or "")
+            title = str(field_value(web, "title", "") or "")
+            chunk_urls.append(url)
+            if url:
+                raw_sources.append({"url": url, "title": title})
+        sources = normalize_web_sources(raw_sources, limit=8)
+        annotations: list[dict[str, Any]] = []
+        for support in sequence_value(field_value(grounding, "grounding_supports", [])):
+            segment = field_value(support, "segment", {})
+            end_index = field_value(segment, "end_index")
+            for raw_index in sequence_value(
+                field_value(support, "grounding_chunk_indices", [])
+            ):
+                try:
+                    url = chunk_urls[int(raw_index)]
+                except (TypeError, ValueError, IndexError):
+                    continue
+                if url:
+                    annotations.append({"url": url, "end_index": end_index})
+        operations = len(queries)
+        if operations == 0 and sources:
+            operations = 1
+        return insert_numbered_citations(text, annotations, sources), operations, sources
+
+    @classmethod
+    def _build_interactions_input(
+        cls,
+        normalized_messages: list[dict[str, Any]],
+        *,
+        attachments: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        turns: list[dict[str, Any]] = []
+        last_user_index = max(
+            (
+                index
+                for index, message in enumerate(normalized_messages)
+                if str(message.get("role") or "").strip().lower() == "user"
+            ),
+            default=-1,
+        )
+        for index, message in enumerate(normalized_messages):
+            role = str(message.get("role") or "user").strip().lower()
+            if role == "system":
+                continue
+            content: list[dict[str, Any]] = [
+                {"type": "text", "text": cls._normalize_message_text(message)}
+            ]
+            if index == last_user_index:
+                for attachment in attachments:
+                    mime_type = str(attachment.get("mime_type") or "")
+                    content.append(
+                        {
+                            "type": "image" if mime_type.startswith("image/") else "document",
+                            "mime_type": mime_type,
+                            "data": attachment.get("data_base64") or "",
+                        }
+                    )
+            turns.append(
+                {
+                    "role": "model" if role == "assistant" else "user",
+                    "content": content,
+                }
+            )
+        return turns
+
+    @classmethod
+    def _extract_interaction_search(
+        cls,
+        response: Any,
+    ) -> tuple[str, int, list[dict[str, str]]]:
+        steps = sequence_value(field_value(response, "steps", []))
+        outputs = sequence_value(field_value(response, "outputs", []))
+        items = list(steps) if steps else list(outputs)
+        operations = 0
+        text_blocks: list[tuple[str, list[Any]]] = []
+        raw_sources: list[dict[str, str]] = []
+
+        def collect_content(content_items: Any) -> None:
+            nonlocal operations
+            for content in sequence_value(content_items):
+                content_type = str(field_value(content, "type", "") or "").lower()
+                if content_type == "google_search_call":
+                    arguments = field_value(content, "arguments", {})
+                    queries = sequence_value(field_value(arguments, "queries", []))
+                    operations += len([query for query in queries if str(query or "").strip()])
+                    continue
+                if content_type != "text":
+                    continue
+                block_text = str(field_value(content, "text", "") or "")
+                annotations = list(
+                    sequence_value(field_value(content, "annotations", []))
+                )
+                text_blocks.append((block_text, annotations))
+                for annotation in annotations:
+                    url = str(
+                        field_value(annotation, "url", "")
+                        or field_value(annotation, "uri", "")
+                        or field_value(annotation, "source", "")
+                        or ""
+                    ).strip()
+                    if not url.startswith(("http://", "https://")):
+                        continue
+                    raw_sources.append(
+                        {
+                            "url": url,
+                            "title": str(
+                                field_value(annotation, "title", "") or url
+                            ),
+                        }
+                    )
+
+        for item in items:
+            item_type = str(field_value(item, "type", "") or "").lower()
+            if item_type == "google_search_call":
+                arguments = field_value(item, "arguments", {})
+                queries = sequence_value(field_value(arguments, "queries", []))
+                operations += len([query for query in queries if str(query or "").strip()])
+            elif item_type == "google_search_result":
+                for result in sequence_value(field_value(item, "result", [])):
+                    url = str(field_value(result, "url", "") or "").strip()
+                    if url:
+                        raw_sources.append(
+                            {
+                                "url": url,
+                                "title": str(field_value(result, "title", "") or url),
+                            }
+                        )
+            elif item_type in {"model_output", "turn"}:
+                collect_content(field_value(item, "content", []))
+            else:
+                collect_content([item])
+
+        sources = normalize_web_sources(raw_sources, limit=8)
+        source_index = {
+            source["url"].casefold().rstrip("/"): index + 1
+            for index, source in enumerate(sources)
+        }
+        rendered_blocks: list[str] = []
+        for block_text, annotations in text_blocks:
+            normalized_annotations: list[dict[str, Any]] = []
+            for annotation in annotations:
+                url = str(
+                    field_value(annotation, "url", "")
+                    or field_value(annotation, "uri", "")
+                    or field_value(annotation, "source", "")
+                    or ""
+                ).strip()
+                if url.casefold().rstrip("/") not in source_index:
+                    continue
+                raw_end = field_value(annotation, "end_index")
+                try:
+                    byte_end = int(raw_end)
+                    char_end = len(block_text.encode("utf-8")[:byte_end].decode("utf-8", "ignore"))
+                except (TypeError, ValueError):
+                    char_end = len(block_text)
+                normalized_annotations.append({"url": url, "end_index": char_end})
+            rendered_blocks.append(
+                insert_numbered_citations(block_text, normalized_annotations, sources)
+            )
+
+        text = "".join(rendered_blocks).strip()
+        if not text:
+            text = str(field_value(response, "output_text", "") or "")
+        if operations == 0 and sources:
+            operations = 1
+        return text, operations, sources
 
     @classmethod
     def list_available_models(cls, api_key: str = None, **kwargs) -> None:

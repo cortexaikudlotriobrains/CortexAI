@@ -204,11 +204,22 @@ export async function ensureMode(page, mode) {
 /**
  * Set a boolean UI toggle to an exact state.
  *
- * This avoids tests accidentally double-toggling flags like Smart Routing,
- * Rewrite, or Web when a previous test or reload left the UI in a different state.
+ * This avoids tests accidentally double-toggling flags like Smart Routing or
+ * Improve when a previous test or reload left the UI in a different state.
+ * The removed Ask/Compare Web toggle remains a tolerated legacy selector while
+ * the live suite migrates to automatic provider-native search.
  */
 export async function setToggle(page, selector, desired) {
     const locator = page.locator(selector);
+    if (selector === "#routeResearchBtn" && await locator.count() === 0) {
+        return;
+    }
+    let openedOptions = false;
+    if (selector === "#routeOptimizeBtn" && await locator.count() === 0) {
+        const options = page.locator("#composerOptionsBtn");
+        await clickWithInterceptionFallback(options);
+        openedOptions = true;
+    }
     const expectedValue = desired ? "true" : "false";
     const deadline = Date.now() + 12_000;
 
@@ -222,6 +233,9 @@ export async function setToggle(page, selector, desired) {
     }
 
     await expect(locator).toHaveAttribute("aria-checked", expectedValue);
+    if (openedOptions) {
+        await clickWithInterceptionFallback(page.locator("#composerOptionsBtn"));
+    }
 }
 
 /**

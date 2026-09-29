@@ -62,6 +62,14 @@ FRONTEND_DIR=frontend-react/dist
 # PROMPT_OPTIMIZER_TEMPERATURE=0.2
 # On-demand Compare synthesis model (requires OPENAI_API_KEY)
 # CORTEX_ANALYSIS_MODEL=gpt-5.4-mini
+# Ask/Compare provider-native web search
+# NATIVE_WEB_SEARCH_MODE=enabled
+# NATIVE_WEB_SEARCH_PROVIDERS=openai,claude,gemini,grok,deepseek
+# COMPARE_NATIVE_WEB_SEARCH_ENABLED=true
+# DEEPSEEK_AGENTIC_SEARCH_ENABLED=true
+# WEB_SEARCH_MAX_OPERATIONS=3
+# WEB_SEARCH_MAX_DISPLAY_SOURCES=8
+# DEEPSEEK_WEB_SEARCH_MAX_RESULTS=5
 # Optional Tavily search-option resolver
 # TAVILY_ENHANCED_SEARCH_ENABLED=true
 # TAVILY_CHUNKS_PER_SOURCE=3
@@ -108,12 +116,12 @@ If `FRONTEND_DIR` is unset, `server/app.py` serves `frontend-react/dist`. Set th
 - Explicit frontend fresh sign-in starts an empty new chat session; browser refreshes, Chrome tab reload/resume, same-browser reauth, and explicit History selections continue the selected thread.
 - React posts non-sensitive lifecycle diagnostics to `/v1/client-diagnostics`; backend logs them as `frontend.diagnostic` events so production refresh reports can be separated into reload/navigation, tab discard, back/forward cache restore, long main-thread task, or frontend error cases.
 - React attachment UX reads `directAttachmentUploads` and `legacyAttachmentUploads` from `/runtime-config.js`, which mirror the backend rollout flags. In direct mode it validates the complete selection locally from server entitlements, renders immediate per-file Preparing/Uploading/Processing/Ready state, authorizes metadata through `POST /v1/files/upload-intents`, sends bytes to S3 with header-free `XMLHttpRequest` forms, and calls `POST /v1/files/{file_id}/complete` only after S3 succeeds. Two transfers run concurrently; failures and retries are per-file, polling is bounded, removal aborts and deletes, and Ask/Compare Send is blocked until all selected files are Cortex-verified `ready`. With direct mode off, the same queue UI temporarily uses multipart `POST /v1/files/upload-batch` while `ATTACHMENTS_LEGACY_PROXY_UPLOAD_ENABLED=true`. Upload/storage remains free.
-- React Ask and Compare use the same `Web` globe toggle, default it on for new page sessions, and let users turn it off for the current page session. Compare streams `/v1/compare/stream` events into per-model response columns.
+- React Ask and Compare omit a Web toggle and submit `routing.web_mode=auto`; prompt intent or an API-level override controls search. Compare streams `/v1/compare/stream` events into per-model response columns.
 - React Ask always loads active selectable models from authenticated `/v1/model-options`, independently of `ENABLE_MODELS_CATALOG`, and waits for its response plus `/v1/entitlements` before initializing its manual model. Turning Smart routing off shows the plan default: Free uses `openai:gpt-5.6-luna`, Plus uses `claude:claude-sonnet-4-6`, and Pro uses `openai:gpt-5.6-terra`. Valid existing/manual selections remain unchanged.
 - React Compare keeps every selected response visible in a responsive grid without horizontal response scrolling on desktop and tablet widths: three columns on wide desktop, two at tablet widths, and stacked tall cards at the app's tablet/mobile shell breakpoint. Phone-sized mobile uses a segmented model switcher, shows one selected response card at a time in natural page flow, and elevates the stuck switcher into a frosted provider-tinted bar without changing model-pill horizontal positions.
 - Model headers and action footers remain fixed inside each desktop/tablet Compare card while only the answer body scrolls. The transcript reserves bottom breathing room above the persistent composer so the input area does not compress the reading workspace.
 - React Compare uses the same right-aligned user-message bubble as Ask mode and keeps aggregate totals in a separate compact row. Model cards show a friendly model name with the exact API model ID, use compact icon actions, and reserve most of the column height for response content.
-- React Ask and Compare use one rounded composer shell with a borderless textarea that starts at one line and auto-grows to a bounded height, attachment chips above a shared bottom toolbar, and a fixed-size send action. Attach is followed by Smart, Web, and Improve in Ask, and by Web and Improve in Compare; Compare no longer places Web beside the model selectors. The same ordering applies on desktop and mobile, with compact narrow-phone sizing that keeps every action visible without horizontal page overflow. Mode changes use the app navigation; the composer does not duplicate the Ask/Compare switch. Compare model selectors remain in a compact options row above the textarea and scroll horizontally on narrow screens when needed.
+- React Ask and Compare use one rounded composer shell with a borderless textarea that starts at one line and auto-grows to a bounded height, attachment chips above a shared bottom toolbar, and a fixed-size send action. Ask orders Attach, Smart Ask, a sliders-style More options button, then Send; Compare orders Attach, the same options button, then Send. One options dialog presents Improve prompt as a switch and `Auto|Low|Medium|High|Maximum` Reasoning as an inline radiogroup. Desktop/tablet anchor it above the composer; phones below 768px use a modal bottom sheet with a backdrop, grabber, focus trap, and drag/Escape dismissal. Enabled Improve and explicit non-Auto Reasoning appear as individually removable chips; Auto has no status chip, and narrow phones place the chip stack on its own row. Ask/Compare do not render a Web control. Mode changes use the app navigation; the composer does not duplicate the Ask/Compare switch. Compare model selectors remain in a compact options row above the textarea and scroll horizontally on narrow screens when needed.
 - The React composer shell keeps a transparent structural border to prevent layout movement and uses soft elevation rather than a visible rectangular outline. Textarea focus suppresses the browser outline and increases the shell shadow on desktop and mobile.
 - Empty React Ask and Compare workspaces keep their input surfaces on one desktop/tablet vertical center line, with only a small mode-specific greeting above the composer. Mobile places that greeting one-quarter down from the viewport top while retaining the bottom-sheet composer. The greeting disappears and the composer docks after the first turn.
 - The empty React Work workspace keeps its differently shaped goal surface on the same desktop/tablet center line while retaining the `Start a task` introduction and editable example prompts above it. Mobile keeps the compact Work introduction, aligns `Start a task` to the same one-quarter viewport line as Ask and Compare, and docks the goal composer immediately above the fixed navigation.
@@ -121,10 +129,10 @@ If `FRONTEND_DIR` is unset, `server/app.py` serves `frontend-react/dist`. Set th
 - Mobile uses a persistent square-pen header action to start a new session from Ask, Compare, or History. The action cancels active generation, clears the current thread, returns to chat, and preserves the selected mode; the History panel does not render a separate New chat button.
 - Frontend Compare selectors keep at least two active models and send only active selected models in compare requests. Initial empty slots wait for `/v1/entitlements` and use only `/v1/model-options` rows whose billing class is allowed by the effective plan. Within the eligible set, the default resolver prefers `openai:gpt-5.6-luna` plus `claude:claude-sonnet-5`, and Add Model prefers `deepseek:deepseek-v4-flash`. Remove controls appear with three active models and compact whichever two remain after any slot is removed.
 - React manual Ask and Compare controls render through the same accessible provider-first model picker. It opens with provider logos and model counts. On fine-pointer desktop layouts, hovering a provider immediately reveals its readable model labels, exact IDs, credit-use hints, locks, and active state in an adjacent panel; the preview remains stable while crossing panels, switches on another provider hover, and dismisses shortly after leaving the picker. Click plus Right/Left Arrow remain accessible fallbacks. Touch/mobile layouts use a compact tap-to-model drill-down with Back. The viewport-positioned body portal prevents Compare's horizontally scrollable model row from clipping either layout. Compare supplies duplicate-selection prevention and removal behavior; synchronized hidden native selects preserve existing Playwright selectors and `selectOption` flows.
-- Frontend Compare response cards use restrained model headings, compact Markdown paragraph/list spacing, compact footers, and a packed mono metric strip for completed duration and AI-credit usage; success/error counts and aggregate AI-credit usage remain in the summary bar without token totals.
-- React composer feature chips provide legacy-compatible explanatory tooltips for Smart, Web, and Improve in Ask and Compare. Ask and Compare use the same Web label and globe icon. Enabled chips use a theme-aware high-contrast fill, label, and accent ring so their state remains clear in light and dark themes. Compare's Web and Improve controls use the same background, border, label, and shadow treatment whenever they share the same toggle state. The descriptions are associated through `aria-describedby`, open on hover or keyboard focus, and remain viewport-contained on mobile. A touch tap toggles the chip and keeps its tooltip visible for two seconds.
+- Frontend response cards use restrained model headings, compact Markdown paragraph/list spacing, compact footers, and a packed mono metric strip for response-start duration and AI-credit usage. Completed successful Smart Ask cards append the normalized effective `Low|Medium|High|Max reasoning` effort with an accessible level-specific color; manual Ask, Compare, failed/loading cards, and Work omit it. Compare success/error counts and aggregate AI-credit usage remain in the summary bar without token totals.
+- The React Smart Ask chip provides an accessible explanatory tooltip and a theme-aware enabled state. More options is exposed as a dialog trigger; Improve is a labelled switch and Reasoning is a keyboard-operable radiogroup whose unsupported levels remain disabled with explanations. The options surface omits allowance counts, supports outside-click and Escape dismissal with focus restoration, and announces setting changes through a polite live region.
 - React desktop top mode navigation pairs the existing Ask/Compare/Work sidebar glyphs with each label, keeps active and inactive states legible in both light and dark themes, and uses a theme-accent underline for the selected mode. The glyphs remain hidden at iPad widths to preserve the established tablet layout.
-- Mobile and desktop completed response-card duration and AI-credit usage appear directly in the header without a run-details chevron. Loading and failed cards keep a muted elapsed/status line visible on mobile and desktop. The frontend displays the same UI-observed elapsed duration when live timestamps are available and falls back to API `latency_ms` for restored rows. Token usage remains in the API response and React data layer for persistence and reporting but is not rendered on Ask or Compare results.
+- Mobile and desktop response-start duration and AI-credit usage appear directly in the header without a run-details chevron. Loading and failed cards keep a muted elapsed/status line visible on mobile and desktop. For a live stream, the frontend freezes each card's elapsed timer when its first renderable response content reaches the UI and retains that time-to-first-visible-content value after completion; restored rows fall back to persisted completion timing or API `latency_ms`. Token usage remains in the API response and React data layer for persistence and reporting but is not rendered on Ask or Compare results.
 - React response headers reuse the model picker's shared provider-logo and model-presentation resolver, including the provider-initial fallback when an image is unavailable.
 - React retains `/models` behind `ENABLE_MODELS_CATALOG=true`. The default disabled state hides its sidebar/account-menu links and redirects direct navigation to Ask; the implementation remains available for a later rollout.
 - Ask/Compare use session-authenticated `/v1/model-options` for active selectable rows in every catalogue-flag state. The retained rich catalogue contains 21 models; when `ENABLE_MODELS_CATALOG=true`, `/v1/models` additionally exposes canonical registry rows and their official pricing/lifecycle evidence.
@@ -135,12 +143,13 @@ If `FRONTEND_DIR` is unset, `server/app.py` serves `frontend-react/dist`. Set th
 - `server/billing/enforcement_service.py` composes effective-plan resolution, entitlement evaluation, atomic reservation, and output-aware settlement/release for DB-mode Ask, Compare, Optimize, Cortex Analysis, and attachment-backed model calls. `server/persistence.py` owns the short committing units of work; no billing transaction remains open during a provider, optimizer, or object-storage call.
 - `BILLING_ENABLED=false` keeps valid Cortex grants effective, falls back to Free for other users, keeps Stripe lazy, and makes Checkout, Portal, and webhook routes return `503 billing_not_configured`. `DEV_SUBSCRIPTION_PLAN` works only when billing is disabled and the runtime is explicitly local/development. The `unrestricted` development value additionally requires `DEV_SUBSCRIPTION_BYPASS_ENABLED=true`; prefer the guarded `run_app.py --subscription-plan unrestricted` entrypoint.
 - With billing enabled, startup validates the secret key, webhook signing secret, paid-plan Price IDs, server redirect URLs, and optional API version. The API rejects client-supplied Price IDs, amounts, currencies, Customer IDs, and redirects. `server/billing/webhook_service.py` makes verified Stripe Checkout/subscription/invoice state authoritative, locks provider-event retries, rejects stale snapshots, preserves usage counters across same-period changes, and delegates paid/grace/cancellation access to `subscription_service.py`.
-- `/v1/chat`, `/v1/chat/stream`, `/v1/compare`, and `/v1/compare/stream` calculate one effective output limit and use it for both provider execution and credit reservation. They settle actual successful input/output credits and release unused estimates and failed targets. Advanced Web Search reserves 10,000 Cortex credits for the normal two-credit Tavily call, then settles `provider credits used x 5,000`; missing Tavily usage falls back to two credits and is marked estimated. Cached/session-reused research is free for the turn. Compare shares retrieval and performs aggregate partial settlement. Improve Prompt reserves all configured attempts and settles each billable usage item. Cortex Analysis reserves and settles its source-context synthesis as a separate unified-wallet call without charging again for reused Compare research. Upload/storage itself is free.
+- `/v1/chat`, `/v1/chat/stream`, `/v1/compare`, and `/v1/compare/stream` calculate one effective output limit and use it for both provider execution and credit reservation. They settle actual successful input/output credits and release unused estimates and failed targets. Provider-native search reserves up to three operations per model target, settles reported operations as tool items up to that cap, and releases the balance. Compare search and citations remain target-local. Improve Prompt reserves all configured attempts and settles each billable usage item. Cortex Analysis reserves and settles its source-context synthesis as a separate unified-wallet call with search disabled. Upload/storage itself is free.
 - Cache-aware accounting partitions reported prompt usage into normal, cached-read, and cache-write tokens, applies effective provider-price ratios to the existing Cortex input multiplier, and falls back to the full multiplier when pricing evidence is absent. The canonical calculator feeds settlement, response DTOs, and history. Initial rollout computes `cache_aware_shadow_total`, `legacy_total`, and their delta while `CACHE_AWARE_CREDIT_SETTLEMENT_ENABLED=false` keeps legacy settlement authoritative.
 - Provider caching, persistent research reuse, optimizer/Cortex reuse, credit-aware ceilings, and context compaction are independently flag-controlled. Affinity identifiers are HMAC-SHA256 values derived with `CACHE_KEY_SECRET`; raw session, user, prompt, and file content never appears in cache keys or cache telemetry.
 - Ask/Compare consumer-credit settlement and response DTO statistics use the canonical requested model even when a provider reports a versioned served-model snapshot. Served/pricing identities remain available for response audit and provider-cost calculation. Per-model response credits, aggregate Compare credits, and itemized ledger charges therefore use the same multipliers, and one provider snapshot cannot prevent the other successful Compare targets from producing ledger rows. Any finalization failure releases and unregisters the reservation instead of leaving it heartbeat-active.
 - Focused validation: `python -m pytest tests/test_billing_metering.py tests/test_billing_entitlements.py tests/test_stripe_billing.py tests/test_stripe_webhooks.py tests/test_baseline_safety_rails.py tests/test_fastapi_contract_and_guardrails.py -q`. Use `BILLING_TEST_DATABASE_URL` with `tests/test_billing_postgres_integration.py` for real row-lock concurrency coverage.
 - `/v1/model-options` remains available to session-authenticated clients when the rich catalogue is disabled. `/v1/models?enabled_only=true` returns `404 Not Found` by default; set `ENABLE_MODELS_CATALOG=true` to expose the retained selectable/full catalogue contract again without restoring code.
+- Model catalogue rows expose native reasoning metadata plus normalized `reasoning_levels`, `default_reasoning_level`, and `reasoning_controllable` fields. React uses the normalized fields to drive the inline Reasoning radiogroup in the composer More options dialog; provider aliases remain a server concern.
 - Pending Ask and Compare cards show independent contextual loading blocks with a compact thought orb and skeleton lines. Source-enabled requests use the orb's `searching` treatment; other pending requests use its neutral `working` treatment, while the existing text remains the authoritative status. A card removes its loading state on its first streamed token or error without waiting for the other Compare targets, and motion respects `prefers-reduced-motion`.
 - Smart Ask pending cards remain model-neutral because the `start` provider/model is a routing preview that can differ after research and runtime context are applied. They show `Smart routing` while waiting and adopt the authoritative provider/model from `response_done`.
 - Frontend response card controls render as a minimal icon row for copy, regenerate, and feedback actions. Copy shows a brief visible success confirmation in the toolbar. Regenerate uses the existing `/v1/chat/stream` path, refills the clicked response card in place, and preserves the original source-enabled flag. Compare card regeneration is intentionally single-target so clicking one card does not rerun or replace the other comparison cards.
@@ -355,9 +364,9 @@ diagnostics, cleanup verification, smoke tests, rollout, and rollback.
 - `request_group_id` is optional and is populated for Compare target rows.
 - One Ask turn produces one row.
 - One Compare turn produces one row per target model; all target rows from that turn share the same `request_group_id`.
-- Completed rows include `prompt_tokens`, `completion_tokens`, `ai_credits`, `credit_usage_estimated`, `research_ai_credits`, and `research_credit_usage_estimated`. The credit values are the persisted response-card snapshot; React uses the shared research component once when rebuilding a Compare aggregate. Legacy rows without a snapshot derive their model-credit value from persisted token counts.
+- Completed rows include `prompt_tokens`, `completion_tokens`, `ai_credits`, `credit_usage_estimated`, `research_ai_credits`, and `research_credit_usage_estimated`. The persisted `ai_credits` snapshot includes that response's provider-native search tool charge; the separate research fields remain for legacy shared Tavily rows and are counted once when rebuilding an old Compare aggregate. Legacy rows without a snapshot derive model credits from persisted token counts.
 - Completed rows also expose `cached_input_tokens`, `cache_write_tokens`, `reasoning_tokens`, `cache_hit`, `cache_hit_ratio`, `cache_savings_ai_credits`, and `uncached_equivalent_ai_credits`. Savings remain informational; `ai_credits` is authoritative.
-- Completed model responses retain `requested_model`, provider-reported `served_model`, `pricing_model`, lifecycle/alias resolution, reasoning mode, cached-input/cache-write/reasoning token detail, and the exact pricing rule/version. History returns the identity and pricing-evidence fields needed to explain old charges after the live catalogue changes.
+- Completed model responses retain `requested_model`, provider-reported `served_model`, `pricing_model`, lifecycle/alias resolution, reasoning mode, effective reasoning effort, `routing_mode`, cached-input/cache-write/reasoning token detail, and the exact pricing rule/version. History returns the identity, Smart-versus-explicit routing mode, and pricing-evidence fields needed to reconstruct response-card metadata and explain old charges after the live catalogue changes.
 - If an exact served-model price is absent, the calculator uses the provider's highest current configured rate, marks `pricing_unknown=true`, and persists the full price snapshot; it never turns an unknown model into a zero-dollar response.
 - The React client groups sidebar items by `session_id`, reconstructs Compare turns by `request_group_id` when a thread is selected, and persists the active thread id as `cortex_active_session_id` so startup can restore the same transcript after a browser refresh/remount.
 - `PATCH /v1/history/session/{session_id}` accepts `{"title":"..."}` to rename one user-owned session. The title is trimmed, limited to 120 characters, and persisted without changing latest-activity ordering.
@@ -451,7 +460,7 @@ React exposes `/pricing` for the public Free/Plus/Pro catalogue and `/account/bi
 
 The API, database, ledger, reservations, and React state retain raw integer AI-credit units. Customer-facing React surfaces use `frontend-react/src/utils/aiCredits.ts` to display one AI credit per 1,000 raw units: Free/Plus/Pro therefore render 100/1,000/3,000 AI credits while the API contracts remain 100,000/1,000,000/3,000,000. Balances, allowance meters, response/Compare usage, itemized activity, structured insufficient-credit messages, and Work budgets use the same formatter. React still sends raw Work budgets and other credit-bearing request values back to the API.
 
-React model/composer/file locks are user-experience controls only. Model controls combine live `/v1/model-options` metadata with live entitlements in every rich-catalogue flag state; enabling `ENABLE_MODELS_CATALOG` additionally restores the standalone Models screen and `/v1/models`. Backend request enforcement remains authoritative in both states. Prompt text and attachments are cleared only after a stream is accepted, so a preflight denial remains editable; restored historical responses are not filtered after downgrade. After an active Ask or Compare stream settles, React reloads `/v1/entitlements` so the Web and Improve tooltip balance reflects the newly settled usage without navigation or a browser refresh. The AI credits route shows the unified allowance separately from the provider token/cost analytics on Usage & insights. Its credit history groups itemized API rows by `activity_id` into one card with the original pre-optimization question and total first; Prompt Optimizer and the following Ask/Compare share that display key. When both exist, the native expandable breakdown presents their combined credits as one `Final optimized ... answer` line and explicitly identifies the included optimizer attempts and final answer generation. Optimizer-only activity remains identifiable, Compare/Cortex Analysis/Web Search charges remain understandable, optimizer retries are aggregated, zero-credit adjustments stay out of the visible breakdown, and an explicit fallback covers legacy or privacy-policy-limited activity with no query.
+React model/composer/file locks are user-experience controls only. Model controls combine live `/v1/model-options` metadata with live entitlements in every rich-catalogue flag state; enabling `ENABLE_MODELS_CATALOG` additionally restores the standalone Models screen and `/v1/models`. Backend request enforcement remains authoritative in both states. Once a submission passes client-side checks, React clears the prompt and attachments immediately while keeping the optimistic user bubble visible; cancellation during Improve or rejection before stream acceptance restores that composer content so it remains editable. Restored historical responses are not filtered after downgrade. After an active Ask or Compare stream settles, React reloads `/v1/entitlements` so the balance and Improve allowance reflect newly settled usage without navigation or a browser refresh. The AI credits route shows the unified allowance separately from the provider token/cost analytics on Usage & insights. Its credit history groups itemized API rows by `activity_id` into one card with the original pre-optimization question and total first; Prompt Optimizer and the following Ask/Compare share that display key. When both exist, the native expandable breakdown presents their combined credits as one `Final optimized ... answer` line and explicitly identifies the included optimizer attempts and final answer generation. Optimizer-only activity remains identifiable, Compare/Cortex Analysis/Web Search charges remain understandable, optimizer retries are aggregated, zero-credit adjustments stay out of the visible breakdown, and an explicit fallback covers legacy or privacy-policy-limited activity with no query.
 
 Session-scoped endpoints are session-scoped:
 - `/v1/chat*`
@@ -550,7 +559,7 @@ Common request fields used by Ask and Compare:
   },
   "routing": {
     "smart_mode": true,
-    "research_mode": false
+    "web_mode": "auto"
   },
   "generation": {
     "profile": "auto",
@@ -562,10 +571,11 @@ Common request fields used by Ask and Compare:
 
 Notes:
 - `routing.smart_mode` defaults to `true`.
-- `routing.research_mode` is a boolean in the current API contract, not `"off|auto|on"`.
+- `routing.web_mode` is `off|auto|required`; `on` is accepted as a required-search alias. Legacy `routing.research_mode: true|false` remains compatible and maps to required/off.
+- In auto mode, explicit/current-information prompts require search, explicit no-browse prompts disable it, and ordinary prompts leave the tool decision to the selected provider.
 - Ask and Compare can reuse the same `session_id`; session continuity is shared across both modes.
 - `generation.profile` is `auto|quick|balanced|deep|extended`. Auto selects 4K for normal economical/standard calls, 8K for advanced reasoning models, and 12K for premium or deterministically complex/detailed tasks. Explicit Quick/Balanced/Deep/Extended use 1K/4K/12K/32K before model/context/affordability limits. `generation.max_output_tokens` is the mutually exclusive custom alternative. `generation` cannot be combined with legacy `max_tokens`.
-- Omitted API requests use Quick/1K. React sends Auto explicitly and exposes no Answer depth selector or live hold estimate; requested answer detail belongs in the prompt. Unsafe explicit ceilings and unsupported reasoning combinations return `422 invalid_generation_budget`.
+- Omitted API requests use Quick/1K. React sends Auto output capacity explicitly and exposes `Auto|Low|Medium|High|Maximum` reasoning, but no output-token profile or live hold estimate. Smart defaults Auto and uses a manual effort as a routing constraint; manual Ask defaults to the model's lowest supported level; Compare permits only levels shared by every target. Requested answer detail still belongs in the prompt. Unsafe explicit ceilings and unsupported reasoning combinations return `422 invalid_generation_budget`.
 - Claude reasoning controls follow the selected model's registry declaration. Claude 4.6 and supported Claude 5 models use adaptive thinking; the manual-budget-only Claude 4.5 family defaults to normal generation and returns `422 invalid_generation_budget` for explicit reasoning-on. Claude custom temperature is omitted when Anthropic requires default sampling, including adaptive-thinking and Claude 5 requests.
 - If `session_id` is omitted in DB mode, the backend may resolve the user's most recent active session.
 - The browser UI avoids that fallback on explicit fresh login by marking `cortex_fresh_login_pending`, consuming the backend `fresh_login=1` callback marker, clearing the stored active thread id, and sending `new_session=true` for the first turn after sign-in.
@@ -599,7 +609,7 @@ Prompt optimization:
   "model": "string (optional when provider is set)",
   "routing": {
     "smart_mode": true,
-    "research_mode": false
+    "web_mode": "auto"
   },
   "context": {
     "session_id": "string (optional)",
@@ -620,7 +630,7 @@ Rules:
 - If `model` is provided, `provider` is required.
 - In manual Ask mode, `provider` + `model` gives deterministic targeting.
 - With `routing.smart_mode=true`, Ask uses the smart orchestration path.
-- With `routing.research_mode=true`, Ask uses orchestrator-managed web research with fresh sources for the current turn.
+- With `routing.web_mode=auto`, Ask applies the server intent policy and then lets the selected provider decide on ordinary prompts. `required` forces search and `off` disables it.
 - The resolved effective generation ceiling is used unchanged for provider execution and credit authorization.
 - Provider-neutral `temperature` remains optional. For Claude, the adapter forwards it only to Claude 4.5/4.6 requests with thinking off; incompatible values are omitted so Anthropic uses its required default sampling.
 
@@ -633,6 +643,7 @@ Rules:
   "text": "string",
   "provider": "string",
   "model": "string",
+  "routing_mode": "smart|explicit|null",
   "latency_ms": 1234,
   "token_usage": {
     "prompt_tokens": 100,
@@ -677,12 +688,14 @@ Rules:
 
 Notes:
 - `start` includes the routed preview `provider` and `model`, plus `session_id`, `research_mode`, and an initial `web_source_items` array. Smart-mode clients should not present the preview as the final selected model.
-- `response_done` includes the full `ChatResponseDTO`, including `session_id` and `web_source_items`.
+- `response_done` includes the full `ChatResponseDTO`, including `session_id`, authoritative `routing_mode`, effective generation/reasoning budget, and `web_source_items`.
 - `done` includes the resolved `session_id`.
 - `heartbeat` carries elapsed timing while provider work is pending. It keeps
   the HTTP response body active, is ignored by the React UI, and does not call
   provider APIs or consume model tokens.
 - Server logs emit `chat.stream.*` lifecycle events from inside the response body generator, including provider-call start/completion and terminal stream reason.
+- Terminal `error` includes `code`, customer-safe `message`, `retryable`, and
+  `request_id`; implementation exception text is never written to the stream.
 
 ## Compare API
 
@@ -697,7 +710,7 @@ Notes:
   ],
   "routing": {
     "smart_mode": true,
-    "research_mode": false
+    "web_mode": "auto"
   },
   "context": {
     "session_id": "string (optional)",
@@ -719,8 +732,8 @@ Rules:
 - 2 to 3 targets at the API boundary. Free and Plus allow 2; Pro allows 3.
 - Compare always uses explicit targets.
 - `routing.smart_mode` is ignored in compare mode by design.
-- With `routing.research_mode=true`, research runs once per compare turn and is shared across all selected targets for fairness.
-- Browser Ask and Compare send `routing.research_mode=true` by default because their shared `Web` toggle starts on; users can turn it off for the current page session.
+- With `routing.web_mode=auto`, every Compare target independently receives its provider's own search tool and preserves its own source set. DeepSeek alone executes the backend Tavily tool loop.
+- Browser Ask and Compare have no Web toggle and submit `routing.web_mode=auto`. A prompt can explicitly request search or say “without browsing”; API clients can send `required|off` directly.
 - A target may provide its own `generation` object; it overrides the shared Compare generation value for that target only.
 - Each Claude target independently receives only the thinking, effort, and temperature fields supported by that model generation.
 
@@ -792,6 +805,7 @@ Notes:
 - `heartbeat` may appear while Compare targets are pending and has the same
   keep-alive semantics as chat streaming.
 - Server logs emit `compare.stream.*` lifecycle events from inside the response body generator, including per-target provider-call progress and terminal stream reason.
+- Terminal `error` uses the same structured public fields as the Chat stream.
 
 ### Cortex Analysis API
 
@@ -823,8 +837,8 @@ reopening. It shows the newest analysis by default and exposes all prior runs
 through Analysis history. Creation and regeneration are new synthesized model
 calls charged against the unified AI-credit wallet; there is no separate Cortex
 quota. The reservation includes the Compare question and successful source
-responses with a 1,800-token output ceiling. Existing Compare research is reused
-without another Tavily charge. React formats `aiCredits` with the shared
+responses with a 1,800-token output ceiling. Existing per-response Compare sources and search metadata are reused
+with web search disabled for synthesis, so no second search charge is added. React formats `aiCredits` with the shared
 display-credit conversion and shows it in the analysis header. Historical runs
 remain readable after downgrade.
 
@@ -846,6 +860,8 @@ psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260807_add_
 psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260811_add_direct_s3_attachment_upload.sql
 psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260820_add_cortex_work_mode.sql
 psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260829_add_work_web_output_and_model_identity.sql
+psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260905_add_subscription_grants.sql
+psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260927_add_tool_credit_transaction_item.sql
 ```
 
 The first Cortex Analysis migration adds Compare response revision metadata and
@@ -858,7 +874,7 @@ itself remains implemented in persistence/session resolution logic.
 
 The billing foundation, Cortex revision table, unified-credit ledger,
 reservation-activity migration, model-pricing audit migration, Cortex
-attribution migration, generation-budget audit migration, cache-aware accounting migration, and direct-S3 attachment lifecycle migration are all required. They are additive and
+attribution migration, generation-budget audit migration, cache-aware accounting migration, direct-S3 attachment lifecycle migration, and provider-native search tool-item migration are all required. They are additive and
 idempotent under the repository migration convention. PostgreSQL startup checks
 the required tables and columns and fails before serving provider routes when a
 migration is missing. See `docs/runbooks/db-migrations.md` for verification and
@@ -875,13 +891,16 @@ GPT-5.6 and Codex-family models use the Responses API with `max_output_tokens` a
 
 ## Research Behavior
 
-- Web research is orchestrator-managed.
-- When `routing.research_mode=true`, Ask performs a fresh research pass for the current turn.
-- When `routing.research_mode=true`, Compare performs one shared research pass for the compare turn.
-- Injected sources are primary evidence for current/source-dependent facts; models may still use non-conflicting baseline knowledge for background context.
+- Ask and Compare use provider-native web search when `NATIVE_WEB_SEARCH_MODE=enabled`.
+- `routing.web_mode=auto` is the browser default. The server maps current-information or explicit search prompts to required, explicit no-browse prompts to off, and leaves ordinary prompts in provider-decides auto mode.
+- OpenAI uses Responses `web_search`; Claude uses `web_search_20250305`; Gemini uses Interactions `google_search`; Grok uses Responses `web_search`; DeepSeek receives a local search function backed by Tavily.
+- Compare search is independent per target. Results from one provider are never injected into another model's request.
+- Each model request is capped at three billable search operations, each response displays at most eight deduplicated sources, and each DeepSeek/Tavily operation returns at most five results. OpenAI, Claude, Grok, and DeepSeek enforce the cap at the request/tool-loop boundary. Gemini's managed Google Search tool has no exact query-count request field, so Cortex supplies the three-query instruction, audits any provider-reported overrun, and never bills above the product cap.
+- Cortex Analysis receives the source/search metadata attached to each response but invokes its synthesis model with web search off.
 - Successful provider answers are not scanned or replaced using phrase, number, date, or citation heuristics. When research is disabled, non-empty answers are returned as generated by the selected models.
 - Response payloads expose normalized source metadata through `web_source_items`.
-- Query sanitization anchors underspecified follow-up searches to the previous user topic when the current prompt omits that topic.
+- Search settlement uses immutable `item_type=tool` rows and charges reported operations up to the three-operation product cap in addition to model tokens: OpenAI 10,000 Cortex credits, Claude 10,000, Gemini 14,000, Grok 5,000, and DeepSeek/Tavily 10,000 per operation. Preflight reserves the cap and releases unused capacity.
+- `NATIVE_WEB_SEARCH_MODE=off|shadow` retains the legacy shared-research path. Legacy `routing.research_mode` and query sanitization remain available for compatibility/rollback.
 - Tavily search calls use a deterministic local resolver with fixed retrieval params: `max_results=5`, `search_depth=advanced`, `chunks_per_source=1..3` (default `3`), `include_raw_content=false`, `include_answer=false`, and `auto_parameters=false`.
 - With `TAVILY_ENHANCED_SEARCH_ENABLED=true`, the resolver may add Tavily `topic` for `finance`/`news`, a bounded `time_range`, country targeting only when no topic is sent, and curated finance domain allowlists for Canada, US, US SEC filings, and UK economic queries.
 - The resolver does not rewrite queries. Prompt optimization and query sanitization remain separate layers before the Tavily client receives its query string.
@@ -896,6 +915,9 @@ Applied in `server/utils.py`:
 - Empty length-limited responses remain successful-but-incomplete billable work, even when reasoning consumed the allowance before visible output. Unexplained empty successes still normalize to provider errors.
 - Provider-native availability failures are sanitized before DTO/stream output. Upstream 503/high-demand/overloaded errors are tagged as `error.details.kind="transient_capacity"` and rendered as `This model is temporarily busy. Try again shortly or switch to another model.` instead of raw provider JSON.
 - Smart Ask keeps the existing automatic fallback loop for retryable provider failures. Manual Ask and Compare keep the user-selected model targets and return safe per-model errors when those explicit targets are unavailable.
+- Unhandled API failures return `{"detail":{"code":"internal_error","message":"...","retryable":true,"request_id":"..."}}`; the raw exception remains in correlated server logs. Ask/Compare stream failures emit those same four fields in the terminal NDJSON `error` event instead of `str(exc)`.
+- React normalizes transport errors by stable code, HTTP status, and operation context in `frontend-react/src/errors/userFacingError.ts`. UI surfaces never render an arbitrary backend `detail`, exception message, Work `error_message`, or persisted provider error directly. They show contextual recovery copy and expose `request_id` only as an optional support code.
+- History responses include nullable `error_code` from `llm_responses.error_type`, allowing restored response cards to preserve the safe failure category without replaying stored exception text.
 - CortexAI does not attempt to determine whether a non-empty successful LLM answer is fabricated. Web research provides optional grounding; provider-native safety/filter outcomes remain authoritative.
 
 Security/logging:

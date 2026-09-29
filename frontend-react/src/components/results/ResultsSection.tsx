@@ -445,6 +445,10 @@ function responseSwitcherTone(providerRaw: string, fallbackColor: string) {
 
 function responseDurationMs(response: ChatTurn["responses"][number]) {
   const startedAtMs = parseTimestamp(response.started_at);
+  const firstVisibleAtMs = parseTimestamp(response.first_visible_at);
+  if (startedAtMs !== null && firstVisibleAtMs !== null) {
+    return Math.max(0, firstVisibleAtMs - startedAtMs);
+  }
   const completedAtMs = parseTimestamp(response.completed_at);
   if (startedAtMs !== null && completedAtMs !== null) {
     return Math.max(0, completedAtMs - startedAtMs);

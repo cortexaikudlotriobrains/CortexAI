@@ -218,6 +218,48 @@ describe("CreditsPage", () => {
     ).toBeInTheDocument();
     expect(within(activity).getAllByText("3 credits")).toHaveLength(2);
   });
+
+  it("shows provider-native search as a provider-specific tool charge", async () => {
+    const base = transactionFixture()[0];
+    hookMocks.fetchCreditTransactions.mockResolvedValue({
+      items: [
+        {
+          ...base,
+          id: "gemini-search",
+          item_type: "tool",
+          provider: "gemini",
+          model: null,
+          input_tokens: 0,
+          output_tokens: 0,
+          input_credits: 0,
+          output_credits: 0,
+          fixed_credits: 28_000,
+          total_credits: 28_000,
+          provider_cost_usd: 0.028,
+          pricing_version: "web-search-2026-09-27",
+          metadata: {
+            tool_kind: "web_search",
+            backend: "google_search",
+            operations: 2,
+          },
+        },
+      ],
+      limit: 100,
+      offset: 0,
+    });
+
+    renderPage();
+
+    const activity = await screen.findByRole("article", {
+      name: "Credit activity for How do atomic credit reservations work?",
+    });
+    expect(within(activity).getByText("Web Search")).toBeInTheDocument();
+    fireEvent.click(within(activity).getByText("View credit breakdown"));
+    expect(within(activity).getByText("Gemini Web Search")).toBeInTheDocument();
+    expect(
+      within(activity).getByText("2 search operations × 14 AI credits each"),
+    ).toBeInTheDocument();
+  });
 });
 
 function renderPage() {

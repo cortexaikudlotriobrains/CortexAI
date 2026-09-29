@@ -3,13 +3,14 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { UsageInsightsPage } from "../pages/UsageInsightsPage";
+import type { UserFacingError } from "../errors/userFacingError";
 import { useChatStore } from "../store/chatStore";
 import type { EntitlementsResponse, UsageSummary } from "../types";
 
 interface MockUsageState {
   summary: UsageSummary | null;
   loading: boolean;
-  error: string | null;
+  error: UserFacingError | null;
   reload: () => void;
 }
 
@@ -23,7 +24,7 @@ const hookMocks = vi.hoisted(() => ({
     current: {
       summary: null as UsageSummary | null,
       loading: true as boolean,
-      error: null as string | null,
+      error: null as UserFacingError | null,
       reload: vi.fn(),
     } satisfies MockUsageState,
   },
@@ -323,6 +324,29 @@ describe("UsageInsightsPage states", () => {
     }
   });
 
+  it("shows safe visible recovery copy when CSV export fails", async () => {
+    const user = userEvent.setup();
+    hookMocks.usageState.current = {
+      summary: usageSummary(),
+      loading: false,
+      error: null,
+      reload: vi.fn(),
+    };
+    hookMocks.subscriptionState.current = { entitlements: entitlementFixture("plus") };
+    hookMocks.exportUsageCsv.mockRejectedValueOnce(
+      new Error("S3 bucket cortex-private-export was unavailable"),
+    );
+
+    renderPage();
+    await user.click(screen.getByRole("button", { name: "Export usage CSV for Last 30 days" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Usage couldn't be exported");
+    expect(alert).toHaveTextContent("No file was downloaded. Please try again.");
+    expect(alert).not.toHaveTextContent("cortex-private-export");
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+  });
+
   it("renders the empty model activity state", () => {
     hookMocks.usageState.current = {
       summary: emptyUsageSummary(),
@@ -355,13 +379,22 @@ describe("UsageInsightsPage states", () => {
     hookMocks.usageState.current = {
       summary: null,
       loading: false,
-      error: "Reporting service unavailable",
+      error: {
+        code: "service_unavailable",
+        title: "Usage data couldn't load",
+        message: "Your usage data is safe. Please try again.",
+        retryable: true,
+        action: "retry",
+        actionLabel: "Try again",
+        context: "usage_load",
+      },
       reload,
     };
 
     renderPage();
 
-    expect(screen.getByRole("alert")).toHaveTextContent("Usage data could not load.");
+    expect(screen.getByRole("alert")).toHaveTextContent("Usage data couldn't load");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("Reporting service unavailable");
     await user.click(screen.getByRole("button", { name: "Retry" }));
     expect(reload).toHaveBeenCalledTimes(1);
   });

@@ -229,6 +229,29 @@ describe("attachmentUploadQueue", () => {
     expect(apiMocks.completeFileUpload).toHaveBeenCalledTimes(1);
   });
 
+  it("does not expose a persisted processing error returned by the API", async () => {
+    apiMocks.createUploadIntents.mockResolvedValue(
+      intentResponse("file-failed", "failed.txt"),
+    );
+    transferMock.mockResolvedValue(undefined);
+    apiMocks.completeFileUpload.mockResolvedValue({
+      ...serverFile("file-failed", "failed.txt", "failed"),
+      error_code: "ingestion_failed",
+      error_message: "Traceback: storage_key=attachments/users/secret",
+    });
+
+    await beginAttachmentUploads([textFile("failed.txt")], { mode: "direct" });
+
+    await waitFor(() => {
+      expect(useAttachmentUploadStore.getState().tasks[0]).toMatchObject({
+        state: "failed",
+        failureStage: "processing",
+        error: "This file could not be processed. Retry the upload.",
+      });
+    });
+    expect(useAttachmentUploadStore.getState().tasks[0].error).not.toContain("storage_key");
+  });
+
   it("explains model-incompatible authorization before any S3 transfer", async () => {
     apiMocks.createUploadIntents.mockRejectedValue(
       new ApiClientError(400, "incompatible", {

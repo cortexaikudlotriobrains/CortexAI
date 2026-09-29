@@ -6,6 +6,7 @@ import os
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from server.frontend_runtime_config import render_frontend_runtime_config_js
@@ -13,6 +14,7 @@ from server.billing.plan_catalog import get_plan_catalog
 from server.billing.stripe_gateway import load_stripe_billing_config
 from server.middleware import RequestIDMiddleware
 from server.runtime_checks import check_claude_runtime
+from server.utils import unexpected_public_error
 from server.routes import (
     admin,
     auth as auth_routes,
@@ -510,6 +512,28 @@ def create_app() -> FastAPI:
         version="1.0.0",
         lifespan=lifespan,
     )
+
+    @app.exception_handler(Exception)
+    async def unhandled_api_error(request: Request, exc: Exception) -> JSONResponse:
+        """Keep implementation details in logs while returning a stable public contract."""
+        request_id = str(getattr(request.state, "request_id", "") or "")
+        logger.error(
+            "Unhandled API error",
+            exc_info=(type(exc), exc, exc.__traceback__),
+            extra={
+                "extra_fields": {
+                    "event": "http.request.unhandled_error",
+                    "request_id": request_id,
+                    "method": request.method,
+                    "path": request.url.path,
+                }
+            },
+        )
+        return JSONResponse(
+            status_code=500,
+            content={"detail": unexpected_public_error(request_id=request_id)},
+            headers={"X-Request-ID": request_id} if request_id else None,
+        )
 
     # Proxy headers middleware must be outermost so that downstream middleware
     # and route handlers see the correct scheme/host when behind AWS CloudFront

@@ -27,14 +27,54 @@ export function buildHeaders(extra?: Record<string, string | undefined>): Record
 }
 
 export class ApiClientError extends Error {
+  readonly code: string | null;
+  readonly retryable: boolean | null;
+  readonly details: Record<string, unknown>;
+  readonly requestId: string | null;
+
   constructor(
     public readonly status: number,
     message: string,
     public readonly body?: unknown,
+    metadata: {
+      code?: string | null;
+      retryable?: boolean | null;
+      details?: Record<string, unknown>;
+      requestId?: string | null;
+    } = {},
   ) {
     super(message);
     this.name = "ApiClientError";
+    const detail = structuredErrorDetail(body);
+    this.code = metadata.code ?? detail.code;
+    this.retryable = metadata.retryable ?? detail.retryable;
+    this.details = metadata.details ?? detail.fields;
+    this.requestId = metadata.requestId ?? detail.requestId;
   }
+}
+
+interface StructuredErrorDetail {
+  code: string | null;
+  message: string | null;
+  retryable: boolean | null;
+  requestId: string | null;
+  fields: Record<string, unknown>;
+}
+
+export function structuredErrorDetail(body: unknown): StructuredErrorDetail {
+  if (!isRecord(body)) return emptyStructuredErrorDetail();
+  const candidate = isRecord(body.detail) ? body.detail : body;
+  const fields = { ...candidate };
+  const code = stringValue(candidate.code);
+  const message = stringValue(candidate.message);
+  const retryable = typeof candidate.retryable === "boolean" ? candidate.retryable : null;
+  const requestId = stringValue(candidate.request_id) ?? stringValue(candidate.requestId);
+  delete fields.code;
+  delete fields.message;
+  delete fields.retryable;
+  delete fields.request_id;
+  delete fields.requestId;
+  return { code, message, retryable, requestId, fields };
 }
 
 function detailMessage(body: unknown, fallback: string): string {
@@ -42,13 +82,10 @@ function detailMessage(body: unknown, fallback: string): string {
   if (typeof body !== "object" || body === null) return fallback;
 
   const record = body as Record<string, unknown>;
-  const detail = record.detail;
-  if (typeof detail === "string") return detail;
-  if (typeof detail === "object" && detail !== null) {
-    const detailRecord = detail as Record<string, unknown>;
-    if (typeof detailRecord.message === "string") return detailRecord.message;
-    if (typeof detailRecord.code === "string") return detailRecord.code;
-  }
+  if (typeof record.detail === "string") return record.detail;
+  const detail = structuredErrorDetail(body);
+  if (detail.message) return detail.message;
+  if (detail.code) return detail.code;
   if (typeof record.message === "string") return record.message;
   return fallback;
 }
@@ -66,7 +103,7 @@ async function parseErrorBody(res: Response): Promise<unknown> {
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const body = await parseErrorBody(res);
-    throw new ApiClientError(res.status, detailMessage(body, res.statusText), body);
+    throw apiClientError(res, body);
   }
 
   if (res.status === 204) return undefined as T;
@@ -146,7 +183,7 @@ export async function* streamPost(
 
   if (!res.ok || !res.body) {
     const errBody = await parseErrorBody(res);
-    throw new ApiClientError(res.status, detailMessage(errBody, res.statusText), errBody);
+    throw apiClientError(res, errBody);
   }
 
   const reader = res.body.getReader();
@@ -167,4 +204,51 @@ export async function* streamPost(
   const finalText = decoder.decode();
   if (finalText) buffer += finalText;
   if (buffer) yield buffer;
+}
+
+export async function apiClientErrorFromResponse(
+  response: Response,
+  fallbackMessage?: string,
+): Promise<ApiClientError> {
+  const body = await parseErrorBody(response);
+  return apiClientError(response, body, fallbackMessage);
+}
+
+export function apiClientErrorFromStreamEvent(
+  event: Record<string, unknown>,
+  fallbackMessage: string,
+): ApiClientError {
+  const body = { detail: event };
+  const detail = structuredErrorDetail(body);
+  return new ApiClientError(0, detail.message ?? fallbackMessage, body, {
+    code: detail.code ?? "stream_error",
+    retryable: detail.retryable ?? true,
+    details: detail.fields,
+    requestId: detail.requestId,
+  });
+}
+
+function apiClientError(
+  response: Response,
+  body: unknown,
+  fallbackMessage?: string,
+): ApiClientError {
+  return new ApiClientError(
+    response.status,
+    detailMessage(body, fallbackMessage || response.statusText || "Request failed"),
+    body,
+    { requestId: response.headers.get("X-Request-ID") },
+  );
+}
+
+function emptyStructuredErrorDetail(): StructuredErrorDetail {
+  return { code: null, message: null, retryable: null, requestId: null, fields: {} };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }

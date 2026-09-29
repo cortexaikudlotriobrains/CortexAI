@@ -15,6 +15,8 @@ export interface UserContextRequest {
 
 export interface ChatRoutingRequest {
   smart_mode?: boolean;
+  web_mode?: "off" | "auto" | "required";
+  /** @deprecated Compatibility with pre-native-search clients. */
   research_mode?: boolean;
 }
 
@@ -30,6 +32,7 @@ export type ReasoningEffort =
   | "high"
   | "xhigh"
   | "max";
+export type ReasoningLevel = "auto" | "low" | "medium" | "high" | "max";
 
 export interface GenerationRequest {
   profile?: GenerationProfile;
@@ -132,6 +135,7 @@ export interface ChatResponse {
   replacement_model?: string;
   migration_reason?: string;
   reasoning_mode?: string;
+  routing_mode?: string;
   latency_ms: number | null;
   token_usage: TokenUsage | null;
   estimated_cost: number;
@@ -170,6 +174,7 @@ export interface ChatResponse {
   timestamp: string;
   ui_status?: ResponseRunStatus;
   started_at?: string;
+  first_visible_at?: string;
   completed_at?: string;
   failed_at?: string;
 }
@@ -303,7 +308,7 @@ export interface CreditTransaction {
   activity_id: string;
   query: string | null;
   operation_type: string;
-  item_type: "model" | "research" | "adjustment";
+  item_type: "model" | "research" | "tool" | "adjustment";
   provider: string | null;
   model: string | null;
   input_tokens: number;
@@ -371,6 +376,9 @@ export interface ModelCatalogItem {
   reasoning_efforts?: string[];
   reasoning_disable_supported?: boolean;
   reasoning_counts_against_output?: boolean;
+  reasoning_levels?: Exclude<ReasoningLevel, "auto">[];
+  default_reasoning_level?: Exclude<ReasoningLevel, "auto">;
+  reasoning_controllable?: boolean;
   pricing_source_url?: string;
   lifecycle_source_url?: string;
   source_verified_at?: string;
@@ -433,9 +441,11 @@ export interface HistoryEntry {
   effective_max_output_tokens?: number;
   effective_reasoning_mode?: string;
   effective_reasoning_effort?: string;
+  routing_mode?: string;
   generation_policy_version?: string;
   completion_status?: "complete" | "incomplete" | "failed";
   stop_cause?: string;
+  error_code?: string;
   response: string;
   latency_ms?: number;
   prompt_tokens?: number;
@@ -850,8 +860,6 @@ export interface ChatTurn {
 export interface AppState {
   mode: ChatMode;
   smartMode: boolean;
-  researchMode: boolean;
-  compareResearchMode: boolean;
   optimizeMode: boolean;
   selectedModelKey: string;
   compareModelKeys: string[];

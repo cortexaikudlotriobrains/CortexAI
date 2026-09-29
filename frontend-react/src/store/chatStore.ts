@@ -10,6 +10,7 @@ import type {
   HistoryEntry,
   HistoryThread,
   PromptOptimizationState,
+  ReasoningLevel,
   ResponseRunStatus,
   TurnStatus,
 } from "../types";
@@ -23,6 +24,7 @@ import {
 } from "../session/activeSession";
 import type { SubscriptionError } from "../subscription/subscriptionErrors";
 import { clearAttachmentUploads } from "../uploads/attachmentUploadQueue";
+import type { UserFacingError } from "../errors/userFacingError";
 
 interface BeginTurnInput {
   mode: ChatMode;
@@ -48,13 +50,13 @@ interface ChatStoreState {
   setMode: (mode: ChatMode) => void;
 
   smartMode: boolean;
-  researchMode: boolean;
-  compareResearchMode: boolean;
   optimizeMode: boolean;
+  askReasoningLevel: ReasoningLevel;
+  compareReasoningLevel: ReasoningLevel;
   setSmartMode: (v: boolean) => void;
-  setResearchMode: (v: boolean) => void;
-  setCompareResearchMode: (v: boolean) => void;
   setOptimizeMode: (v: boolean) => void;
+  setAskReasoningLevel: (level: ReasoningLevel) => void;
+  setCompareReasoningLevel: (level: ReasoningLevel) => void;
 
   selectedModelKey: string;
   setSelectedModelKey: (key: string) => void;
@@ -113,8 +115,8 @@ interface ChatStoreState {
   setStreamingText: (text: string) => void;
   appendStreamingText: (chunk: string) => void;
 
-  error: string | null;
-  setError: (err: string | null) => void;
+  error: UserFacingError | null;
+  setError: (err: UserFacingError | null) => void;
   subscriptionError: SubscriptionError | null;
   setSubscriptionError: (err: SubscriptionError | null) => void;
 
@@ -137,13 +139,13 @@ export const useChatStore = create<ChatStoreState>((set) => ({
   setMode: (mode) => set({ mode }),
 
   smartMode: true,
-  researchMode: true,
-  compareResearchMode: true,
   optimizeMode: false,
+  askReasoningLevel: "auto",
+  compareReasoningLevel: "low",
   setSmartMode: (v) => set({ smartMode: v }),
-  setResearchMode: (v) => set({ researchMode: v }),
-  setCompareResearchMode: (v) => set({ compareResearchMode: v }),
   setOptimizeMode: (v) => set({ optimizeMode: v }),
+  setAskReasoningLevel: (level) => set({ askReasoningLevel: level }),
+  setCompareReasoningLevel: (level) => set({ compareReasoningLevel: level }),
 
   selectedModelKey: "",
   setSelectedModelKey: (key) => set({ selectedModelKey: key }),
@@ -399,7 +401,7 @@ export const useChatStore = create<ChatStoreState>((set) => ({
     set((state) => ({ streamingText: state.streamingText + chunk })),
 
   error: null,
-  setError: (err) => set({ error: err }),
+  setError: (error) => set({ error }),
   subscriptionError: null,
   setSubscriptionError: (err) => set({ subscriptionError: err }),
 
@@ -456,7 +458,7 @@ function updateResponseState(
     if (turn.id !== turnId) return turn;
     const responses = [...turn.responses];
     const current = responses[index] ?? makePlaceholderResponse(index, "", "", undefined);
-    responses[index] = updater(current);
+    responses[index] = recordFirstVisibleTimestamp(current, updater(current));
     return {
       ...turn,
       responses,
@@ -505,6 +507,7 @@ function mergeCompletedResponses(
     return {
       ...response,
       started_at: previous?.started_at ?? response.started_at,
+      first_visible_at: previous?.first_visible_at ?? response.first_visible_at,
       completed_at: failed
         ? response.completed_at ?? previous?.completed_at
         : response.completed_at ?? previous?.completed_at ?? resolvedAt,
@@ -514,6 +517,24 @@ function mergeCompletedResponses(
       ui_status: failed ? "failed" : "complete",
     };
   });
+}
+
+function hasVisibleResponseText(text: string): boolean {
+  return text.trim().length > 0;
+}
+
+function recordFirstVisibleTimestamp(
+  current: ChatResponse,
+  next: ChatResponse,
+): ChatResponse {
+  if (next.first_visible_at) return next;
+  if (current.first_visible_at) {
+    return { ...next, first_visible_at: current.first_visible_at };
+  }
+  if (hasVisibleResponseText(current.text) || !hasVisibleResponseText(next.text)) {
+    return next;
+  }
+  return { ...next, first_visible_at: new Date().toISOString() };
 }
 
 function makeId(prefix = "turn"): string {

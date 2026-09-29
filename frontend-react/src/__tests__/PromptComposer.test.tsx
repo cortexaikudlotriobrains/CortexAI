@@ -1,12 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  act,
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { PromptComposer } from "../components/composer/PromptComposer";
 import { DEFAULT_MODELS } from "../config/defaultModels";
@@ -35,15 +28,11 @@ describe("PromptComposer", () => {
     useChatStore.setState({
       mode: "single",
       smartMode: true,
-      researchMode: true,
-      compareResearchMode: true,
       optimizeMode: false,
+      askReasoningLevel: "auto",
+      compareReasoningLevel: "low",
       selectedModelKey: "openai:gpt-5.1",
-      compareModelKeys: [
-        "openai:gpt-5.1",
-        "claude:claude-sonnet-4-5",
-        "",
-      ],
+      compareModelKeys: ["openai:gpt-5.1", "claude:claude-sonnet-4-5", ""],
       prompt: "",
       attachments: [],
       turns: [],
@@ -103,37 +92,33 @@ describe("PromptComposer", () => {
     const fileName = screen.getByText("long-mobile-design-reference.pdf");
     const attachButton = screen.getByRole("button", { name: "Attach files" });
     const smartSwitch = screen.getByRole("switch", { name: "Smart routing" });
-    const researchSwitch = screen.getByRole("switch", { name: "Research mode" });
     const smartTooltip = screen.getByRole("tooltip", {
       name: "Gets you the best answer automatically",
     });
-    const researchTooltip = screen.getByRole("tooltip", {
-      name: "Uses latest information from the web",
-    });
-    const improveTooltip = screen.getByRole("tooltip", {
-      name: "Helps you ask better for better results",
-    });
+    const optionsButton = screen.getByRole("button", { name: "More options" });
     const sendButton = screen.getByRole("button", { name: "Send message" });
     const controls = card?.querySelector('[data-composer-mode="single"]');
     const featureControls = card?.querySelector("#promptFeatureControls");
 
     expect(textarea).toHaveAttribute("rows", "1");
-    expect(textarea).toHaveAttribute(
-      "placeholder",
-      "Ask anything…",
-    );
+    expect(textarea).toHaveAttribute("placeholder", "Ask anything…");
     expect(card).toContainElement(fileName);
     expect(card).toContainElement(attachButton);
     expect(card).toContainElement(smartSwitch);
     expect(controls).toContainElement(attachButton);
     expect(featureControls).toContainElement(smartSwitch);
-    expect(featureControls).toContainElement(researchSwitch);
+    expect(featureControls).toContainElement(optionsButton);
+    expect(optionsButton).toHaveAccessibleDescription("Improve off; reasoning Auto");
+    expect(optionsButton).toHaveAttribute("data-improve-enabled", "false");
+    expect(optionsButton).toHaveAttribute("data-reasoning-level", "auto");
+    expect(optionsButton).toHaveAttribute("data-options-configured", "false");
+    expect(optionsButton).toHaveAttribute("aria-haspopup", "dialog");
+    expect(optionsButton.querySelector("svg")).toBeInTheDocument();
     expect(smartSwitch).toHaveAttribute("aria-describedby", smartTooltip.id);
-    expect(researchSwitch).toHaveAttribute("aria-checked", "true");
-    expect(researchSwitch).toHaveAttribute("aria-describedby", researchTooltip.id);
+    expect(screen.queryByRole("switch", { name: "Research mode" })).not.toBeInTheDocument();
     expect(
-      screen.getByRole("switch", { name: "Prompt optimization" }),
-    ).toHaveAttribute("aria-describedby", improveTooltip.id);
+      screen.queryByRole("switch", { name: /Improve prompt/ }),
+    ).not.toBeInTheDocument();
     expect(card).toContainElement(sendButton);
     expect(screen.queryByRole("combobox", { name: "Answer depth" })).not.toBeInTheDocument();
     expect(screen.queryByRole("checkbox", { name: "Compare" })).not.toBeInTheDocument();
@@ -149,22 +134,119 @@ describe("PromptComposer", () => {
       expect(screen.queryByText("long-mobile-design-reference.pdf")).not.toBeInTheDocument();
     });
     expect(useChatStore.getState().attachments).toEqual([]);
+
+    await user.click(optionsButton);
+    expect(screen.getByRole("dialog", { name: "More options" })).toBeVisible();
+    expect(screen.getByRole("switch", { name: /Improve prompt/ })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    expect(screen.getByRole("radiogroup", { name: "Reasoning" })).toBeVisible();
+    expect(
+      screen.getByRole("radio", { name: "Auto — Cortex chooses for each request" }),
+    ).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText("Applied to Smart routing")).toBeVisible();
+    expect(screen.queryByText(/credits left/i)).not.toBeInTheDocument();
   });
 
-  it("starts Ask mode with Web enabled and preserves a manual off choice", async () => {
-    const user = userEvent.setup();
-
+  it("keeps automatic web-search policy out of the Ask composer", () => {
     render(<PromptComposer models={DEFAULT_MODELS} />);
 
-    const researchSwitch = screen.getByRole("switch", { name: "Research mode" });
-    expect(researchSwitch).toHaveTextContent("Web");
-    expect(researchSwitch).toHaveAttribute("aria-checked", "true");
-    expect(useChatStore.getState().researchMode).toBe(true);
+    expect(screen.queryByRole("switch", { name: "Research mode" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Web")).not.toBeInTheDocument();
+  });
 
-    await user.click(researchSwitch);
+  it("lets Smart users override Auto reasoning and resets explicit models to Low", async () => {
+    const user = userEvent.setup();
+    render(<PromptComposer models={DEFAULT_MODELS} />);
 
-    expect(researchSwitch).toHaveAttribute("aria-checked", "false");
-    expect(useChatStore.getState().researchMode).toBe(false);
+    await user.click(screen.getByRole("button", { name: "More options" }));
+    await user.click(
+      screen.getByRole("radio", { name: "High — Deeper analysis for difficult questions" }),
+    );
+
+    expect(useChatStore.getState().askReasoningLevel).toBe("high");
+    expect(screen.getByRole("dialog", { name: "More options" })).toBeVisible();
+    expect(
+      screen.getByRole("radio", { name: "High — Deeper analysis for difficult questions" }),
+    ).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText("Applied to Smart routing")).toBeVisible();
+    expect(screen.getByRole("button", { name: "More options" })).toHaveAttribute(
+      "data-reasoning-level",
+      "high",
+    );
+    expect(screen.getByText("High", { selector: "[data-option-chip='reasoning'] span" })).toBeVisible();
+
+    await user.keyboard("{Escape}");
+
+    await user.click(screen.getByRole("switch", { name: "Smart routing" }));
+
+    expect(useChatStore.getState().smartMode).toBe(false);
+    expect(useChatStore.getState().askReasoningLevel).toBe("low");
+    await user.click(screen.getByRole("button", { name: "More options" }));
+    expect(
+      screen.getByRole("radio", { name: "Low — Faster, lighter analysis" }),
+    ).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("supports radio arrow keys, keeps the dialog open, and returns focus on Escape", async () => {
+    stubMobileViewport(false);
+    const user = userEvent.setup();
+    render(<PromptComposer models={DEFAULT_MODELS} />);
+
+    const options = screen.getByRole("button", { name: "More options" });
+    await user.click(options);
+    const auto = screen.getByRole("radio", {
+      name: "Auto — Cortex chooses for each request",
+    });
+    auto.focus();
+    await user.keyboard("{ArrowDown}");
+
+    expect(useChatStore.getState().askReasoningLevel).toBe("low");
+    expect(screen.getByRole("dialog", { name: "More options" })).toBeVisible();
+    expect(screen.getByRole("radio", { name: /Low/ })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Reset reasoning to Auto" })).toBeVisible();
+
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("dialog", { name: "More options" })).not.toBeInTheDocument();
+    await waitFor(() => expect(options).toHaveFocus());
+
+    await user.click(screen.getByRole("button", { name: "Reset reasoning to Auto" }));
+    expect(useChatStore.getState().askReasoningLevel).toBe("auto");
+    expect(screen.queryByRole("button", { name: "Reset reasoning to Auto" })).not.toBeInTheDocument();
+  });
+
+  it("uses a modal bottom sheet with trapped focus on phone layouts", async () => {
+    stubMobileViewport(true);
+    const user = userEvent.setup();
+    render(<PromptComposer models={DEFAULT_MODELS} />);
+
+    await user.click(screen.getByRole("button", { name: "More options" }));
+    const dialog = screen.getByRole("dialog", { name: "More options" });
+
+    expect(dialog).toHaveAttribute("data-layout", "sheet");
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    await waitFor(() => {
+      expect(screen.getByRole("switch", { name: /Improve prompt/ })).toHaveFocus();
+    });
+    expect(screen.getByRole("button", { name: "Dismiss options sheet" })).toBeVisible();
+  });
+
+  it("disables Compare reasoning levels that are not shared by every model", async () => {
+    const user = userEvent.setup();
+    useChatStore.setState({
+      mode: "compare",
+      compareModelKeys: ["openai:gpt-5.6-luna", "deepseek:deepseek-v4-flash", ""],
+      compareReasoningLevel: "low",
+    });
+    render(<PromptComposer models={DEFAULT_MODELS} />);
+
+    await user.click(screen.getByRole("button", { name: "More options" }));
+    expect(screen.getByText("Shared across selected models")).toBeVisible();
+    expect(screen.getByRole("radio", { name: /Low/ })).toBeEnabled();
+    expect(screen.getByRole("radio", { name: /Medium/ })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: /Maximum/ })).toBeEnabled();
   });
 
   it("uses the same shell in Compare mode without a redundant mode switch", () => {
@@ -174,67 +256,42 @@ describe("PromptComposer", () => {
     expect(useChatStore.getState().mode).toBe("compare");
     expect(screen.getByLabelText("Compare model selectors")).toBeInTheDocument();
     expect(screen.queryByRole("switch", { name: "Smart routing" })).not.toBeInTheDocument();
-    const webSwitch = screen.getByRole("switch", { name: "Research mode" });
-    const improveSwitch = screen.getByRole("switch", { name: "Prompt optimization" });
-    const compareSelectors = screen.getByLabelText("Compare model selectors");
+    const optionsButton = screen.getByRole("button", { name: "More options" });
     const featureControls = document.querySelector("#promptFeatureControls");
-    expect(webSwitch).toHaveTextContent("Web");
-    expect(webSwitch).not.toHaveTextContent("With sources");
-    expect(webSwitch.querySelector("svg circle")).not.toBeNull();
-    expect(webSwitch).toHaveAttribute(
-      "aria-describedby",
-      screen.getByRole("tooltip", {
-        name: "Uses latest information from the web",
-      }).id,
-    );
-    expect(improveSwitch).toHaveAttribute(
-      "aria-describedby",
-      screen.getByRole("tooltip", {
-        name: "Helps you ask better for better results",
-      }).id,
-    );
-    expect(compareSelectors).not.toContainElement(webSwitch);
-    expect(featureControls).toContainElement(webSwitch);
-    expect(featureControls).toContainElement(improveSwitch);
+    expect(screen.queryByRole("switch", { name: "Research mode" })).not.toBeInTheDocument();
+    expect(featureControls).toContainElement(optionsButton);
+    expect(
+      screen.queryByRole("switch", { name: /Improve prompt/ }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByRole("checkbox", { name: "Compare" })).not.toBeInTheDocument();
 
     const textarea = screen.getByRole("textbox", { name: "Prompt input" });
     const card = textarea.parentElement?.parentElement;
-    expect(textarea).toHaveAttribute(
-      "placeholder",
-      "Ask once and compare model responses",
-    );
+    expect(textarea).toHaveAttribute("placeholder", "Ask once and compare model responses");
     expect(textarea).toHaveAttribute("rows", "1");
     expect(card).toContainElement(screen.getByLabelText("Compare model selectors"));
     expect(card).toContainElement(screen.getByRole("button", { name: "Send message" }));
   });
 
-  it("shows a tapped feature tooltip for two seconds while toggling the chip", () => {
-    vi.useFakeTimers();
+  it("toggles Improve from the options menu in Ask and Compare", async () => {
+    const user = userEvent.setup();
     render(<PromptComposer models={DEFAULT_MODELS} />);
 
-    const researchSwitch = screen.getByRole("switch", { name: "Research mode" });
-    const tooltip = screen.getByRole("tooltip", {
-      name: "Uses latest information from the web",
-    });
+    await user.click(screen.getByRole("button", { name: "More options" }));
+    const improveSwitch = screen.getByRole("switch", { name: /Improve prompt/ });
+    await user.click(improveSwitch);
 
-    const touchPointerUp = new Event("pointerup", { bubbles: true });
-    Object.defineProperty(touchPointerUp, "pointerType", { value: "touch" });
-    fireEvent(researchSwitch, touchPointerUp);
-    fireEvent.click(researchSwitch);
+    expect(improveSwitch).toHaveAttribute("aria-checked", "true");
+    expect(useChatStore.getState().optimizeMode).toBe(true);
+    const optionsButton = screen.getByRole("button", { name: "More options" });
+    expect(optionsButton).toHaveAttribute("data-improve-enabled", "true");
+    expect(optionsButton).toHaveAttribute("data-options-configured", "true");
+    expect(screen.getByRole("button", { name: "Turn off Improve prompt" })).toBeVisible();
 
-    expect(researchSwitch).toHaveAttribute("aria-checked", "false");
-    expect(tooltip).toHaveAttribute("data-touch-visible", "true");
+    await user.click(screen.getByRole("button", { name: "Turn off Improve prompt" }));
 
-    act(() => {
-      vi.advanceTimersByTime(1999);
-    });
-    expect(tooltip).toHaveAttribute("data-touch-visible", "true");
-
-    act(() => {
-      vi.advanceTimersByTime(1);
-    });
-    expect(tooltip).toHaveAttribute("data-touch-visible", "false");
+    expect(useChatStore.getState().optimizeMode).toBe(false);
+    expect(screen.queryByRole("button", { name: "Turn off Improve prompt" })).not.toBeInTheDocument();
   });
 
   it("auto-grows longer prompts and caps the textarea height", async () => {
@@ -279,9 +336,7 @@ describe("PromptComposer", () => {
 
       const send = screen.getByRole("button", { name: "Send message" });
       expect(send).toBeDisabled();
-      expect(send).toHaveAccessibleDescription(
-        "Waiting for attachments to finish uploading",
-      );
+      expect(send).toHaveAccessibleDescription("Waiting for attachments to finish uploading");
     },
   );
 
@@ -299,10 +354,7 @@ describe("PromptComposer", () => {
   });
 });
 
-function uploadTask(
-  state: AttachmentUploadState,
-  serverFile?: FileUploadResponse,
-) {
+function uploadTask(state: AttachmentUploadState, serverFile?: FileUploadResponse) {
   return {
     clientId: `client-${state}`,
     file: new File(["file"], "long-mobile-design-reference.pdf", {
@@ -324,7 +376,8 @@ function stubMobileViewport(matches: boolean) {
   vi.stubGlobal(
     "matchMedia",
     vi.fn().mockImplementation((query: string) => ({
-      matches: query === "(max-width: 900px)" ? matches : false,
+      matches:
+        query === "(max-width: 900px)" || query === "(max-width: 767px)" ? matches : false,
       media: query,
       onchange: null,
       addListener: vi.fn(),

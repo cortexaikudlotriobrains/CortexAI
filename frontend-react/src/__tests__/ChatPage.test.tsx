@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { BrowserRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatPage } from "../pages/ChatPage";
+import { userFacingMessage } from "../errors/userFacingError";
 import { useChatStore } from "../store/chatStore";
 import type { CognitoConfig, WhoAmIResponse } from "../types";
 
@@ -196,11 +197,21 @@ describe("ChatPage authentication gate", () => {
       responses: [],
       status: "error",
     });
-    useChatStore.getState().setError("Temporary upstream outage");
+    useChatStore.getState().setError(userFacingMessage(
+      "Your request couldn't be completed",
+      "Try again or switch models.",
+      {
+        code: "provider_5xx",
+        retryable: true,
+        action: "retry",
+        actionLabel: "Try again",
+        context: "chat",
+      },
+    ));
     const user = userEvent.setup();
 
     renderChatPage();
-    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await user.click(screen.getByRole("button", { name: "Try again" }));
 
     expect(mocks.regenerate).toHaveBeenCalledWith(turnId);
     expect(mocks.submit).not.toHaveBeenCalled();

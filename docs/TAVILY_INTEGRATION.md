@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Tavily is used as the web-research provider for research-enabled Ask/Compare turns.
+Tavily is the backend search provider for DeepSeek's Ask/Compare function tool and for the legacy shared-research rollback path. OpenAI, Claude, Gemini, and Grok use their own provider-native search tools when native search is enabled.
 
 Primary integration path:
 
@@ -12,10 +12,13 @@ Primary integration path:
 - `tools/web/factory.py`
 - `tools/web/intent.py`
 - `tools/web/research_pack.py`
+- `api/deepseek_client.py`
+
+See `docs/PROVIDER_NATIVE_WEB_SEARCH.md` for the cross-provider policy and rollout contract.
 
 ## Runtime Modes
 
-At route level, API contract uses `routing.research_mode` as a boolean:
+At route level, the current API contract uses `routing.web_mode=off|auto|required`; `on` aliases required. `routing.research_mode` remains a backward-compatible boolean:
 
 - `false` -> no web research for this turn
 - `true` -> research-enabled flow
@@ -28,6 +31,8 @@ Inside orchestration, research state tracks behavior as:
 
 Current behavior highlights:
 
+- With `NATIVE_WEB_SEARCH_MODE=enabled`, DeepSeek can invoke the local Tavily-backed `web_search` function up to three times. Each operation is limited to five results.
+- Compare runs that function loop independently for each DeepSeek target; Tavily results are not shared with other providers.
 - `on` performs a fresh search for the current turn.
 - In `on`, local research cache reuse is bypassed.
 - If sanitized query is empty in `on`, system falls back to raw prompt.
@@ -38,11 +43,12 @@ Current behavior highlights:
 
 ## Credit Settlement
 
-- Research preflight reserves `2 Tavily credits x 5,000 = 10,000 Cortex credits`, matching the normal Advanced Search call.
-- Settlement uses the successful provider response's usage: `Tavily API credits used x 5,000 Cortex credits`.
+- DeepSeek native-search preflight reserves up to three operations at `2 Tavily credits x 5,000 = 10,000 Cortex credits` per operation.
+- DeepSeek settlement charges `10,000 Cortex credits` per successful Tavily tool operation and records an immutable `item_type=tool` row with `backend=tavily`.
+- The legacy shared-research path reserves `2 Tavily credits x 5,000 = 10,000 Cortex credits` and settles `Tavily API credits used x 5,000 Cortex credits`.
 - If Tavily omits usage metadata, settlement uses the two-credit Advanced Search fallback and marks the ledger row as estimated.
 - Cache hits and session-state reuse report zero provider credits and add no new research charge.
-- Compare performs one shared retrieval and adds its research charge once, not once per target.
+- Only the legacy rollback path performs one shared Compare retrieval. Native Compare search is per target.
 - A successful Tavily response is settled from its reported usage even when it yields no usable sources. Calls that fail without a usage response add no research charge.
 - Research ledger metadata records `provider_credits_used` and `cortex_credits_per_provider_credit`.
 
@@ -85,6 +91,8 @@ TAVILY_API_KEY=tvly-xxxxxxxxxxxxxxxxxxxxxx
 TAVILY_ENHANCED_SEARCH_ENABLED=true
 TAVILY_CHUNKS_PER_SOURCE=3
 TAVILY_ENHANCED_SEARCH_DOMAIN_RULES=true
+DEEPSEEK_AGENTIC_SEARCH_ENABLED=true
+DEEPSEEK_WEB_SEARCH_MAX_RESULTS=5
 ```
 
 Dependency:
@@ -112,6 +120,7 @@ Recommended checks:
 - `tests/test_tavily_resolver.py`
 - `tests/test_research_pack.py`
 - `tests/test_routing_regression.py`
+- `tests/test_native_web_search_contracts.py`
 
 ## Notes
 
@@ -120,4 +129,4 @@ Recommended checks:
 
 ---
 
-Last updated: 2026-07-31
+Last updated: 2026-09-27

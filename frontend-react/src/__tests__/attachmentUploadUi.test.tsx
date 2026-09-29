@@ -109,6 +109,11 @@ describe("AttachmentStrip direct uploads", () => {
       state: "failed",
       failureStage: "authorization",
     });
+    expect(useChatStore.getState().error).toMatchObject({
+      title: "The file upload couldn't start",
+      message: "Retry the upload. Your message and other files are unchanged.",
+    });
+    expect(JSON.stringify(useChatStore.getState().error)).not.toContain("opaque provider failure");
   });
 });
 

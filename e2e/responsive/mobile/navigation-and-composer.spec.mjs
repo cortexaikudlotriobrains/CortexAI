@@ -160,13 +160,78 @@ test("mobile Ask and Compare keep feature controls beside Attach", async ({ resp
     await page.setViewportSize({ width: 320, height: 568 });
 
     for (const [mode, switchNames] of [
-        ["Ask", ["Smart routing", "Research mode", "Prompt optimization"]],
-        ["Compare", ["Research mode", "Prompt optimization"]],
+        ["Ask", ["Smart routing"]],
+        ["Compare", []],
     ]) {
         await openMobilePanel(page, mode);
         await expectComposerToolbarOrder(page, switchNames);
         await expectNoHorizontalOverflow(page);
     }
+});
+
+test("mobile reasoning sheet stays usable at the smallest supported width", async ({ responsiveApp }) => {
+    const { page } = responsiveApp;
+    await page.setViewportSize({ width: 320, height: 568 });
+
+    const optionsButton = page.getByRole("button", { name: "More options" });
+    await optionsButton.click();
+    await expect(optionsButton).toHaveAttribute("data-improve-enabled", "false");
+    await expect(optionsButton).toHaveAttribute("data-reasoning-level", "auto");
+    await expect(optionsButton).toHaveAttribute("data-options-configured", "false");
+    await expect(optionsButton).toHaveAttribute("aria-haspopup", "dialog");
+    const dialog = page.getByRole("dialog", { name: "More options" });
+    await expect(dialog).toHaveAttribute("data-layout", "sheet");
+    await expect(page.getByRole("radiogroup", { name: "Reasoning" })).toBeVisible();
+    await expect(
+        page.getByRole("radio", { name: "Auto — Cortex chooses for each request" }),
+    ).toHaveAttribute("aria-checked", "true");
+
+    const bounds = await dialog.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds.x).toBeGreaterThanOrEqual(0);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(320);
+
+    await page.getByRole("radio", { name: /Maximum/ }).click();
+    await expect(dialog).toBeVisible();
+    await expect(page.getByRole("radio", { name: /Maximum/ })).toHaveAttribute(
+        "aria-checked",
+        "true",
+    );
+    await expect(optionsButton).toHaveAttribute("data-reasoning-level", "max");
+    await expect(optionsButton).toHaveAttribute("data-options-configured", "true");
+    await expect(page.getByRole("button", { name: "Reset reasoning to Auto" })).toBeVisible();
+    await expect(page.getByText("Applied to Smart routing", { exact: true })).toBeVisible();
+    await page.getByRole("switch", { name: /Improve prompt/ }).click();
+    await page.keyboard.press("Escape");
+
+    const chips = page.locator("[data-options-chips]");
+    await expect(chips.locator("[data-option-chip]")).toHaveCount(2);
+    const chipsBounds = await chips.boundingBox();
+    const attachBounds = await page.getByRole("button", { name: "Attach files" }).boundingBox();
+    expect(chipsBounds).not.toBeNull();
+    expect(attachBounds).not.toBeNull();
+    expect(chipsBounds.y + chipsBounds.height).toBeLessThanOrEqual(attachBounds.y);
+    await expect(page.getByText("Improve", { exact: true })).toHaveCSS("white-space", "nowrap");
+    await expect(page.getByText("Maximum", { exact: true })).toHaveCSS("white-space", "nowrap");
+    await expectNoHorizontalOverflow(page);
+
+    await optionsButton.click();
+    await expect(dialog).toHaveCSS("transform", "matrix(1, 0, 0, 1, 0, 0)");
+    const grabberBounds = await page.locator("[data-sheet-grabber]").boundingBox();
+    expect(grabberBounds).not.toBeNull();
+    await page.mouse.move(
+        grabberBounds.x + grabberBounds.width / 2,
+        grabberBounds.y + grabberBounds.height / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+        grabberBounds.x + grabberBounds.width / 2,
+        grabberBounds.y + grabberBounds.height / 2 + 100,
+        { steps: 4 },
+    );
+    await page.mouse.up();
+    await expect(dialog).toBeHidden();
+    await expect(optionsButton).toBeFocused();
 });
 
 for (const viewport of [
@@ -221,14 +286,12 @@ test("mobile Enter inserts a newline instead of sending", async ({ responsiveApp
     await expect(page.getByRole("button", { name: "Send message" })).toBeEnabled();
 });
 
-test("small mobile keeps focused feature tooltips inside the viewport", async ({ responsiveApp }) => {
+test("small mobile keeps the Smart tooltip and options menu inside the viewport", async ({ responsiveApp }) => {
     const { page } = responsiveApp;
     await page.setViewportSize({ width: 320, height: 568 });
 
     for (const [switchName, tooltipText] of [
         ["Smart routing", "Gets you the best answer automatically"],
-        ["Research mode", "Uses latest information from the web"],
-        ["Prompt optimization", "Helps you ask better for better results"],
     ]) {
         const chip = page.getByRole("switch", { name: switchName });
         const tooltip = page.locator('[role="tooltip"]').filter({ hasText: tooltipText });
@@ -248,49 +311,36 @@ test("small mobile keeps focused feature tooltips inside the viewport", async ({
         );
     }
 
+    await page.getByRole("button", { name: "More options" }).click();
+    const optionsMenu = page.getByRole("dialog", { name: "More options" });
+    await expect(optionsMenu).toBeVisible();
+    const optionsBounds = await optionsMenu.boundingBox();
+    expect(optionsBounds).not.toBeNull();
+    expect(optionsBounds.x).toBeGreaterThanOrEqual(0);
+    expect(optionsBounds.x + optionsBounds.width).toBeLessThanOrEqual(320);
+    await page.keyboard.press("Escape");
+    await expect(optionsMenu).toBeHidden();
+
     await openMobilePanel(page, "Compare");
-    const web = page.getByRole("switch", { name: "Research mode" });
-    const webTooltip = page
-        .locator('[role="tooltip"]')
-        .filter({ hasText: "Uses latest information from the web" });
-    await expect(web).toContainText("Web");
-    await expect(web.locator("svg circle")).toBeVisible();
-    await expect(web).toHaveAttribute(
-        "aria-describedby",
-        await webTooltip.getAttribute("id"),
-    );
+    await expect(page.getByRole("switch", { name: "Research mode" })).toHaveCount(0);
+    await page.getByRole("button", { name: "More options" }).click();
+    await expect(page.getByRole("switch", { name: /Improve prompt/ })).toBeVisible();
     await expectNoHorizontalOverflow(page);
 });
 
-test("mobile tap toggles a feature chip and shows its tooltip briefly", async ({ responsiveApp }) => {
+test("mobile tap toggles Improve inside the options sheet", async ({ responsiveApp }) => {
     const { page } = responsiveApp;
     await page.setViewportSize({ width: 390, height: 844 });
 
-    const research = page.getByRole("switch", { name: "Research mode" });
-    const tooltip = page
-        .locator('[role="tooltip"]')
-        .filter({ hasText: "Uses latest information from the web" });
-    await expect(research).toHaveAttribute("aria-checked", "true");
+    await page.getByRole("button", { name: "More options" }).click();
+    const optimize = page.getByRole("switch", { name: /Improve prompt/ });
+    await expect(optimize).toHaveAttribute("aria-checked", "false");
 
-    await research.evaluate(element => {
-        element.dispatchEvent(
-            new PointerEvent("pointerup", {
-                bubbles: true,
-                pointerType: "touch",
-            }),
-        );
-        element.click();
-    });
+    await optimize.click();
 
-    await expect(research).toHaveAttribute("aria-checked", "false");
-    await expect(tooltip).toHaveAttribute("data-touch-visible", "true");
-    await expect(tooltip).toBeVisible();
+    await expect(optimize).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByRole("button", { name: "Turn off Improve prompt" })).toBeVisible();
     await expectNoHorizontalOverflow(page);
-
-    await expect(tooltip).toHaveAttribute("data-touch-visible", "false", {
-        timeout: 3000,
-    });
-    await expect(tooltip).toBeHidden();
 });
 
 test("mobile attachment chips stay inside the composer without narrowing input", async ({ responsiveApp }) => {
@@ -395,8 +445,11 @@ async function expectMobileComposerControlsFullyVisible(page) {
     const featureBounds = await featureControls.boundingBox();
     expect(featureBounds).not.toBeNull();
 
-    for (const name of ["Smart routing", "Research mode", "Prompt optimization"]) {
-        const control = page.getByRole("switch", { name });
+    for (const [role, name] of [
+        ["switch", "Smart routing"],
+        ["button", "More options"],
+    ]) {
+        const control = page.getByRole(role, { name });
         await expect(control).toBeVisible();
         const bounds = await control.boundingBox();
         expect(bounds, `${name} bounds`).not.toBeNull();
@@ -405,6 +458,16 @@ async function expectMobileComposerControlsFullyVisible(page) {
             featureBounds.x + featureBounds.width + 1,
         );
     }
+
+    await page.getByRole("button", { name: "More options" }).click();
+    const optionsMenu = page.getByRole("dialog", { name: "More options" });
+    await expect(optionsMenu).toBeVisible();
+    const menuBounds = await optionsMenu.boundingBox();
+    expect(menuBounds, "More options menu bounds").not.toBeNull();
+    expect(menuBounds.x).toBeGreaterThanOrEqual(0);
+    expect(menuBounds.x + menuBounds.width).toBeLessThanOrEqual(page.viewportSize().width);
+    await page.keyboard.press("Escape");
+    await expect(optionsMenu).toBeHidden();
 
     for (const name of ["Attach files", "Send message"]) {
         const control = page.getByRole("button", { name });
@@ -420,8 +483,14 @@ async function expectMobileComposerControlsFullyVisible(page) {
 
 async function expectComposerToolbarOrder(page, switchNames) {
     const attach = page.getByRole("button", { name: "Attach files" });
+    const options = page.getByRole("button", { name: "More options" });
     const send = page.getByRole("button", { name: "Send message" });
-    const controls = [attach, ...switchNames.map(name => page.getByRole("switch", { name })), send];
+    const controls = [
+        attach,
+        ...switchNames.map(name => page.getByRole("switch", { name })),
+        options,
+        send,
+    ];
     const bounds = [];
 
     for (const control of controls) {

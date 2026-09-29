@@ -7,6 +7,7 @@ import { ProviderLogo } from "../components/shared/ProviderLogo";
 import { CortexIcon, type CortexIconName } from "../components/shared/CortexIcon";
 import { SubscriptionBanner } from "../components/subscription/SubscriptionBanner";
 import { getModelPresentation } from "../config/modelPresentation";
+import { presentError, type UserFacingError } from "../errors/userFacingError";
 import { useAuth } from "../hooks/useAuth";
 import { useChat } from "../hooks/useChat";
 import { useSubscription } from "../hooks/useSubscription";
@@ -30,6 +31,7 @@ export function UsageInsightsPage() {
   const [periodMenuOpen, setPeriodMenuOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportStatus, setExportStatus] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<UserFacingError | null>(null);
   const periodControlRef = useRef<HTMLDivElement>(null);
   const selectedPeriod = getUsagePeriodOption(selectedPeriodKey);
   const usageParams = useMemo(() => buildUsagePeriodParams(selectedPeriodKey), [selectedPeriodKey]);
@@ -88,6 +90,7 @@ export function UsageInsightsPage() {
     setSelectedPeriodKey(periodKey);
     setPeriodMenuOpen(false);
     setExportStatus(null);
+    setExportError(null);
   };
 
   const handleExportUsage = async () => {
@@ -97,6 +100,7 @@ export function UsageInsightsPage() {
 
     setExporting(true);
     setExportStatus("Exporting usage CSV");
+    setExportError(null);
     try {
       const blob = await exportUsageCsv({
         from: summary.period.from,
@@ -106,7 +110,9 @@ export function UsageInsightsPage() {
       triggerCsvDownload(blob, buildUsageExportFilename(summary.period));
       setExportStatus(`Exported usage CSV for ${summary.period.label}`);
     } catch (err) {
-      setExportStatus(err instanceof Error ? `Export failed: ${err.message}` : "Export failed");
+      const visibleError = presentError(err, "usage_export");
+      setExportStatus(null);
+      setExportError(visibleError);
     } finally {
       setExporting(false);
     }
@@ -234,11 +240,22 @@ export function UsageInsightsPage() {
           entitlements={subscriptionState.entitlements}
           onManageBilling={() => navigate("/account/billing")}
         />
+        {exportError ? (
+          <section className={styles.exportError} role="alert">
+            <div>
+              <strong>{exportError.title}</strong>
+              <span>{exportError.message}</span>
+              {exportError.requestId ? <small>Support code: {exportError.requestId}</small> : null}
+            </div>
+            <button type="button" onClick={() => void handleExportUsage()}>Try again</button>
+            <button type="button" onClick={() => setExportError(null)}>Dismiss</button>
+          </section>
+        ) : null}
         <section className={styles.body} aria-label="Usage dashboard content">
           {usageLoading ? (
             <UsageLoadingState />
           ) : usageError ? (
-            <UsageErrorState message={usageError} onRetry={reload} />
+            <UsageErrorState error={usageError} onRetry={reload} />
           ) : summary ? (
             <UsageDashboard summary={summary} showModelEmpty={empty} />
           ) : (
@@ -703,12 +720,13 @@ function UsageLoadingState() {
   );
 }
 
-function UsageErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
+function UsageErrorState({ error, onRetry }: { error: UserFacingError; onRetry: () => void }) {
   return (
     <section className={styles.statePanel} role="alert">
       <div>
-        <p className={styles.stateTitle}>Usage data could not load.</p>
-        <p className={styles.stateText}>{message}</p>
+        <p className={styles.stateTitle}>{error.title}</p>
+        <p className={styles.stateText}>{error.message}</p>
+        {error.requestId && <p className={styles.stateText}>Support code: {error.requestId}</p>}
       </div>
       <button type="button" className={styles.retryButton} onClick={onRetry}>
         Retry

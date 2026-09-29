@@ -150,6 +150,12 @@ class FakeOrchestrator:
         self.last_ask_model_type = model_type
         self.last_ask_context = context
         self.last_ask_kwargs = dict(kwargs)
+        routing_mode = (
+            "smart"
+            if str(kwargs.get("routing_mode") or "").strip().lower() == "smart"
+            and not model_type
+            else "explicit"
+        )
         return UnifiedResponse(
             request_id="req_ask_1",
             text="OK",
@@ -160,7 +166,10 @@ class FakeOrchestrator:
             estimated_cost=0.00001,
             finish_reason="stop",
             error=None,
-            metadata=self._metadata_for_research_mode(kwargs.get("research_mode")),
+            metadata={
+                **self._metadata_for_research_mode(kwargs.get("research_mode")),
+                "routing": {"mode": routing_mode},
+            },
         )
 
     def prepare_messages_for_turn(
@@ -655,6 +664,18 @@ def test_model_options_remain_complete_when_rich_catalog_is_disabled(client, mon
 
     assert actual_pairs == expected_pairs
     assert {"gemini", "grok"}.issubset(actual_providers)
+    assert all("reasoning_levels" in item for item in body["models"])
+    assert all("reasoning_controllable" in item for item in body["models"])
+
+    by_pair = {(item["provider"], item["model"]): item for item in body["models"]}
+    assert by_pair[("openai", "gpt-5.6-sol")]["reasoning_levels"] == [
+        "low",
+        "medium",
+        "high",
+        "max",
+    ]
+    assert by_pair[("openai", "gpt-5.6-sol")]["default_reasoning_level"] == "low"
+    assert by_pair[("openai", "gpt-4o-mini")]["reasoning_controllable"] is False
 
 
 def test_providers_catalog_returns_catalog_and_model_counts(client):
@@ -768,8 +789,7 @@ def test_models_catalog_filters_by_provider_case_insensitive(client):
 
     registry = ModelRegistry.from_yaml()
     expected_names = sorted(
-        candidate.model_name
-        for candidate in registry.list_selectable_models(provider=provider)
+        candidate.model_name for candidate in registry.list_selectable_models(provider=provider)
     )
     actual_names = sorted(item["model"] for item in body["models"])
     assert actual_names == expected_names
@@ -1647,7 +1667,7 @@ def test_chat_dto_uses_requested_model_for_versioned_served_model_credits():
         estimated_cost=0.0,
         finish_reason="stop",
         error=None,
-        metadata={},
+        metadata={"routing": {"mode": " SMART "}},
     )
 
     dto = ChatResponseDTO.from_unified_response(response)
@@ -1655,6 +1675,7 @@ def test_chat_dto_uses_requested_model_for_versioned_served_model_credits():
     assert dto.requested_model == "gpt-4o-mini"
     assert dto.served_model == "gpt-4o-mini-2024-07-18"
     assert dto.pricing_model == "gpt-4o-mini-2024-07-18"
+    assert dto.routing_mode == "smart"
     assert dto.ai_credits == 916
     assert dto.credit_usage_estimated is False
 
@@ -1828,6 +1849,64 @@ def test_chat_stream_returns_ndjson_events(client, caplog):
     assert "chat.stream.provider_call_completed" in log_events
     assert "chat.stream.response_done_sent" in log_events
     assert "chat.stream.done_sent" in log_events
+
+
+def test_chat_stream_unexpected_failure_uses_public_error_contract(client, app):
+    def _raise_internal_error(*_args, **_kwargs):
+        raise RuntimeError("database password leaked from internal-host:5432")
+
+    app.state.fake_orchestrator.ask = _raise_internal_error
+    response = client.post(
+        "/v1/chat/stream",
+        json={"prompt": "hello", "provider": "openai", "model": "gpt-4o-mini"},
+        headers={"X-API-Key": "dev-key-1", "X-Request-ID": "req-chat-public"},
+        cookies={"cortex_session": "test-session-cookie"},
+    )
+
+    assert response.status_code == 200
+    events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+    error_event = next(event for event in events if event.get("type") == "error")
+    assert error_event == {
+        "type": "error",
+        "code": "internal_error",
+        "message": (
+            "CortexAI couldn't complete this request because of an unexpected problem. "
+            "Please try again."
+        ),
+        "retryable": True,
+        "request_id": "req-chat-public",
+    }
+    assert "password" not in response.text
+    assert "internal-host" not in response.text
+
+
+def test_unhandled_api_failure_returns_structured_public_error(app):
+    def _raise_internal_error(*_args, **_kwargs):
+        raise RuntimeError("secret DSN postgres://private-host/application")
+
+    app.state.fake_orchestrator.ask = _raise_internal_error
+    safe_client = TestClient(app, raise_server_exceptions=False)
+    response = safe_client.post(
+        "/v1/chat",
+        json={"prompt": "hello", "provider": "openai", "model": "gpt-4o-mini"},
+        headers={"X-API-Key": "dev-key-1", "X-Request-ID": "req-http-public"},
+        cookies={"cortex_session": "test-session-cookie"},
+    )
+
+    assert response.status_code == 500
+    assert response.headers["X-Request-ID"] == "req-http-public"
+    assert response.json() == {
+        "detail": {
+            "code": "internal_error",
+            "message": (
+                "CortexAI couldn't complete this request because of an unexpected problem. "
+                "Please try again."
+            ),
+            "retryable": True,
+            "request_id": "req-http-public",
+        }
+    }
+    assert "private-host" not in response.text
 
 
 def test_context_guardrail_soft_trims_oversized_history():
@@ -2242,6 +2321,41 @@ def test_compare_stream_returns_ndjson_events(client, caplog):
     assert "compare.stream.done_sent" in log_events
 
 
+def test_compare_stream_unexpected_failure_uses_public_error_contract(client, app):
+    def _raise_internal_error(*_args, **_kwargs):
+        raise RuntimeError("provider token leaked from private-worker")
+
+    app.state.fake_orchestrator.ask = _raise_internal_error
+    response = client.post(
+        "/v1/compare/stream",
+        json={
+            "prompt": "hello",
+            "targets": [
+                {"provider": "openai", "model": "gpt-4o-mini"},
+                {"provider": "gemini", "model": "gemini-2.5-flash"},
+            ],
+        },
+        headers={"X-API-Key": "dev-key-1", "X-Request-ID": "req-compare-public"},
+        cookies={"cortex_session": "test-session-cookie"},
+    )
+
+    assert response.status_code == 200
+    events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+    error_event = next(event for event in events if event.get("type") == "error")
+    assert error_event == {
+        "type": "error",
+        "code": "internal_error",
+        "message": (
+            "CortexAI couldn't complete this request because of an unexpected problem. "
+            "Please try again."
+        ),
+        "retryable": True,
+        "request_id": "req-compare-public",
+    }
+    assert "provider token" not in response.text
+    assert "private-worker" not in response.text
+
+
 def test_compare_stream_preserves_empty_length_response_as_incomplete(client, app):
     def _ask_with_one_blank(
         prompt: str, model_type: Optional[str] = None, context: Any = None, **kwargs
@@ -2423,6 +2537,7 @@ def test_chat_accepts_auto_routing_without_provider(client, app):
     body = r.json()
     assert body.get("provider") in set(get_provider_ids())
     assert isinstance(body.get("model"), str)
+    assert body.get("routing_mode") == "smart"
     assert app.state.fake_orchestrator.last_ask_model_type is None
     assert app.state.fake_orchestrator.last_ask_kwargs.get("routing_mode") == "smart"
 
@@ -3442,6 +3557,38 @@ def test_compare_stream_partial_settlement_uses_only_emitted_successes():
         [emitted, completed_but_unemitted],
         {0},
     ) == [emitted]
+
+
+def test_compare_stream_partial_settlement_keeps_search_from_failed_target():
+    from server.routes import compare as compare_route
+
+    failed_after_search = UnifiedResponse(
+        request_id="failed-search",
+        text="",
+        provider="deepseek",
+        model="deepseek-chat",
+        latency_ms=1,
+        token_usage=TokenUsage(2, 1, 3),
+        estimated_cost=0.0,
+        finish_reason="error",
+        error=NormalizedError(
+            code="provider_error",
+            message="failed after search",
+            provider="deepseek",
+            retryable=True,
+        ),
+        metadata={
+            "web_search": {
+                "provider": "deepseek",
+                "backend": "tavily",
+                "operations": 1,
+            }
+        },
+    )
+
+    assert compare_route._billable_stream_responses([failed_after_search], set()) == [
+        failed_after_search
+    ]
 
 
 def test_chat_stream_finalizes_success_after_output_before_terminal_event(client, monkeypatch):

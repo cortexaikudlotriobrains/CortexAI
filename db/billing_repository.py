@@ -1258,7 +1258,7 @@ def create_credit_transaction(
     metadata: Mapping[str, Any] | None = None,
 ) -> BillingRecord:
     """Persist one immutable line item for a settled credit reservation."""
-    if item_type not in {"model", "research", "adjustment"}:
+    if item_type not in {"model", "research", "tool", "adjustment"}:
         raise ValueError("Unsupported credit transaction item_type")
     numeric_values = {
         "item_index": item_index,

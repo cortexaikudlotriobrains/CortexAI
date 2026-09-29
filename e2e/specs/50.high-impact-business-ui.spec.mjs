@@ -126,9 +126,9 @@ test("single chat renders explicit empty-response placeholder for empty successf
 
 /**
  * Use case: when providers return rate-limit responses, users should see an actionable
- * failure state (banner + retry) instead of silent failure or stuck streaming UI.
+ * failure state on the affected answer with a retry action instead of a raw backend message.
  */
-test("single chat 429 failure shows error banner with retry action", async ({ liveApp }) => {
+test("single chat 429 failure shows an actionable response error", async ({ liveApp }) => {
     const { page, config } = liveApp;
     const chatStreamUrl = `${config.apiBaseUrl}/v1/chat/stream`;
 
@@ -146,18 +146,19 @@ test("single chat 429 failure shows error banner with retry action", async ({ li
 
     await submitPromptDirect(page, liveApp.withPromptMarker("429 banner + retry probe."));
 
-    await expect(page.locator("#errorBanner")).toBeVisible();
-    await expect(page.locator("#errorTitle")).not.toHaveText("");
-    await expect(page.locator("#errorMsg")).not.toHaveText("");
-    await expect(page.locator("#errorRetry")).toBeVisible();
+    const failedCard = page.locator('[data-response-error="true"]').last();
+    await expect(failedCard).toBeVisible();
+    await expect(failedCard).toContainText(/too many requests/i);
+    await expect(failedCard).not.toContainText(/rate limit exceeded/i);
+    await expect(failedCard.getByRole("button", { name: "Regenerate response" })).toBeVisible();
     await expect(page.locator("#submitBtn")).toHaveAttribute("aria-label", "Send message");
 });
 
 /**
- * Use case: upstream 5xx outages must produce clear "service unavailable" UX copy
- * so operators and end users know this is transient infrastructure failure.
+ * Use case: upstream 5xx outages must produce clear recovery guidance without
+ * exposing infrastructure wording returned by the backend.
  */
-test("single chat 503 failure maps to service-unavailable UI copy", async ({ liveApp }) => {
+test("single chat 503 failure maps to safe recovery copy", async ({ liveApp }) => {
     const { page, config } = liveApp;
     const chatStreamUrl = `${config.apiBaseUrl}/v1/chat/stream`;
 
@@ -174,9 +175,10 @@ test("single chat 503 failure maps to service-unavailable UI copy", async ({ liv
 
     await submitPromptDirect(page, liveApp.withPromptMarker("503 service copy probe."));
 
-    await expect(page.locator("#errorBanner")).toBeVisible();
-    await expect(page.locator("#errorText")).toContainText(/service unavailable/i);
-    await expect(page.locator("#errorRetry")).toBeVisible();
+    const failedCard = page.locator('[data-response-error="true"]').last();
+    await expect(failedCard).toContainText(/couldn't complete this request/i);
+    await expect(failedCard).toContainText(/try again or choose another model/i);
+    await expect(failedCard).not.toContainText(/service unavailable/i);
 });
 
 /**
@@ -200,14 +202,15 @@ test("single chat 504 failure maps to timeout UI copy", async ({ liveApp }) => {
 
     await submitPromptDirect(page, liveApp.withPromptMarker("504 timeout copy probe."));
 
-    await expect(page.locator("#errorBanner")).toBeVisible();
-    await expect(page.locator("#errorText")).toContainText(/gateway timeout/i);
-    await expect(page.locator("#errorRetry")).toBeVisible();
+    const failedCard = page.locator('[data-response-error="true"]').last();
+    await expect(failedCard).toContainText(/took too long/i);
+    await expect(failedCard).not.toContainText(/gateway timeout/i);
+    await expect(failedCard.getByRole("button", { name: "Regenerate response" })).toBeVisible();
 });
 
 /**
  * Use case: transient outages should recover in-place via Retry without forcing users
- * to retype prompts; second attempt success should clear the error banner.
+ * to retype prompts; second attempt success should replace the failed response.
  */
 test("retry action recovers after transient 503 and returns a successful response", async ({ liveApp }) => {
     const { page, config } = liveApp;
@@ -251,15 +254,15 @@ test("retry action recovers after transient 503 and returns a successful respons
     });
 
     await submitPromptDirect(page, liveApp.withPromptMarker("Retry path probe for transient failure."));
-    await expect(page.locator("#errorBanner")).toBeVisible();
-    await expect(page.locator("#errorRetry")).toBeVisible();
+    const retryButton = page.getByRole("button", { name: "Regenerate response" }).last();
+    await expect(page.locator('[data-response-error="true"]').last()).toBeVisible();
+    await expect(retryButton).toBeVisible();
 
-    await page.locator("#errorRetry").evaluate(node => {
+    await retryButton.evaluate(node => {
         if (node && typeof node.click === "function") {
             node.click();
         }
     });
-    await expect(page.locator("#errorBanner")).toBeHidden({ timeout: 20_000 });
     await expect(page.locator("[id^='response-text-']", { hasText: "Recovered answer after retry." }).first()).toBeVisible();
     expect(attempts).toBeGreaterThanOrEqual(2);
 
@@ -331,7 +334,8 @@ test("compare stream with one failed model still renders mixed-result cards and 
 
     const failedCard = page.locator(`#response-text-${firstIndex}`).locator("xpath=..");
     await expect(failedCard).toHaveAttribute("data-response-error", "true");
-    await expect(page.locator(`#response-text-${firstIndex}`)).toContainText("temporary upstream failure");
+    await expect(page.locator(`#response-text-${firstIndex}`)).toContainText("The model couldn't complete this request");
+    await expect(page.locator(`#response-text-${firstIndex}`)).not.toContainText("temporary upstream failure");
     await expect(page.locator(`#response-text-${secondIndex}`)).toContainText("Recovery answer paragraph one.");
     await expect(page.locator(".compare-summary-card")).toContainText("1 succeeded");
     await expect(page.locator(".compare-summary-card")).toContainText("1 errors");

@@ -122,6 +122,52 @@ describe("ResponseCard", () => {
     expect(screen.getByText("Saved ~0.25 credits through context reuse")).toBeInTheDocument();
   });
 
+  it.each([
+    ["low", "Low", "low"],
+    ["medium", "Medium", "medium"],
+    ["high", "High", "high"],
+    ["max", "Max", "max"],
+  ] as const)(
+    "shows Smart effective %s reasoning after credits",
+    (effectiveEffort, label, normalizedLevel) => {
+      render(
+        <ResponseCard
+          response={{
+            ...response(),
+            routing_mode: "smart",
+            ai_credits: 2_184,
+            generation_budget: generationBudget(effectiveEffort),
+          }}
+          compact
+        />,
+      );
+
+      const reasoning = screen.getByText(`${label} reasoning`).closest("span");
+      const stats = document.querySelector('[id^="response-stats-"]');
+      const credits = screen.getByText("2.184 credits");
+
+      expect(stats).toHaveTextContent("2.184 credits");
+      expect(stats).toHaveTextContent(`${label} reasoning`);
+      expect(credits.nextElementSibling).toBe(reasoning);
+      expect(reasoning).toHaveAttribute("data-response-reasoning-effort", normalizedLevel);
+      expect(reasoning?.getAttribute("title")).toContain("can take longer");
+    },
+  );
+
+  it("hides effective reasoning for explicit-model response cards", () => {
+    render(
+      <ResponseCard
+        response={{
+          ...response(),
+          routing_mode: "explicit",
+          generation_budget: generationBudget("high"),
+        }}
+      />,
+    );
+
+    expect(screen.queryByText("High reasoning")).not.toBeInTheDocument();
+  });
+
   it("preserves a token-limited partial answer and offers a larger retry", () => {
     const onRetry = vi.fn();
     render(
@@ -174,6 +220,53 @@ describe("ResponseCard", () => {
     });
 
     expect(header).toHaveTextContent("00:10 elapsed · Generating response");
+  });
+
+  it("freezes elapsed time when the first response content becomes visible", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-09T00:00:08.000Z"));
+    const pending = {
+      ...response(false, ""),
+      latency_ms: null,
+      ui_status: "streaming" as const,
+      started_at: "2026-06-09T00:00:00.000Z",
+    };
+    const { rerender } = render(<ResponseCard response={pending} isStreaming />);
+    const header = document.querySelector("header");
+
+    expect(header).toHaveTextContent("00:08 elapsed · Generating response");
+
+    rerender(
+      <ResponseCard
+        response={{
+          ...pending,
+          text: "The first visible response content",
+          first_visible_at: "2026-06-09T00:00:08.400Z",
+        }}
+        isStreaming
+      />,
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+
+    expect(header).toHaveTextContent("00:08 elapsed · Generating response");
+
+    rerender(
+      <ResponseCard
+        response={{
+          ...pending,
+          text: "The completed response",
+          first_visible_at: "2026-06-09T00:00:08.400Z",
+          completed_at: "2026-06-09T00:00:20.000Z",
+          ui_status: "complete",
+        }}
+      />,
+    );
+
+    expect(header).toHaveTextContent("8.4s");
+    expect(header).not.toHaveTextContent("20.0s");
   });
 
   it("shows completed duration without rendering token usage from the response", () => {
@@ -249,6 +342,8 @@ describe("ResponseCard", () => {
     const header = document.querySelector("header");
     expect(header).toHaveTextContent("Failed after 8.2 sec");
     expect(header).not.toHaveTextContent("tokens");
+    expect(screen.getByText("The model couldn't complete this request")).toBeInTheDocument();
+    expect(screen.queryByText("Stream disconnected.")).not.toBeInTheDocument();
   });
 
   it("does not render legacy source controls when sources have no inline markers", () => {
@@ -595,6 +690,21 @@ function responseWithSources(text: string): ChatResponse {
       { title: "World report", url: "https://www.bbc.co.uk/news/world" },
       { title: "Large language model - Wikipedia", url: "https://en.wikipedia.org/wiki/Large_language_model" },
     ],
+  };
+}
+
+function generationBudget(effectiveEffort: string): NonNullable<ChatResponse["generation_budget"]> {
+  return {
+    profile: "auto",
+    requested_max_output_tokens: 8_192,
+    effective_max_output_tokens: 8_192,
+    requested_reasoning_mode: "auto",
+    effective_reasoning_mode: "standard",
+    requested_reasoning_effort: "auto",
+    effective_reasoning_effort: effectiveEffort,
+    reasoning_disable_supported: true,
+    reasoning_counts_against_output: true,
+    policy_version: "generation-budget-v3",
   };
 }
 

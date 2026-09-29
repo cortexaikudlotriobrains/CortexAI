@@ -2645,8 +2645,10 @@ def get_compare_analysis_sources(
 
     llm_requests = get_table("llm_requests")
     llm_responses = get_table("llm_responses")
+    routing_decisions = get_table("routing_decisions")
     req_cols = {col.name for col in llm_requests.columns}
     resp_cols = {col.name for col in llm_responses.columns}
+    routing_cols = {col.name for col in routing_decisions.columns}
     if "request_group_id" not in req_cols:
         return None
 
@@ -2661,6 +2663,9 @@ def get_compare_analysis_sources(
     response_text_expr = llm_responses.c.text if "text" in resp_cols else literal("")
     response_error_expr = (
         llm_responses.c.error_message if "error_message" in resp_cols else literal(None)
+    )
+    routing_trace_expr = (
+        routing_decisions.c.trace if "trace" in routing_cols else literal(None)
     )
     created_expr = llm_requests.c.created_at if "created_at" in req_cols else llm_requests.c.id
     group_text_expr = func.lower(cast(llm_requests.c.request_group_id, String))
@@ -2682,12 +2687,16 @@ def get_compare_analysis_sources(
             revision_expr.label("response_revision"),
             response_text_expr.label("response_text"),
             response_error_expr.label("error_message"),
+            routing_trace_expr.label("routing_trace"),
             created_expr.label("created_at"),
         )
         .select_from(
             llm_requests.outerjoin(
                 llm_responses,
                 llm_responses.c.llm_request_id == llm_requests.c.id,
+            ).outerjoin(
+                routing_decisions,
+                routing_decisions.c.llm_request_id == llm_requests.c.id,
             )
         )
         .where(and_(llm_requests.c.user_id == user_id, group_match))
@@ -2718,6 +2727,14 @@ def get_compare_analysis_sources(
                 "provider": str(item.get("provider") or "unknown"),
                 "model": str(item.get("model") or "unknown"),
                 "content": str(item.get("response_text") or ""),
+                "web_source_items": _extract_history_web_source_items(
+                    item.get("routing_trace")
+                ),
+                "web_search": (
+                    _history_routing_trace_payload(item.get("routing_trace")).get(
+                        "web_search", {}
+                    )
+                ),
                 "error_message": (
                     str(item["error_message"]) if item.get("error_message") is not None else None
                 ),
@@ -3099,6 +3116,7 @@ def get_llm_history_entries(
     resp_tokens_col = llm_responses.c.total_tokens if "total_tokens" in resp_cols else None
     resp_cost_col = llm_responses.c.estimated_cost if "estimated_cost" in resp_cols else None
     resp_error_col = llm_responses.c.error_message if "error_message" in resp_cols else None
+    resp_error_type_col = llm_responses.c.error_type if "error_type" in resp_cols else None
     resp_completion_status_col = (
         llm_responses.c.completion_status if "completion_status" in resp_cols else None
     )
@@ -3122,6 +3140,11 @@ def get_llm_history_entries(
     routing_trace_col = (
         routing_decisions.c.trace
         if routing_decisions is not None and "trace" in routing_cols
+        else None
+    )
+    routing_mode_col = (
+        routing_decisions.c.routing_mode
+        if routing_decisions is not None and "routing_mode" in routing_cols
         else None
     )
 
@@ -3163,6 +3186,7 @@ def get_llm_history_entries(
     tokens_expr = resp_tokens_col if resp_tokens_col is not None else literal(None)
     cost_expr = resp_cost_col if resp_cost_col is not None else literal(None)
     error_expr = resp_error_col if resp_error_col is not None else literal(None)
+    error_code_expr = resp_error_type_col if resp_error_type_col is not None else literal(None)
     served_model_expr = resp_served_model_col if resp_served_model_col is not None else model_expr
     pricing_model_expr = (
         resp_pricing_model_col if resp_pricing_model_col is not None else served_model_expr
@@ -3195,6 +3219,7 @@ def get_llm_history_entries(
         llm_responses.c.pricing_unknown if "pricing_unknown" in resp_cols else literal(False)
     )
     routing_trace_expr = routing_trace_col if routing_trace_col is not None else literal(None)
+    routing_mode_expr = routing_mode_col if routing_mode_col is not None else literal(None)
     session_title_expr = sessions.c.title if "title" in session_cols else literal(None)
     response_revision_root_expr = (
         req_revision_root_col if req_revision_root_col is not None else literal(None)
@@ -3280,6 +3305,8 @@ def get_llm_history_entries(
             tokens_expr.label("tokens"),
             cost_expr.label("cost"),
             error_expr.label("error_message"),
+            error_code_expr.label("error_code"),
+            routing_mode_expr.label("routing_mode"),
             routing_trace_expr.label("routing_trace"),
         )
         .select_from(from_clause)
@@ -3373,10 +3400,16 @@ def get_llm_history_entries(
                 "effective_max_output_tokens": payload.get("effective_max_output_tokens"),
                 "effective_reasoning_mode": payload.get("effective_reasoning_mode"),
                 "effective_reasoning_effort": payload.get("effective_reasoning_effort"),
+                "routing_mode": payload.get("routing_mode"),
                 "generation_policy_version": payload.get("generation_policy_version"),
                 "completion_status": str(payload.get("completion_status") or "complete"),
                 "stop_cause": str(payload.get("stop_cause") or "unknown"),
                 "response": str(response_text),
+                "error_code": (
+                    str(payload["error_code"])
+                    if payload.get("error_code") is not None
+                    else None
+                ),
                 "latency_ms": payload.get("latency_ms"),
                 "prompt_tokens": payload.get("prompt_tokens"),
                 "cached_input_tokens": payload.get("cached_input_tokens"),

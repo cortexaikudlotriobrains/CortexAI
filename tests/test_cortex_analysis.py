@@ -129,12 +129,16 @@ def test_analysis_shuffles_anonymous_labels_and_restores_attribution(
     )
 
     sent_payload = json.loads(_FakeOpenAIClient.captured_messages[1]["content"])
-    assert set(sent_payload["responses"][0]) == {"label", "content"}
+    assert set(sent_payload["responses"][0]) == {"label", "content", "search", "sources"}
     assert {item["label"] for item in sent_payload["responses"]} == {"Response A", "Response B"}
     assert "openai" not in _FakeOpenAIClient.captured_messages[1]["content"].lower()
     assert "claude" not in _FakeOpenAIClient.captured_messages[1]["content"].lower()
     assert _FakeOpenAIClient.captured_kwargs["model"] == "gpt-5.4-mini"
     assert _FakeOpenAIClient.captured_kwargs["response_format"]["type"] == "json_schema"
+    assert _FakeOpenAIClient.captured_kwargs["web_search_policy"] == {
+        "requested_mode": "off",
+        "mode": "off",
+    }
     response_schema = _FakeOpenAIClient.captured_kwargs["response_format"]["json_schema"]["schema"]
     assert response_schema["properties"]["disagreements"]["items"]["required"] == [
         "who",

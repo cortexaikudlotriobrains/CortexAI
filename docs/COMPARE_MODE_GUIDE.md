@@ -12,7 +12,8 @@ Compare Mode allows you to send every query to multiple LLM providers simultaneo
 This guide covers both:
 - API compare mode (`POST /v1/compare`, `POST /v1/compare/stream`)
 - CLI compare mode (`COMPARE_MODE=true`)
-- Browser Compare mode, where `With sources` is enabled by default for new page sessions and can be turned off manually. Empty initial model slots are filled only after effective entitlements load and only from models allowed by the current plan; higher-plan models remain visible for discovery.
+- Browser Compare mode, where provider-native search is automatic and no Web control is shown. Empty initial model slots are filled only after effective entitlements load and only from models allowed by the current plan; higher-plan models remain visible for discovery.
+- Browser Compare reasoning starts at Low and enables only levels supported by every selected target. Auto lets each model use its own managed default; unsupported levels remain visible but disabled, and changing a target recomputes the intersection.
 - Browser Cortex Analysis, an on-demand synthesis of two or three completed Compare responses.
 
 ## Cortex Analysis
@@ -34,8 +35,8 @@ This guide covers both:
   alongside the retry state.
 - Each analysis or re-analysis is a synthesized model call charged against the
   unified AI-credit wallet. The reservation includes the Compare question and
-  successful source responses plus the analysis output ceiling. Reused Compare
-  research does not add a second Tavily charge, and there is no separate Cortex
+  successful source responses plus the analysis output ceiling. The synthesis
+  call has search disabled, so reused Compare sources add no second search charge, and there is no separate Cortex
   quota. Saved runs stay readable after downgrade.
 - The required subscription/Cortex migrations are
   `20260718_add_b2c_billing_foundation.sql`,
@@ -47,7 +48,7 @@ This guide covers both:
 
 The API accepts two or three explicit targets. Subscription enforcement may reduce the effective maximum: Free and Plus allow two targets, while Pro allows three. The four-provider examples below describe the legacy CLI `COMPARE_MODE=true` flow, not the FastAPI request limit.
 
-In database-backed API mode, all target/model entitlements and monthly counters are enforced before providers start. Successful targets settle independently against their canonical requested model identity, even when a provider returns a versioned served-model snapshot; that same identity drives each response card's credits and the aggregate Compare credit total. Failed targets release their reserved model-response units, and shared research settles once only when it actually ran. One unrecognized served snapshot cannot suppress inline credits or the other successful target ledger rows. On a streaming disconnect or error, only successful targets whose output started are settled; completed-but-unemitted targets are released. A finalization failure releases and unregisters the reservation rather than allowing its activity heartbeat to keep credits reserved.
+In database-backed API mode, all target/model entitlements and monthly counters are enforced before providers start. Successful targets settle independently against their canonical requested model identity, even when a provider returns a versioned served-model snapshot; that same identity drives each response card's credits and the aggregate Compare credit total. Failed targets release their reserved model-response units. Provider-native search is reserved at up to three operations per target and settles each target's reported operations up to that product cap; legacy shared research still settles once when the rollback path is active. One unrecognized served snapshot cannot suppress inline credits or the other successful target ledger rows. On a streaming disconnect or error, only successful targets whose output started are settled, plus independently reported search usage that must not be lost; completed-but-unemitted targets are otherwise released. A finalization failure releases and unregisters the reservation rather than allowing its activity heartbeat to keep credits reserved.
 
 ## Release Notes (2026-02-18)
 
@@ -285,13 +286,13 @@ COMPARE_TARGETS = [
 - **Order Preservation**: Results appear in the order configured, not completion order
 - **Graceful Degradation**: System continues even if some models fail
 - **Canonical Grouping**: API compare returns one `request_group_id` used consistently in logs and DB persistence
-- **Browser Source Default**: The frontend starts Compare with `With sources` on and preserves a user's manual off choice while switching modes in the same page session.
+- **Automatic Provider Search**: The frontend has no Compare Web switch and sends `routing.web_mode=auto`. Every target decides through its own native search tool and keeps its own sources; DeepSeek alone uses the Tavily-backed function loop.
 - **Plan-Aware Model Defaults**: The frontend fills empty initial Compare slots from the current `/v1/entitlements` billing-class allowlist. It does not remove locked models from the picker and does not rewrite valid existing/manual selections.
 - **Readable Multi-Turn Layout**: One desktop Compare turn fills the available transcript, and desktop/tablet comparisons keep tall visible cards with internal response-body scrolling. Phone-sized mobile uses a segmented model switcher, shows one selected response card at a time in natural page flow, and turns the stuck switcher into a frosted provider-tinted reading cue without shifting model pills horizontally.
 - **Shared Prompt Presentation**: Compare prompts use the same right-aligned `You` bubble as Ask mode, including attachment and prompt-optimization states. While Improve is pending, the prompt and optimization status remain visible but model tabs, response cards, and aggregate totals stay hidden; they appear only after optimization resolves and model generation begins. Aggregate Compare totals render separately.
 - **New-Turn Reveal**: Submitting a Compare follow-up always smoothly reveals that new question once, even when the user was viewing an older turn. Streaming response growth does not continuously move the transcript, and the UI no longer renders a floating down-arrow jump control.
-- **Independent Response Readiness**: Every browser response card shows the shared provider/model logo treatment and owns its own calm loading state. Loading cards show live elapsed time with `Queued`, `Refining prompt`, `Connecting to model`, `Generating response`, or `Finalizing` instead of placeholder zero metrics. The skeleton body disappears when that card streams its first token or returns an error, while slower targets continue showing their own source/improvement-aware loading treatment. Failed cards show elapsed failure time, and completed cards hide unavailable token counts.
-- **Compact Compare Composer**: The React composer starts as a single-line prompt, expands only for longer input, and relies on the main Ask/Compare navigation instead of duplicating a mode switch beside Send. Web and Improve stay together in the bottom toolbar immediately after Attach on desktop and mobile; Web is not mixed into the model-selector row. On narrow screens, active model chips stay in their options row and scroll horizontally when a third model is added.
+- **Independent Response Readiness**: Every browser response card shows the shared provider/model logo treatment and owns its own calm loading state. Loading cards show live elapsed time with `Queued`, `Refining prompt`, `Connecting to model`, `Generating response`, or `Finalizing` instead of placeholder zero metrics. The skeleton body disappears and that card's timer freezes when its first renderable response content reaches the UI, while slower targets continue timing and showing their own source/improvement-aware loading treatment. Failed cards show elapsed failure time, and completed cards retain the observed response-start duration while hiding unavailable token counts.
+- **Compact Compare Composer**: The React composer starts as a single-line prompt, expands only for longer input, and relies on the main Ask/Compare navigation instead of duplicating a mode switch beside Send. Attach is followed by the shared sliders-style More options trigger, whose single dialog holds the Improve switch and inline Reasoning choices; Web is automatic and has no UI control. Enabled Improve and explicit non-Auto Reasoning render as removable chips, with the chip stack moving to its own row on narrow phones. On narrow screens, active model chips stay in their options row and scroll horizontally when a third model is added.
 - **Responsive Compare Cue**: Active model chips are separated by a decorative opposing-arrows connector instead of a literal `VS` label. Desktop uses a quiet circular medallion; mobile removes the border and background to preserve model-name space inside the horizontal selector scroller.
 - **Mobile Model Picker**: Compare model dropdowns render through a fixed-position body portal, keeping every option visible and selectable above the horizontally scrollable mobile model row.
 - **Purposeful Empty State**: Before the first turn, Compare mode explains the ask-once, multi-model workflow and the value of comparing accuracy, depth, speed, tone, and usefulness. Three practical examples fill the prompt without submitting or changing the selected models.
@@ -300,5 +301,5 @@ COMPARE_TARGETS = [
 
 ---
 
-**Last Updated:** 2026-08-02
+**Last Updated:** 2026-09-27
 **Applies To:** OpenAI Project v2.0+

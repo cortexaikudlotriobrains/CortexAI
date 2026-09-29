@@ -51,6 +51,9 @@ describe("usage summary data layer", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("usage-state")).toHaveTextContent(
+        "Your usage data is safe. Please try again.",
+      );
+      expect(screen.getByTestId("usage-state")).not.toHaveTextContent(
         "temporary reporting outage",
       );
     });
@@ -70,7 +73,7 @@ function UsageSummaryProbe({ from, to }: { from: string; to: string }) {
   return (
     <div>
       <p data-testid="usage-state">
-        {loading ? "loading" : error ?? summary?.period.label ?? "empty"}
+        {loading ? "loading" : error?.message ?? summary?.period.label ?? "empty"}
       </p>
       <button type="button" onClick={reload}>
         Reload

@@ -6,11 +6,6 @@
   gap: 7px;
 }
 
-.sourcesOnlyStrip,
-.improveOnlyStrip {
-  gap: 0;
-}
-
 .segmentedGroup {
   display: inline-flex;
   min-width: 0;
@@ -59,19 +54,12 @@
   background: transparent;
 }
 
-.ghostChip {
-  border: 1px solid transparent;
-  background: var(--cx-surface-3);
-  color: var(--cx-ink-600);
-}
-
 .chip:hover {
   color: var(--cx-ink-900);
   transform: translateY(-1px);
 }
 
-.segmentChip:hover,
-.ghostChip:hover {
+.segmentChip:hover {
   background: color-mix(in srgb, var(--cx-surface-2) 72%, var(--cx-surface));
 }
 
@@ -82,17 +70,6 @@
     inset 0 0 0 1px var(--cx-feature-active-ring),
     0 0 0 2px color-mix(in srgb, var(--cx-feature-active-ring) 18%, transparent),
     var(--cx-shadow-sm);
-}
-
-.blocked {
-  border-style: dashed;
-  color: var(--cx-ink-400);
-}
-
-.blocked::after {
-  content: "\1F512";
-  font-size: 9px;
-  line-height: 1;
 }
 
 .active:hover {
@@ -195,6 +172,14 @@
   transform: translate(-50%, 0);
 }
 
+@media (max-width: 1023px) {
+  .chip {
+    height: 36px;
+    font-size: 14px;
+    padding: 0 13px;
+  }
+}
+
 @media (max-width: 760px) {
   .strip {
     gap: 6px;
@@ -224,7 +209,6 @@
   .tooltipVisible.tooltipCenter {
     transform: translateY(0);
   }
-
 }
 
 @media (max-width: 760px) and (hover: hover) {
@@ -256,9 +240,9 @@
   }
 
   .chip {
-    height: 30px;
-    gap: 5px;
-    padding: 0 9px;
+    height: 36px;
+    gap: 6px;
+    padding: 0 13px;
   }
 
   .chip svg {
@@ -266,6 +250,7 @@
     height: 14px;
     flex-basis: 14px;
   }
+
 }
 
 @media (max-width: 430px) and (hover: hover) {
@@ -289,12 +274,14 @@
     padding: 0 6px;
   }
 
-  .ghostChip svg {
-    display: none;
+  .tooltipEnd {
+    right: auto;
+    left: 0;
   }
 
-  .ghostChip.keepIcon svg {
-    display: block;
+  .tooltipEnd::after {
+    right: auto;
+    left: 14px;
   }
 }
 

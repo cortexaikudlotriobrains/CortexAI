@@ -28,6 +28,7 @@ from db import billing_repository as repository
 from server.billing.credit_calculator import calculate_research_credit_charge
 from server.billing.enforcement_service import (
     BillableModelUsage,
+    BillableWebSearchUsage,
     authorize_and_reserve_usage,
     finalize_reserved_usage,
 )
@@ -728,6 +729,73 @@ def test_provider_reported_research_usage_is_charged_when_model_fails(metering_d
         "provider_credits_used": 3,
         "cortex_credits_per_provider_credit": 5_000,
     }
+
+
+def test_provider_native_web_search_reserves_cap_and_settles_actual_operations(
+    metering_db,
+):
+    db, tables = metering_db
+    reservation = authorize_and_reserve_usage(
+        db,
+        user_id=_user(db, tables),
+        request_id="native-search-only",
+        operation_type="ask",
+        model_targets=(ModelTargetIntent("gemini", "gemini-2.5-flash", "standard"),),
+        research_enabled=True,
+        web_search_reservation_credits=42_000,
+        input_text="Latest rate",
+        max_output_tokens=200,
+    )
+    assert reservation.requested_quantities["ai_credits"] >= 42_000
+
+    finalize_reserved_usage(
+        db,
+        reservation=reservation,
+        model_usages=(),
+        research_provider_credits_used=0,
+        web_search_usages=(
+            BillableWebSearchUsage(
+                provider="gemini",
+                backend="google_search",
+                operations=2,
+                fixed_credits=28_000,
+                provider_cost_usd=0.028,
+            ),
+        ),
+    )
+
+    item = db.execute(select(tables["credit_transactions"])).mappings().one()
+    assert item["item_type"] == "tool"
+    assert item["provider"] == "gemini"
+    assert item["fixed_credits"] == 28_000
+    assert item["total_credits"] == 28_000
+    assert item["provider_cost_usd"] == pytest.approx(0.028)
+    assert item["metadata"] == {
+        "tool_kind": "web_search",
+        "backend": "google_search",
+        "operations": 2,
+    }
+
+
+def test_explicit_zero_native_search_reservation_does_not_fall_back_to_tavily_cost(
+    metering_db,
+):
+    db, tables = metering_db
+    reservation = authorize_and_reserve_usage(
+        db,
+        user_id=_user(db, tables),
+        request_id="native-search-disabled-provider",
+        operation_type="ask",
+        model_targets=(ModelTargetIntent("openai", "gpt-4.1-mini", "standard"),),
+        research_enabled=True,
+        web_search_reservation_credits=0,
+        input_text="Explain DNS caching",
+        max_output_tokens=200,
+    )
+
+    assert reservation.requested_quantities["ai_credits"] == sum(
+        estimate.total_credits for estimate in reservation.model_estimates
+    )
 
 
 def test_research_fallback_usage_is_marked_estimated_in_ledger(metering_db):

@@ -38,7 +38,11 @@ class UserContextRequest(BaseModel):
 
 class ChatRoutingRequest(BaseModel):
     smart_mode: bool = True
-    research_mode: bool = False
+    # ``research_mode`` remains for compatibility with clients released before
+    # provider-native search. New clients send ``web_mode`` and do not expose a
+    # per-message Web toggle.
+    research_mode: Optional[bool] = None
+    web_mode: Optional[Literal["off", "auto", "required", "on"]] = None
 
 
 class AttachmentRequestItem(BaseModel):

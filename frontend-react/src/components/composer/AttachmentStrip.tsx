@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { deleteFile } from "../../api/files";
 import { getAttachmentUploadMode } from "../../config/runtimeConfig";
+import { userFacingMessage } from "../../errors/userFacingError";
 import { useChatStore } from "../../store/chatStore";
 import { useAttachmentUploadStore } from "../../store/attachmentUploadStore";
 import type { AttachmentUploadTask } from "../../store/attachmentUploadStore";
@@ -86,7 +87,7 @@ export function AttachmentStrip({
       if (isSubscriptionDenial(subscriptionError)) {
         setSubscriptionError(subscriptionError);
       } else {
-        setError("Upload could not be prepared. Retry the upload.");
+        setError(uploadPreparationError());
       }
     } finally {
       resetFileInput();
@@ -110,7 +111,7 @@ export function AttachmentStrip({
       if (isSubscriptionDenial(subscriptionError)) {
         setSubscriptionError(subscriptionError);
       } else {
-        setError("Upload could not be prepared. Retry the upload.");
+        setError(uploadPreparationError());
       }
     });
   };
@@ -148,7 +149,7 @@ export function AttachmentStrip({
           aria-label="Attach files"
           onClick={() => fileInputRef.current?.click()}
         >
-          <CortexIcon name="attach" />
+          <CortexIcon name="composer-attach" strokeWidth={2} />
         </button>
       </div>
 
@@ -162,6 +163,20 @@ export function AttachmentStrip({
         onChange={(event) => void handleFiles(event.target.files)}
       />
     </div>
+  );
+}
+
+function uploadPreparationError() {
+  return userFacingMessage(
+    "The file upload couldn't start",
+    "Retry the upload. Your message and other files are unchanged.",
+    {
+      code: "attachment_upload_failed",
+      retryable: true,
+      action: "retry",
+      actionLabel: "Try again",
+      context: "chat",
+    },
   );
 }
 

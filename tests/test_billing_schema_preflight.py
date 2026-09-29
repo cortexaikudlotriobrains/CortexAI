@@ -44,16 +44,44 @@ def test_schema_preflight_accepts_required_credit_table(monkeypatch):
     with engine.begin() as connection:
         connection.execute(
             text(
-                "CREATE TABLE credit_transactions "
-                "(id TEXT PRIMARY KEY, total_credits INTEGER NOT NULL)"
+                "CREATE TABLE credit_transactions ("
+                "id TEXT PRIMARY KEY, total_credits INTEGER NOT NULL, item_type TEXT, "
+                "CONSTRAINT ck_credit_transactions_item_type "
+                "CHECK (item_type IN ('model', 'research', 'tool', 'adjustment')))"
             )
         )
     monkeypatch.setattr(
         "server.billing.schema_preflight.REQUIRED_BILLING_SCHEMA",
-        {"credit_transactions": frozenset({"id", "total_credits"})},
+        {"credit_transactions": frozenset({"id", "total_credits", "item_type"})},
     )
 
     validate_billing_schema(engine=engine, schema="main")
+
+
+def test_schema_preflight_requires_tool_credit_item_constraint(monkeypatch):
+    engine = create_engine("sqlite:///:memory:")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE credit_transactions ("
+                "id INTEGER PRIMARY KEY, total_credits INTEGER, item_type TEXT, "
+                "CONSTRAINT ck_credit_transactions_item_type "
+                "CHECK (item_type IN ('model', 'research', 'adjustment')))"
+            )
+        )
+    monkeypatch.setattr(
+        "server.billing.schema_preflight.REQUIRED_BILLING_SCHEMA",
+        {
+            "credit_transactions": frozenset({"id", "total_credits", "item_type"})
+        },
+    )
+
+    with pytest.raises(BillingSchemaPreflightError) as exc_info:
+        validate_billing_schema(engine=engine, schema="main")
+
+    assert exc_info.value.missing == (
+        "constraint main.credit_transactions.ck_credit_transactions_item_type",
+    )
 
 
 def test_postgres_startup_fails_before_serving_when_billing_schema_is_missing(

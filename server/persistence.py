@@ -51,6 +51,7 @@ from server import rate_limit as rate_limit_service
 from server import savings as savings_service
 from server.billing.enforcement_service import (
     BillableModelUsage,
+    BillableWebSearchUsage,
     ReservedRequestUsage,
     authorize_and_reserve_usage,
     finalize_reserved_usage,
@@ -737,6 +738,7 @@ def reserve_subscription_usage(
     operation_type: str,
     model_targets: Iterable[ModelTargetIntent],
     research_enabled: bool,
+    web_search_reservation_credits: int | None = None,
     smart_routing: bool = False,
     optimization_enabled: bool = False,
     attachment_count: int = 0,
@@ -758,6 +760,7 @@ def reserve_subscription_usage(
             operation_type=operation_type,
             model_targets=tuple(model_targets),
             research_enabled=research_enabled,
+            web_search_reservation_credits=web_search_reservation_credits,
             smart_routing=smart_routing,
             optimization_enabled=optimization_enabled,
             attachment_count=attachment_count,
@@ -787,6 +790,7 @@ def finalize_subscription_usage(
     model_usages: Iterable[BillableModelUsage] = (),
     research_provider_credits_used: int,
     research_usage_estimated: bool = False,
+    web_search_usages: Iterable[BillableWebSearchUsage] = (),
     optimization_performed: bool = False,
     file_analysis_performed: bool = False,
     uploaded_bytes: int = 0,
@@ -804,6 +808,7 @@ def finalize_subscription_usage(
                 model_usages=tuple(model_usages),
                 research_provider_credits_used=research_provider_credits_used,
                 research_usage_estimated=research_usage_estimated,
+                web_search_usages=tuple(web_search_usages),
                 optimization_performed=optimization_performed,
                 file_analysis_performed=file_analysis_performed,
                 uploaded_bytes=uploaded_bytes,
@@ -1055,6 +1060,21 @@ def persist_routing_telemetry(
     base_routing["research_credit_usage_estimated"] = (
         credit_usage.research_credit_usage_estimated
     )
+    metadata = response.metadata if isinstance(response.metadata, dict) else {}
+    raw_web_search = metadata.get("web_search")
+    if isinstance(raw_web_search, dict):
+        base_routing["web_search"] = {
+            key: raw_web_search.get(key)
+            for key in (
+                "provider",
+                "backend",
+                "requested_mode",
+                "effective_mode",
+                "status",
+                "operations",
+                "usage_estimated",
+            )
+        }
     if web_source_items:
         base_routing["web_source_items"] = web_source_items
         base_routing["web_sources"] = len(web_source_items)
@@ -1070,7 +1090,6 @@ def persist_routing_telemetry(
         features,
     )
 
-    metadata = response.metadata if isinstance(response.metadata, dict) else {}
     prompt_category = (
         metadata.get("prompt_category") or routing_metadata.get("prompt_category") or "unknown"
     )

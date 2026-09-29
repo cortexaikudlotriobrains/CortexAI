@@ -22,7 +22,9 @@ on staging. Run browser Ask and two-target Compare probes for a normal standard 
 GPT-5.6 Terra, Claude Sonnet, Claude Opus/Fable, and an explicitly detailed task. Also
 run API probes for each explicit profile, and verify:
 
-- React sends `generation.profile=auto` and exposes no Answer depth control or live hold estimate;
+- React sends `generation.profile=auto` plus its selected reasoning value, exposes no output-token profile or live hold estimate, and defaults Smart to Auto;
+- manual Ask starts at the selected model's lowest supported reasoning level, Compare enables only shared levels, and Smart manual levels never route to an incompatible fallback;
+- `/v1/model-options` publishes normalized reasoning levels for every selectable model and provider-specific Maximum/Low aliases resolve correctly;
 - normal standard/economical Auto calls request 4K, advanced reasoning calls request 8K, and premium or deterministically complex/detailed calls request 12K;
 - Auto never selects 32K on the first call;
 - response `generation_budget.effective_max_output_tokens` matches provider kwargs;

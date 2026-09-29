@@ -29,7 +29,7 @@ flowchart TB
     subgraph L1["Layer 1 - Frontend Experience"]
         FE1["frontend-react/dist/index.html"]
         FE2["frontend-react/src\nUI state + mode selection + streaming parser"]
-        FE3["User actions\nsingle chat | compare | optimize | history | reports | byok"]
+        FE3["User actions\nsingle chat | compare | reasoning level | optimize | history | reports | byok"]
     end
 
     %% L2
@@ -63,7 +63,7 @@ flowchart TB
     %% L5
     subgraph L5["Layer 5 - Provider Adapter Layer"]
         P1["ClientRegistry + ProviderAdapter\napi/client_registry.py + api/provider_adapter.py"]
-        P2["Provider clients\nopenai/gemini/deepseek/grok clients"]
+        P2["Provider clients\nopenai/gemini/deepseek/grok/claude clients"]
     end
 
     %% L6
@@ -72,6 +72,7 @@ flowchart TB
         X2["Gemini API"]
         X3["DeepSeek API"]
         X4["Grok API"]
+        X5["Claude API"]
     end
 
     %% L7
@@ -120,6 +121,7 @@ flowchart TB
     P2 --> X2
     P2 --> X3
     P2 --> X4
+    P2 --> X5
 
     O5 --> R1
     O5 --> R2
@@ -160,18 +162,19 @@ sequenceDiagram
     participant LLM as External provider API
     participant PERSIST as persist_chat_interaction
 
-    User->>FE: Submit prompt
+    User->>FE: Choose Auto/Low/Medium/High/Maximum and submit prompt
     FE->>API: POST /v1/chat/stream (prompt+routing+context+generation)
     API->>MW: request_id + X-API-Key validation
-    API->>GB: resolve profile, reasoning, and effective ceiling
-    GB-->>API: one provider+billing budget
+    API->>GB: resolve preview profile, reasoning, and effective ceiling
+    GB-->>API: preview provider+billing budget
     opt DB mode enabled
         API->>PF: resolve owner + authorize exact effective ceiling + rate limit
         API->>BYOK: resolve tenant provider keys
     end
     API->>ORCH: ask(...)
-    ORCH->>SR: plan route and fallback policy
+    ORCH->>SR: plan route and fallback policy with reasoning capability constraint
     loop attempt until valid response or stop
+        ORCH->>GB: resolve candidate-specific reasoning and output parameters
         ORCH->>REG: create_client(provider, model)
         REG-->>ORCH: client
         ORCH->>PC: get_completion(messages, resolved generation params)

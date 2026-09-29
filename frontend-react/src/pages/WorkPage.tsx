@@ -33,6 +33,7 @@ import { WorkComposer } from "../components/work/WorkComposer";
 import { WorkRail } from "../components/work/WorkRail";
 import { WorkStatusPill } from "../components/work/WorkStatusPill";
 import { getRuntimeConfig } from "../config/runtimeConfig";
+import { presentError } from "../errors/userFacingError";
 import { useAuth } from "../hooks/useAuth";
 import { useSubscription } from "../hooks/useSubscription";
 import { useTheme } from "../hooks/useTheme";
@@ -149,7 +150,7 @@ export function WorkPage() {
         }
       })
       .catch((error: unknown) => {
-        if (!cancelled) useWorkStore.getState().setError(errorMessage(error));
+        if (!cancelled) useWorkStore.getState().setError(presentError(error, "work_load"));
       })
       .finally(() => {
         if (!cancelled) {
@@ -213,7 +214,9 @@ export function WorkPage() {
       },
       controller.signal,
     ).catch((error: unknown) => {
-      if (!controller.signal.aborted) useWorkStore.getState().setError(errorMessage(error));
+      if (!controller.signal.aborted) {
+        useWorkStore.getState().setError(presentError(error, "work_stream"));
+      }
     }).finally(() => {
       if (!controller.signal.aborted) useWorkStore.getState().setStreaming(false);
     });
@@ -286,7 +289,7 @@ export function WorkPage() {
       navigate(`/work/${session.id}`, { replace: true });
       await refreshSessions();
     } catch (error) {
-      store.setError(errorMessage(error));
+      store.setError(presentError(error, "work_start"));
     } finally {
       setStartPending(false);
       store.setLoading(false);
@@ -306,7 +309,7 @@ export function WorkPage() {
       });
       await refreshSessions();
     } catch (error) {
-      store.setError(errorMessage(error));
+      store.setError(presentError(error, "work_cancel"));
     } finally {
       store.setLoading(false);
     }
@@ -329,7 +332,7 @@ export function WorkPage() {
         store.setApproval(null);
       }
     } catch (error) {
-      store.setError(errorMessage(error));
+      store.setError(presentError(error, "work_approval"));
     } finally {
       setApprovalBusy(false);
     }
@@ -340,7 +343,7 @@ export function WorkPage() {
       const ids = await beginAttachmentUploads(files);
       setWorkUploadIds((current) => [...current, ...ids]);
     } catch (error) {
-      store.setError(errorMessage(error));
+      store.setError(presentError(error, "work_upload"));
     }
   };
 
@@ -349,7 +352,7 @@ export function WorkPage() {
       const result = await beginToolOAuth(connectorKey, window.location.pathname);
       window.location.assign(result.authorization_url);
     } catch (error) {
-      store.setError(errorMessage(error));
+      store.setError(presentError(error, "work_connect"));
     }
   };
 
@@ -363,7 +366,7 @@ export function WorkPage() {
       await testToolConnection(connection.id);
       await refreshTools();
     } catch (error) {
-      store.setError(errorMessage(error));
+      store.setError(presentError(error, "work_connect"));
       throw error;
     }
   };
@@ -452,7 +455,22 @@ export function WorkPage() {
             composer={<WorkComposer value={instruction} onChange={setInstruction} onSubmit={() => void handleStart()} onFiles={(files) => void handleFiles(files)} onRemoveFile={(id) => void removeAttachmentUpload(id).then(() => setWorkUploadIds((items) => items.filter((item) => item !== id)))} onRetryFile={(id) => void retryAttachmentUpload(id)} tasks={uploadTasks} connections={store.connections} catalog={store.toolCatalog} enabledConnectionIds={store.enabledConnectionIds} onToggleConnection={store.toggleConnection} onConnect={(key) => void handleConnect(key)} onAddMcp={handleAddMcp} webMode={store.webMode} onWebModeChange={store.setWebMode} maxCreditBudget={store.maxCreditBudget} maxPlanBudget={maxPlanBudget} onBudgetChange={store.setMaxCreditBudget} busy={store.loading} />}
           />
         )}
-        {store.error && <div className={styles.errorBanner} role="alert"><span>{store.error}</span><button type="button" onClick={() => store.setError(null)}>Dismiss</button></div>}
+        {store.error && (
+          <div className={styles.errorBanner} role="alert" aria-live="assertive">
+            <div>
+              <strong>{store.error.title}</strong>
+              <span>{store.error.message}</span>
+              {store.error.requestId && <small>Support code: {store.error.requestId}</small>}
+            </div>
+            {store.error.action === "view_plans" && (
+              <button type="button" onClick={() => navigate("/pricing")}>View plans</button>
+            )}
+            {store.error.action === "sign_in" && (
+              <button type="button" onClick={login}>Sign in</button>
+            )}
+            <button type="button" onClick={() => store.setError(null)}>Dismiss</button>
+          </div>
+        )}
         {workspaceReady && <nav className={styles.mobileNav} aria-label="Mobile navigation"><button onClick={() => navigate("/")}><CortexIcon name="ask" /><span>Ask</span></button><button onClick={() => navigate("/?mode=compare")}><CortexIcon name="compare" /><span>Compare</span></button><button className={styles.mobileNavActive} aria-current="page"><CortexIcon name="work" /><span>Work</span></button><button onClick={() => navigate("/?panel=history")}><CortexIcon name="history" /><span>History</span></button></nav>}
       </main>
     </div>
@@ -518,7 +536,7 @@ function WorkTurn({ run, events, artifacts, resultText, current = false, approva
 function ResultHeader({ run, resultText }: { run: WorkRun; resultText?: string | null }) {
   const completed = run.status === "completed";
   const label = completed ? "Work completed" : run.status === "budget_exhausted" ? "Budget reached" : run.status === "output_limit_reached" ? "Output limit reached" : run.status === "cancelled" ? "Work stopped" : "Work failed";
-  return <div className={styles.result}><div className={styles.resultMeta}><span className={completed ? styles.resultMarkSuccess : styles.resultMarkWarn}><CortexIcon name={completed ? "check" : "alert"} size={15} /></span><strong>{label}</strong><span>·</span><span>{formatAiCredits(run.actual_credits)} credits</span></div>{resultText ? <div className={styles.resultBody}><ReactMarkdown remarkPlugins={[remarkGfm]}>{resultText}</ReactMarkdown></div> : <p>{run.error_message || (completed ? "Cortex completed the requested work." : "The work ended before a final written outcome was produced.")}</p>}</div>;
+  return <div className={styles.result}><div className={styles.resultMeta}><span className={completed ? styles.resultMarkSuccess : styles.resultMarkWarn}><CortexIcon name={completed ? "check" : "alert"} size={15} /></span><strong>{label}</strong><span>·</span><span>{formatAiCredits(run.actual_credits)} credits</span></div>{resultText ? <div className={styles.resultBody}><ReactMarkdown remarkPlugins={[remarkGfm]}>{resultText}</ReactMarkdown></div> : <p>{workRunOutcome(run)}</p>}</div>;
 }
 
 function CenteredMessage({ children }: { children: React.ReactNode }) { return <div className={styles.centeredMessage}>{children}</div>; }
@@ -538,7 +556,17 @@ async function pendingApprovalFromEvents(events: WorkEvent[]) {
   return null;
 }
 function isTerminalEvent(event: WorkEvent): boolean { return ["run_completed", "run_failed", "run_cancelled", "budget_exhausted", "output_limit_reached"].includes(event.type); }
-function errorMessage(error: unknown): string { return error instanceof Error ? error.message : "Cortex Work could not complete that request."; }
+function workRunOutcome(run: WorkRun): string {
+  if (run.status === "completed") return "Cortex completed the requested work.";
+  if (run.status === "budget_exhausted") return "The run stopped at the credit budget. Increase the budget and try again if you want it to continue.";
+  if (run.status === "output_limit_reached") return "The run reached its output limit before producing a final response.";
+  if (run.status === "cancelled") return "The work was stopped before a final response was produced.";
+  const failure = new ApiClientError(0, "Work failed", {
+    code: run.error_code || "work_failed",
+    retryable: false,
+  });
+  return presentError(failure, "work_start").message;
+}
 function formatAskedAt(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "date unavailable";

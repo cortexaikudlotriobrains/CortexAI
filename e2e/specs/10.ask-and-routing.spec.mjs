@@ -73,13 +73,12 @@ test("ask mode with smart routing returns streamed response and persisted select
     expectSummaryMatchesRequest(result.summaryText, request);
 });
 
-test("web on then off in the same session changes source behavior", async ({ liveApp }) => {
+test("prompt intent turns automatic web search on then off in the same session", async ({ liveApp }) => {
     const { page, config } = liveApp;
 
     await ensureMode(page, "single");
     await setToggle(page, "#routeSmartBtn", true);
     await setToggle(page, "#routeOptimizeBtn", false);
-    await setToggle(page, "#routeResearchBtn", true);
 
     const first = await submitAskPrompt(page, liveApp.withPromptMarker(promptLibrary.webResearch), config);
     const firstCardText = await page.locator(`#response-text-${first.index}`).innerText();
@@ -100,7 +99,6 @@ test("web on then off in the same session changes source behavior", async ({ liv
         );
     }
 
-    await setToggle(page, "#routeResearchBtn", false);
     const second = await submitAskPrompt(page, liveApp.withPromptMarker(promptLibrary.noWebFollowUp), config);
     const secondCard = page.locator(`#response-text-${second.index}`).locator("xpath=..");
     await expect(secondCard.getByRole("button", { name: /^Sources:/ })).toHaveCount(0);

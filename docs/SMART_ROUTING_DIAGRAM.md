@@ -23,7 +23,7 @@ flowchart TD
     C -- No --> C1["Legacy auto picker<br/>_pick_smart_provider()"]
     C1 --> Z
 
-    C -- Yes --> D["Build routing constraints<br/>cost, latency, context, preferred provider, allowlist"]
+    C -- Yes --> D["Build routing constraints<br/>cost, latency, context, provider/model allowlists,<br/>manual reasoning level"]
     D --> E["Preview first smart candidate<br/>for stream start metadata"]
     D --> F["CortexOrchestrator.ask()<br/>routing_mode = smart / cheap / strong"]
 
@@ -43,7 +43,7 @@ flowchart TD
     K1 --> M
     K2 --> M
 
-    M --> N["ModelRegistry.get_candidates(tier, constraints)"]
+    M --> N["ModelRegistry.get_candidates(tier, constraints)<br/>filters incompatible reasoning capabilities"]
     N --> O["ModelSelector.select()"]
     O --> P["Rank candidates by reliability, coding preference,<br/>tag fit, blended cost, provider preference, context"]
     P --> Q["Ordered candidates<br/>primary + fallbacks"]
@@ -58,7 +58,8 @@ flowchart TD
     S -- Yes --> T["Pop next candidate"]
     T --> U{"Circuit breaker open?"}
     U -- Yes --> U1["Synthesize provider_error response"]
-    U -- No --> V["Invoke provider client"]
+    U -- No --> V0["Resolve this candidate's output budget<br/>and provider-native reasoning parameters"]
+    V0 --> V["Invoke provider client"]
 
     U1 --> W["ResponseValidator.validate()"]
     V --> W
@@ -107,10 +108,11 @@ flowchart TD
 Notes:
 
 - `cheap` forces tier `T0`; `strong` forces tier `T2`; `smart` delegates tier selection to `TierDecider`.
+- Reasoning `Auto` leaves capability selection automatic. A manual public level is a hard constraint across the initial tier, compatible-tier adjustment, and fallback attempts; it never routes to a model that cannot honor the request.
 - The preview step is used by streaming routes so the client can emit a stable `start` event before the full response is generated.
 - Tiering uses full runtime message estimates (not only base prompt/history) so current-turn web/system injections affect candidate selection.
 - If no valid response passes the validator, the orchestrator still returns the best available non-error response before falling back to the last error response.
 
 ---
 
-Last updated: 2026-03-19
+Last updated: 2026-09-25

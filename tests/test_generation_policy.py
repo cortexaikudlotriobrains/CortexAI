@@ -19,7 +19,7 @@ def test_legacy_request_keeps_quick_profile():
     assert resolved.profile == "quick"
     assert resolved.effective_max_output_tokens == 1024
     assert resolved.effective_reasoning_mode == "thinking"
-    assert resolved.effective_reasoning_effort == "high"
+    assert resolved.effective_reasoning_effort == "low"
 
 
 def test_explicit_balanced_profile_uses_fixed_4k_ceiling():
@@ -176,24 +176,77 @@ def test_claude_46_models_use_registry_declared_adaptive_thinking(model):
     assert resolved.effective_reasoning_effort == "medium"
 
 
-def test_profile_effort_falls_back_to_model_supported_maximum():
+def test_profile_effort_uses_model_supported_maximum():
     resolved = resolve_generation_budget(
         provider="claude",
         model="claude-sonnet-5",
         generation={"profile": "extended"},
     )
 
-    assert resolved.effective_reasoning_effort == "high"
+    assert resolved.effective_reasoning_effort == "max"
+
+
+def test_explicit_maximum_reasoning_is_supported_for_claude_5():
+    resolved = resolve_generation_budget(
+        provider="claude",
+        model="claude-sonnet-5",
+        generation={
+            "profile": "extended",
+            "reasoning": {"mode": "on", "effort": "max"},
+        },
+    )
+
+    assert resolved.effective_reasoning_mode == "adaptive"
+    assert resolved.effective_reasoning_effort == "max"
 
 
 def test_explicit_unsupported_reasoning_effort_is_rejected():
     with pytest.raises(GenerationPolicyError, match="unsupported"):
         resolve_generation_budget(
-            provider="claude",
-            model="claude-sonnet-5",
+            provider="deepseek",
+            model="deepseek-v4-pro",
             generation={
                 "profile": "extended",
-                "reasoning": {"effort": "max"},
+                "reasoning": {"mode": "on", "effort": "medium"},
+            },
+        )
+
+
+@pytest.mark.parametrize(
+    ("provider", "model", "requested", "expected"),
+    [
+        ("openai", "gpt-5.4", "max", "xhigh"),
+        ("grok", "grok-4.3", "max", "xhigh"),
+        ("gemini", "gemini-3.5-flash-lite", "low", "low"),
+        ("deepseek", "deepseek-v4-flash", "low", "low"),
+    ],
+)
+def test_public_reasoning_levels_map_to_provider_efforts(
+    provider,
+    model,
+    requested,
+    expected,
+):
+    resolved = resolve_generation_budget(
+        provider=provider,
+        model=model,
+        generation={
+            "profile": "balanced",
+            "reasoning": {"mode": "on", "effort": requested},
+        },
+    )
+
+    assert resolved.effective_reasoning_effort == expected
+
+
+def test_non_reasoning_model_rejects_manual_low_instead_of_silently_disabling():
+    with pytest.raises(GenerationPolicyError, match="does not support reasoning controls"):
+        resolve_generation_budget(
+            provider="openai",
+            model="gpt-4o-mini",
+            generation={
+                "profile": "balanced",
+                "reasoning": {"mode": "on", "effort": "low"},
             },
         )
 

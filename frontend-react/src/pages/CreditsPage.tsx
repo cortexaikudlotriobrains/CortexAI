@@ -6,6 +6,7 @@ import { SubscriptionBanner } from "../components/subscription/SubscriptionBanne
 import { SubscriptionPageShell } from "../components/subscription/SubscriptionPageShell";
 import { UsageAllowance } from "../components/subscription/UsageAllowance";
 import { getModelPresentation } from "../config/modelPresentation";
+import { presentError, type UserFacingError } from "../errors/userFacingError";
 import { useAuth } from "../hooks/useAuth";
 import { useSubscription } from "../hooks/useSubscription";
 import { getAccountMenuSubscriptionPresentation } from "../subscription/accountMenuPresentation";
@@ -21,7 +22,7 @@ export function CreditsPage() {
     subscriptionState.entitlements,
   );
   const [transactions, setTransactions] = useState<CreditTransaction[] | null>(null);
-  const [transactionsError, setTransactionsError] = useState<string | null>(null);
+  const [transactionsError, setTransactionsError] = useState<UserFacingError | null>(null);
   const [transactionsReloadToken, setTransactionsReloadToken] = useState(0);
   const authEnabled = cognitoConfig?.enabled ?? false;
 
@@ -39,9 +40,7 @@ export function CreditsPage() {
       .then((response) => setTransactions(response.items))
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === "AbortError") return;
-        setTransactionsError(
-          error instanceof Error ? error.message : "Recent credit activity could not load.",
-        );
+        setTransactionsError(presentError(error, "credits_load"));
       });
     return () => controller.abort();
   }, [loggedIn, subscriptionState.lastLoadedAt, transactionsReloadToken]);
@@ -136,7 +135,7 @@ function RecentCreditActivity({
   onRetry,
 }: {
   transactions: CreditTransaction[] | null;
-  error: string | null;
+  error: UserFacingError | null;
   onRetry: () => void;
 }) {
   const activities = transactions ? groupCreditTransactions(transactions).slice(0, 20) : null;
@@ -153,7 +152,7 @@ function RecentCreditActivity({
 
       {error ? (
         <div className={styles.activityMessage} role="alert">
-          <span>{error}</span>
+          <span><strong>{error.title}</strong> {error.message}</span>
           <button type="button" onClick={onRetry}>
             Retry
           </button>
@@ -259,7 +258,9 @@ function creditActivityLabel(activity: CreditActivity): string {
   const answerItems = chargedItems.filter(
     (item) => item.item_type === "model" && item.operation_type !== "optimize",
   );
-  const hasSearchCharge = chargedItems.some((item) => item.item_type === "research");
+  const hasSearchCharge = chargedItems.some(
+    (item) => item.item_type === "research" || item.item_type === "tool",
+  );
   const parts: string[] = [];
   if (hasOptimizerCharge && answerItems.length > 0) {
     parts.push(finalOptimizedAnswerLabel(answerItems));
@@ -341,6 +342,24 @@ function finalOptimizedAnswerLabel(answerItems: CreditTransaction[]): string {
 }
 
 function toCreditBreakdownItem(transaction: CreditTransaction): CreditBreakdownItem {
+  if (transaction.item_type === "tool") {
+    const operations = numericMetadata(transaction, "operations");
+    const perOperation =
+      operations && operations > 0 ? transaction.fixed_credits / operations : null;
+    const detail =
+      operations !== null && perOperation !== null
+        ? `${formatInteger(operations)} search ${
+            operations === 1 ? "operation" : "operations"
+          } × ${formatAiCredits(perOperation)} AI credits each`
+        : "Provider web-search charge";
+    return {
+      key: transaction.id,
+      label: `${providerDisplayName(transaction.provider)} Web Search`,
+      detail: `${detail}${transaction.usage_estimated ? " · estimated" : ""}`,
+      totalCredits: transaction.total_credits,
+    };
+  }
+
   if (transaction.item_type === "research") {
     const providerCredits = numericMetadata(transaction, "provider_credits_used");
     const conversion = numericMetadata(transaction, "cortex_credits_per_provider_credit");
@@ -390,6 +409,21 @@ function modelDisplayName(transaction: CreditTransaction): string {
   return transaction.model
     ? getModelPresentation(transaction.provider ?? "", transaction.model).label
     : "AI model";
+}
+
+function providerDisplayName(provider: string | null): string {
+  const labels: Record<string, string> = {
+    openai: "OpenAI",
+    claude: "Claude",
+    anthropic: "Claude",
+    gemini: "Gemini",
+    google: "Gemini",
+    grok: "Grok",
+    deepseek: "DeepSeek",
+    tavily: "Tavily",
+  };
+  const normalized = (provider ?? "").trim().toLowerCase();
+  return labels[normalized] ?? (provider?.trim() || "Provider");
 }
 
 function modelSummary(transactions: CreditTransaction[]): string {

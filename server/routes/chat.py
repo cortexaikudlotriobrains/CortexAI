@@ -17,6 +17,7 @@ from config.provider_catalog import (
     get_provider_default_models,
     get_provider_ids,
 )
+from config.web_search import load_native_web_search_config
 from models.user_context import UserContext
 from orchestrator.core import CortexOrchestrator
 from orchestrator.model_registry import ModelRegistry
@@ -29,6 +30,10 @@ from server.billing.enforcement_service import (
 from server.billing.credit_calculator import research_credit_usage_from_metadata
 from server.billing.entitlement_service import ModelTargetIntent
 from server.billing.errors import enforcement_http_exception
+from server.billing.web_search_billing import (
+    billable_web_search_usages,
+    web_search_reservation_override,
+)
 from server.dependencies import AuthResult, get_auth, get_orchestrator
 from server.generation_service import annotate_response, resolve_request_budget
 from server.generation_service import constrain_budget_to_reservation
@@ -41,7 +46,13 @@ from server.utils import (
     get_client_safe_error_display_text,
     normalize_empty_success_response,
     sanitize_provider_error_response,
+    unexpected_public_error,
     validate_and_trim_context,
+)
+from tools.web.native_policy import (
+    WebSearchPolicy,
+    orchestrator_research_mode,
+    resolve_web_search_policy,
 )
 from utils.logger import get_logger
 
@@ -85,6 +96,18 @@ class ChatExecutionPlan:
     routing_constraints: dict[str, Any] | None
     preview_provider: str
     preview_model: str
+
+
+def _resolve_chat_web_policy(request: ChatRequest, prompt: str) -> tuple[WebSearchPolicy, bool]:
+    routing = request.routing
+    config = load_native_web_search_config()
+    policy = resolve_web_search_policy(
+        prompt,
+        requested_mode=getattr(routing, "web_mode", None) if routing else None,
+        legacy_research_mode=(getattr(routing, "research_mode", None) if routing else None),
+        max_operations=config.max_operations,
+    )
+    return policy, config.enabled
 
 
 def _default_model_for_provider(provider: str) -> str:
@@ -301,10 +324,23 @@ def _resolve_chat_execution_plan(
 
     routing = request.routing
     smart_mode = True if routing is None else bool(routing.smart_mode)
-    research_mode = False if routing is None else bool(routing.research_mode)
+    # Only preserve the legacy Smart-routing preference for an explicit legacy
+    # Web=true request. Automatic provider-native search does not bias model choice.
+    research_mode = bool(
+        routing
+        and getattr(routing, "web_mode", None) is None
+        and getattr(routing, "research_mode", None) is True
+    )
 
     if TRUE_SMART_ROUTING_ENABLED and smart_mode:
         constraints = _build_chat_routing_constraints()
+        reasoning = request.generation.reasoning if request.generation is not None else None
+        requested_reasoning_mode = str(getattr(reasoning, "mode", "auto") or "auto")
+        requested_reasoning_effort = str(getattr(reasoning, "effort", "auto") or "auto")
+        if requested_reasoning_mode != "auto" or requested_reasoning_effort != "auto":
+            constraints = dict(constraints or {})
+            constraints["reasoning_mode"] = requested_reasoning_mode
+            constraints["reasoning_effort"] = requested_reasoning_effort
         if allowed_billing_classes is not None:
             constraints = dict(constraints or {})
             constraints["allowed_billing_classes"] = sorted(allowed_billing_classes)
@@ -482,7 +518,10 @@ def _to_ndjson(event: dict) -> str:
 
 def _research_was_performed(response: object) -> bool:
     metadata = getattr(response, "metadata", None)
-    return research_credit_usage_from_metadata(metadata).provider_credits_used > 0
+    return (
+        research_credit_usage_from_metadata(metadata).provider_credits_used > 0
+        or bool(billable_web_search_usages((response,)))
+    )
 
 
 def _successful_billing_targets(
@@ -496,9 +535,7 @@ def _successful_billing_targets(
         resolve_model_target(
             provider=str(getattr(response, "provider", "") or ""),
             model=str(
-                getattr(response, "requested_model", None)
-                or getattr(response, "model", "")
-                or ""
+                getattr(response, "requested_model", None) or getattr(response, "model", "") or ""
             ),
             orchestrator=orchestrator,
         ),
@@ -541,14 +578,10 @@ def _billable_model_usages(response: object) -> tuple[BillableModelUsage, ...]:
         BillableModelUsage(
             provider=str(getattr(response, "provider", "") or ""),
             model=str(
-                getattr(response, "requested_model", None)
-                or getattr(response, "model", "")
-                or ""
+                getattr(response, "requested_model", None) or getattr(response, "model", "") or ""
             ),
             prompt_tokens=max(0, int(getattr(usage, "prompt_tokens", 0) or 0)),
-            cached_input_tokens=max(
-                0, int(getattr(usage, "cached_input_tokens", 0) or 0)
-            ),
+            cached_input_tokens=max(0, int(getattr(usage, "cached_input_tokens", 0) or 0)),
             cache_write_tokens=max(0, int(getattr(usage, "cache_write_tokens", 0) or 0)),
             output_tokens=max(0, int(getattr(usage, "completion_tokens", 0) or 0)),
             reasoning_tokens=max(0, int(getattr(usage, "reasoning_tokens", 0) or 0)),
@@ -561,9 +594,7 @@ def _billable_model_usages(response: object) -> tuple[BillableModelUsage, ...]:
             ),
             pricing_version=str(getattr(response, "pricing_version", "") or "") or None,
             provider_cost_owner=str(
-                (getattr(response, "metadata", {}) or {}).get(
-                    "provider_cost_owner", "cortex"
-                )
+                (getattr(response, "metadata", {}) or {}).get("provider_cost_owner", "cortex")
             ),
         ),
     )
@@ -575,6 +606,7 @@ def _reserve_chat_usage(
     request_id: str,
     execution_plan: ChatExecutionPlan,
     research_enabled: bool,
+    web_search_reservation_credits_value: int | None,
     orchestrator: CortexOrchestrator,
     resolved_attachments: list[attachments_service.ResolvedAttachment],
     input_text: str,
@@ -604,6 +636,7 @@ def _reserve_chat_usage(
             operation_type=operation_type,
             model_targets=targets,
             research_enabled=research_enabled,
+            web_search_reservation_credits=web_search_reservation_credits_value,
             smart_routing=execution_plan.strategy == "smart_orchestrator",
             attachment_count=len(resolved_attachments),
             total_attachment_bytes=sum(item.size_bytes for item in resolved_attachments),
@@ -642,15 +675,15 @@ def _finalize_chat_usage(
             if settle_model_response
             else ()
         )
-        research_usage = research_credit_usage_from_metadata(
-            getattr(response, "metadata", None)
-        )
+        research_usage = research_credit_usage_from_metadata(getattr(response, "metadata", None))
+        web_search_usages = billable_web_search_usages((response,))
         _finalize_subscription_usage(
             reservation=reservation,
             successful_targets=successful_targets,
             model_usages=(_billable_model_usages(response) if settle_model_response else ()),
             research_provider_credits_used=research_usage.provider_credits_used,
             research_usage_estimated=research_usage.estimated,
+            web_search_usages=web_search_usages,
             file_analysis_performed=attachments_present and bool(successful_targets),
         )
     except Exception as exc:
@@ -690,14 +723,20 @@ async def chat(
     requested_session_id = request.context.session_id if request.context else None
     force_new_session = bool(request.context and request.context.new_session)
     routing = request.routing
-    research_mode = bool(routing and routing.research_mode)
-    orchestrator_research_mode = "on" if research_mode else "off"
+    web_policy, native_web_search = _resolve_chat_web_policy(request, request.prompt)
+    research_mode = web_policy.enabled
+    legacy_research_mode = getattr(routing, "research_mode", None) if routing else None
+    orchestrator_mode = orchestrator_research_mode(
+        web_policy,
+        requested_mode=getattr(routing, "web_mode", None) if routing else None,
+        legacy_research_mode=legacy_research_mode,
+    )
     if (
         research_mode
         and request.regeneration is not None
         and not request.regeneration.refresh_research
     ):
-        orchestrator_research_mode = "auto"
+        orchestrator_mode = "auto"
 
     if request.regeneration is not None and not API_DB_ENABLED:
         raise HTTPException(
@@ -797,13 +836,15 @@ async def chat(
             inference_attachments=inference_attachments,
         )
 
+    generation_registry = ModelRegistry.from_yaml()
+    generation_input_text = _billing_materialized_input_text(request, inference_attachments)
     generation_budget = resolve_request_budget(
         provider=execution_plan.preview_provider,
         model=execution_plan.preview_model,
         generation=request.generation,
         legacy_max_tokens=request.max_tokens,
-        input_text=_billing_materialized_input_text(request, inference_attachments),
-        registry=ModelRegistry.from_yaml(),
+        input_text=generation_input_text,
+        registry=generation_registry,
     )
     effective_max_tokens = generation_budget.effective_max_output_tokens
     kwargs: dict[str, Any] = {}
@@ -815,6 +856,8 @@ async def chat(
     if inference_attachments:
         kwargs["attachments"] = inference_attachments
     kwargs["request_id"] = req_id
+    kwargs["web_search_policy"] = web_policy.to_provider_dict()
+    kwargs["_native_web_search"] = native_web_search
 
     billing_reservation: ReservedRequestUsage | None = None
     if API_DB_ENABLED and persistence_resolution is not None:
@@ -836,6 +879,16 @@ async def chat(
             request_id=f"{req_id}:chat:{uuid4()}",
             execution_plan=execution_plan,
             research_enabled=research_mode,
+            web_search_reservation_credits_value=web_search_reservation_override(
+                (
+                    (provider for provider, _model in smart_targets)
+                    if smart_targets
+                    else (execution_plan.preview_provider,)
+                ),
+                native_enabled=native_web_search,
+                search_enabled=web_policy.enabled,
+                per_target=False,
+            ),
             orchestrator=orchestrator,
             resolved_attachments=resolved_attachments,
             input_text=_billing_materialized_input_text(request, inference_attachments),
@@ -889,6 +942,25 @@ async def chat(
         )
         kwargs.update(generation_budget.provider_kwargs())
 
+    def resolve_smart_generation(provider: str, model: str):
+        resolved = resolve_request_budget(
+            provider=provider,
+            model=model,
+            generation=request.generation,
+            legacy_max_tokens=request.max_tokens,
+            input_text=generation_input_text,
+            registry=generation_registry,
+        )
+        return constrain_budget_to_reservation(
+            resolved,
+            billing_reservation,
+            provider=provider,
+            model=model,
+        )
+
+    if execution_plan.strategy == "smart_orchestrator":
+        kwargs["_smart_generation_resolver"] = resolve_smart_generation
+
     provider_completed = False
     try:
         response = await asyncio.to_thread(
@@ -898,13 +970,17 @@ async def chat(
             context=context,
             model_name=execution_plan.model_name,
             token_tracker=None,
-            research_mode=orchestrator_research_mode,
+            research_mode=orchestrator_mode,
             routing_mode=execution_plan.routing_mode,
             routing_constraints=execution_plan.routing_constraints,
             **kwargs,
         )
         provider_completed = True
         response = sanitize_provider_error_response(normalize_empty_success_response(response))
+        if execution_plan.strategy == "smart_orchestrator":
+            response_model = str(response.requested_model or response.model or "").strip()
+            if generation_registry.find_model(response.provider, response_model) is not None:
+                generation_budget = resolve_smart_generation(response.provider, response_model)
         response = annotate_response(response, generation_budget)
         if billing_reservation is not None:
             _finalize_chat_usage(
@@ -963,14 +1039,20 @@ async def chat_stream(
     requested_session_id = request.context.session_id if request.context else None
     force_new_session = bool(request.context and request.context.new_session)
     routing = request.routing
-    research_mode = bool(routing and routing.research_mode)
-    orchestrator_research_mode = "on" if research_mode else "off"
+    web_policy, native_web_search = _resolve_chat_web_policy(request, request.prompt)
+    research_mode = web_policy.enabled
+    legacy_research_mode = getattr(routing, "research_mode", None) if routing else None
+    orchestrator_mode = orchestrator_research_mode(
+        web_policy,
+        requested_mode=getattr(routing, "web_mode", None) if routing else None,
+        legacy_research_mode=legacy_research_mode,
+    )
     if (
         research_mode
         and request.regeneration is not None
         and not request.regeneration.refresh_research
     ):
-        orchestrator_research_mode = "auto"
+        orchestrator_mode = "auto"
 
     if request.regeneration is not None and not API_DB_ENABLED:
         raise HTTPException(
@@ -1072,13 +1154,15 @@ async def chat_stream(
     target_provider = execution_plan.preview_provider
     target_model = execution_plan.preview_model
 
+    generation_registry = ModelRegistry.from_yaml()
+    generation_input_text = _billing_materialized_input_text(request, inference_attachments)
     generation_budget = resolve_request_budget(
         provider=execution_plan.preview_provider,
         model=execution_plan.preview_model,
         generation=request.generation,
         legacy_max_tokens=request.max_tokens,
-        input_text=_billing_materialized_input_text(request, inference_attachments),
-        registry=ModelRegistry.from_yaml(),
+        input_text=generation_input_text,
+        registry=generation_registry,
     )
     effective_max_tokens = generation_budget.effective_max_output_tokens
     kwargs: dict[str, Any] = {}
@@ -1090,6 +1174,8 @@ async def chat_stream(
     if inference_attachments:
         kwargs["attachments"] = inference_attachments
     kwargs["request_id"] = req_id
+    kwargs["web_search_policy"] = web_policy.to_provider_dict()
+    kwargs["_native_web_search"] = native_web_search
 
     billing_reservation: ReservedRequestUsage | None = None
     if API_DB_ENABLED and persistence_resolution is not None:
@@ -1111,6 +1197,16 @@ async def chat_stream(
             request_id=f"{req_id}:chat-stream:{uuid4()}",
             execution_plan=execution_plan,
             research_enabled=research_mode,
+            web_search_reservation_credits_value=web_search_reservation_override(
+                (
+                    (provider for provider, _model in smart_targets)
+                    if smart_targets
+                    else (execution_plan.preview_provider,)
+                ),
+                native_enabled=native_web_search,
+                search_enabled=web_policy.enabled,
+                per_target=False,
+            ),
             orchestrator=orchestrator,
             resolved_attachments=resolved_attachments,
             input_text=_billing_materialized_input_text(request, inference_attachments),
@@ -1166,7 +1262,27 @@ async def chat_stream(
         target_provider = execution_plan.preview_provider
         target_model = execution_plan.preview_model
 
+    def resolve_smart_generation(provider: str, model: str):
+        resolved = resolve_request_budget(
+            provider=provider,
+            model=model,
+            generation=request.generation,
+            legacy_max_tokens=request.max_tokens,
+            input_text=generation_input_text,
+            registry=generation_registry,
+        )
+        return constrain_budget_to_reservation(
+            resolved,
+            billing_reservation,
+            provider=provider,
+            model=model,
+        )
+
+    if execution_plan.strategy == "smart_orchestrator":
+        kwargs["_smart_generation_resolver"] = resolve_smart_generation
+
     async def event_stream():
+        response_generation_budget = generation_budget
         stream_started_at = time.monotonic()
         heartbeat_interval_s = _stream_heartbeat_interval_s()
         provider_task: asyncio.Task | None = None
@@ -1213,7 +1329,7 @@ async def chat_stream(
                     context=context,
                     model_name=execution_plan.model_name,
                     token_tracker=None,
-                    research_mode=orchestrator_research_mode,
+                    research_mode=orchestrator_mode,
                     routing_mode=execution_plan.routing_mode,
                     routing_constraints=execution_plan.routing_constraints,
                     **kwargs,
@@ -1235,7 +1351,14 @@ async def chat_stream(
                     stream_log.log("heartbeat_sent", elapsed_ms=elapsed_ms)
             response = await provider_task
             response = sanitize_provider_error_response(normalize_empty_success_response(response))
-            response = annotate_response(response, generation_budget)
+            if execution_plan.strategy == "smart_orchestrator":
+                response_model = str(response.requested_model or response.model or "").strip()
+                if generation_registry.find_model(response.provider, response_model) is not None:
+                    response_generation_budget = resolve_smart_generation(
+                        response.provider,
+                        response_model,
+                    )
+            response = annotate_response(response, response_generation_budget)
             stream_log.log(
                 "provider_call_completed",
                 response_provider=getattr(response, "provider", ""),
@@ -1353,6 +1476,7 @@ async def chat_stream(
             )
             raise
         except Exception as exc:
+            public_error = unexpected_public_error(request_id=req_id)
             if not billing_finalization_attempted:
                 if (
                     billing_reservation is not None
@@ -1386,8 +1510,8 @@ async def chat_stream(
                     error_response = persistence_service.build_error_response(
                         provider=target_provider,
                         model=target_model,
-                        message=str(exc),
-                        code="provider_error",
+                        message=str(public_error["message"]),
+                        code=str(public_error["code"]),
                         retryable=True,
                     )
                     _persist_chat_interaction(
@@ -1403,7 +1527,7 @@ async def chat_stream(
                     )
                 except Exception:
                     logger.exception("Chat stream error persistence failed in DB mode")
-            yield stream_log.record_event(_to_ndjson({"type": "error", "message": str(exc)}))
+            yield stream_log.record_event(_to_ndjson({"type": "error", **public_error}))
 
     return StreamingResponse(
         event_stream(),

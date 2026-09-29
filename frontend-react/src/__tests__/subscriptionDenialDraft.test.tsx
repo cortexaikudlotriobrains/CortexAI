@@ -23,7 +23,6 @@ describe("subscription denial draft preservation", () => {
     useChatStore.setState({
       mode: "single",
       smartMode: false,
-      researchMode: false,
       optimizeMode: false,
       selectedModelKey: "openai:gpt-5.1",
       prompt: "Keep my exact draft",

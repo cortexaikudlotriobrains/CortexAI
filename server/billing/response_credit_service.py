@@ -15,6 +15,7 @@ from server.billing.credit_calculator import (
     calculate_credit_charge,
     calculate_model_credit_charge,
     research_credit_usage_from_metadata,
+    web_search_credit_usage_from_metadata,
 )
 from server.billing.credit_estimator import fallback_actual_tokens
 
@@ -25,6 +26,8 @@ class ResponseCreditUsage:
     credit_usage_estimated: bool
     research_ai_credits: int
     research_credit_usage_estimated: bool
+    web_search_ai_credits: int = 0
+    web_search_credit_usage_estimated: bool = False
     cache_hit: bool = False
     cache_hit_ratio: float = 0.0
     cache_savings_ai_credits: int = 0
@@ -107,7 +110,8 @@ def calculate_response_credit_usage(
             uncached_equivalent = cache_charge.uncached_equivalent_credits
 
     research_usage = research_credit_usage_from_metadata(metadata)
-    displayed_credits = model_credits
+    web_search_usage = web_search_credit_usage_from_metadata(metadata)
+    displayed_credits = model_credits + web_search_usage.cortex_credits
     if include_research_charge:
         displayed_credits += research_usage.cortex_credits
 
@@ -116,6 +120,8 @@ def calculate_response_credit_usage(
         credit_usage_estimated=model_usage_estimated,
         research_ai_credits=research_usage.cortex_credits,
         research_credit_usage_estimated=research_usage.estimated,
+        web_search_ai_credits=web_search_usage.cortex_credits,
+        web_search_credit_usage_estimated=web_search_usage.estimated,
         cache_hit=cache_hit,
         cache_hit_ratio=cache_hit_ratio,
         cache_savings_ai_credits=cache_savings,

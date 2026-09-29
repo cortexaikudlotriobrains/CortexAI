@@ -117,6 +117,27 @@ describe("history threads", () => {
     },
   );
 
+  it("restores Smart routing and effective reasoning metadata", () => {
+    const [restored] = buildTurnsFromHistoryEntries([
+      entry({
+        routing_mode: "smart",
+        generation_profile: "auto",
+        effective_max_output_tokens: 8_192,
+        effective_reasoning_mode: "standard",
+        effective_reasoning_effort: "high",
+        generation_policy_version: "generation-budget-v3",
+      }),
+    ]);
+
+    expect(restored.responses[0]).toMatchObject({
+      routing_mode: "smart",
+      generation_budget: {
+        effective_reasoning_mode: "standard",
+        effective_reasoning_effort: "high",
+      },
+    });
+  });
+
   it("searches all prompts, responses, providers, and models in a thread", () => {
     const threads = buildHistoryThreads([
       entry({ prompt: "Initial question", response: "Contains a deployment checklist" }),
@@ -135,6 +156,21 @@ describe("history threads", () => {
 
     expect(threads[0].title).toBe("Launch readiness");
     expect(filterHistoryThreads(threads, "launch readiness")).toHaveLength(1);
+  });
+
+  it("restores the persisted error category for safe response-card presentation", () => {
+    const [turn] = buildTurnsFromHistoryEntries([
+      entry({
+        response: "[error] Traceback from private-provider-host",
+        error_code: "provider_5xx",
+        completion_status: "failed",
+      }),
+    ]);
+
+    expect(turn.responses[0].error).toMatchObject({
+      code: "provider_5xx",
+      retryable: false,
+    });
   });
 
   it.each(["API Chat", "API Compare", " api chat "])(

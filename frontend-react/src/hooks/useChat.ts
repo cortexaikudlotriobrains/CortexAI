@@ -18,7 +18,13 @@ import {
   isSubscriptionDenial,
   toSubscriptionError,
 } from "../subscription/subscriptionErrors";
+import { useAttachmentUploadStore } from "../store/attachmentUploadStore";
 import { parseModelKey } from "./useSmartRouting";
+import {
+  presentError,
+  userFacingMessage,
+  type UserFacingError,
+} from "../errors/userFacingError";
 import type {
   ApiError,
   AttachmentRequestItem,
@@ -31,9 +37,14 @@ import type {
   FileUploadResponse,
   GenerationProfile,
   PromptOptimizationState,
+  ReasoningLevel,
   ResponseRunStatus,
   UserContextRequest,
 } from "../types";
+import {
+  generationForReasoningLevel,
+  reasoningLevelFromResponse,
+} from "../reasoning/reasoningLevels";
 
 const MANAGED_GENERATION_PROFILE: GenerationProfile = "auto";
 
@@ -56,10 +67,19 @@ export function useChat() {
     const clearComposer = options.clearComposer ?? !options.promptOverride;
     if (!rawPrompt && attachments.length === 0) return;
     if (state.mode === "compare" && state.compareModelKeys.filter(Boolean).length < 2) {
-      state.setError("Select at least two models to compare.");
+      state.setError(userFacingMessage(
+        "Choose another model",
+        "Select at least two models to compare.",
+        { code: "compare_requires_two_models", context: "chat" },
+      ));
       return;
     }
 
+    const composerSubmission = beginComposerSubmission({
+      enabled: clearComposer,
+      prompt: state.prompt,
+      attachments: [...state.attachments],
+    });
     const previousActiveTurnId = state.activeTurnId;
     const controller = beginRequestController();
 
@@ -87,8 +107,7 @@ export function useChat() {
           mode: state.mode,
           prompt: rawPrompt,
           submittedPrompt: rawPrompt,
-          researchEnabled:
-            state.mode === "compare" ? state.compareResearchMode : state.researchMode,
+          researchEnabled: false,
           optimizeEnabled: true,
           attachments,
           responses: buildPlaceholdersForCurrentMode(
@@ -139,7 +158,7 @@ export function useChat() {
           creditActivityId,
           initialQuery: rawPrompt,
           startedAt: requestStartedAt,
-          clearComposer,
+          acceptComposer: composerSubmission.accept,
         });
       } else {
         await runAskTurn({
@@ -154,7 +173,7 @@ export function useChat() {
           creditActivityId,
           initialQuery: rawPrompt,
           startedAt: requestStartedAt,
-          clearComposer,
+          acceptComposer: composerSubmission.accept,
         });
       }
     } catch (err: unknown) {
@@ -170,14 +189,17 @@ export function useChat() {
         latest.setStreaming(false);
         return;
       }
-      const message = toFriendlyError(err);
+      const visibleError = presentError(err, "chat");
       if (latest.activeTurnId) {
-        markTurnResponsesFailed(latest.activeTurnId, message);
+        markTurnResponsesFailed(latest.activeTurnId, visibleError);
         latest.setTurnStatus(latest.activeTurnId, "error");
+        latest.setError(null);
+      } else {
+        latest.setError(visibleError);
       }
-      latest.setError(message);
       latest.setStreaming(false);
     } finally {
+      composerSubmission.restore();
       clearRequestController(controller);
     }
   }, []);
@@ -236,6 +258,9 @@ export function useChat() {
         regenerationSourceRequestId:
           sourceTurn.mode === "compare" ? sourceResponse.request_id : undefined,
         generationProfileOverride,
+        reasoningLevelOverride: reasoningLevelFromResponse(
+          sourceResponse.generation_budget?.requested_reasoning_effort,
+        ),
       });
     } catch (err: unknown) {
       if (controller.signal.aborted) return;
@@ -250,17 +275,30 @@ export function useChat() {
         latest.setStreaming(false);
         return;
       }
-      const message = toFriendlyError(err);
+      const visibleError = presentError(err, "chat");
       if (generationProfileOverride) {
-        latest.setError(`Retry failed. The partial answer was kept. ${message}`);
+        latest.setError(userFacingMessage(
+          "Retry couldn't finish",
+          `The partial answer was kept. ${visibleError.message}`,
+          {
+            code: visibleError.code,
+            retryable: visibleError.retryable,
+            action: visibleError.retryable ? "retry" : "dismiss",
+            actionLabel: visibleError.retryable ? "Try again" : undefined,
+            requestId: visibleError.requestId,
+            context: "chat",
+          },
+        ));
         latest.setStreaming(false);
         return;
       }
       if (latest.activeTurnId) {
-        markTurnResponsesFailed(latest.activeTurnId, message);
+        markTurnResponsesFailed(latest.activeTurnId, visibleError);
         latest.setTurnStatus(latest.activeTurnId, "error");
+        latest.setError(null);
+      } else {
+        latest.setError(visibleError);
       }
-      latest.setError(message);
       latest.setStreaming(false);
     } finally {
       clearRequestController(controller);
@@ -311,8 +349,7 @@ async function runAskTurn({
   initialQuery,
   startedAt,
   targetOverride,
-  researchEnabledOverride,
-  clearComposer,
+  acceptComposer,
 }: {
   prompt: string;
   submittedPrompt: string;
@@ -327,22 +364,25 @@ async function runAskTurn({
   startedAt: string;
   targetOverride?: Partial<CompareTargetRequest>;
   researchEnabledOverride?: boolean;
-  clearComposer: boolean;
+  acceptComposer: () => void;
 }) {
   const state = useChatStore.getState();
   const selected = parseModelKey(state.selectedModelKey);
   const provider = targetOverride?.provider ?? selected.provider;
   const model = targetOverride?.model ?? selected.model;
   const smartMode = targetOverride?.provider ? false : state.smartMode;
-  const researchEnabled = researchEnabledOverride ?? state.researchMode;
+  const researchEnabled = false;
   const request: ChatRequest = {
     prompt: submittedPrompt,
     credit_activity_id: creditActivityId,
     initial_query: initialQuery,
     provider: smartMode ? undefined : provider || undefined,
     model: smartMode ? undefined : model || undefined,
-    routing: { smart_mode: smartMode, research_mode: researchEnabled },
-    generation: { profile: MANAGED_GENERATION_PROFILE },
+    routing: { smart_mode: smartMode, web_mode: "auto" },
+    generation: generationForReasoningLevel(
+      state.askReasoningLevel,
+      MANAGED_GENERATION_PROFILE,
+    ),
     attachments: attachmentItems.length > 0 ? attachmentItems : undefined,
     context,
   };
@@ -376,13 +416,12 @@ async function runAskTurn({
 
   let finalResponse: Partial<ChatResponse> = {};
   const deltaBuffer = new StreamDeltaBuffer(activeTurnId);
-  const commitComposer = deferredComposerClear(clearComposer);
   // finally guarantees no orphaned timeout can mutate a turn after the
   // cancel/error path has settled it.
   try {
     for await (const chunk of streamChat(request, signal)) {
       if (signal.aborted) break;
-      commitComposer();
+      acceptComposer();
       if (chunk.type === "delta" && chunk.text) {
         deltaBuffer.append(0, chunk.text);
         continue;
@@ -427,9 +466,10 @@ async function runAskTurn({
         if (chunk.session_id) latest.setSessionId(chunk.session_id);
         break;
       } else if (chunk.type === "error") {
-        throw new Error(chunk.error ?? "Stream error");
+        throw streamError(chunk.error);
       }
     }
+    if (!signal.aborted) acceptComposer();
   } finally {
     if (signal.aborted) {
       deltaBuffer.dispose();
@@ -477,7 +517,7 @@ async function runCompareTurn({
   creditActivityId,
   initialQuery,
   startedAt,
-  clearComposer,
+  acceptComposer,
 }: {
   prompt: string;
   submittedPrompt: string;
@@ -490,12 +530,16 @@ async function runCompareTurn({
   creditActivityId: string;
   initialQuery: string;
   startedAt: string;
-  clearComposer: boolean;
+  acceptComposer: () => void;
 }) {
   const state = useChatStore.getState();
   const activeKeys = state.compareModelKeys.filter(Boolean);
   if (activeKeys.length < 2) {
-    state.setError("Select at least two models to compare.");
+    state.setError(userFacingMessage(
+      "Choose another model",
+      "Select at least two models to compare.",
+      { code: "compare_requires_two_models", context: "chat" },
+    ));
     state.setStreaming(false);
     return;
   }
@@ -504,7 +548,7 @@ async function runCompareTurn({
     const { provider, model } = parseModelKey(key);
     return { provider, model: model || undefined };
   });
-  const researchEnabled = state.compareResearchMode;
+  const researchEnabled = false;
   const placeholders = targets.map((target, index) =>
     makePlaceholderResponse(index, target.provider, target.model ?? "", state.sessionId, {
       startedAt,
@@ -515,8 +559,11 @@ async function runCompareTurn({
     credit_activity_id: creditActivityId,
     initial_query: initialQuery,
     targets,
-    routing: { smart_mode: false, research_mode: researchEnabled },
-    generation: { profile: MANAGED_GENERATION_PROFILE },
+    routing: { smart_mode: false, web_mode: "auto" },
+    generation: generationForReasoningLevel(
+      state.compareReasoningLevel,
+      MANAGED_GENERATION_PROFILE,
+    ),
     attachments: attachmentItems.length > 0 ? attachmentItems : undefined,
     context,
   };
@@ -542,11 +589,10 @@ async function runCompareTurn({
   }
 
   const deltaBuffer = new StreamDeltaBuffer(activeTurnId);
-  const commitComposer = deferredComposerClear(clearComposer);
   try {
     for await (const chunk of streamCompare(request, signal)) {
       if (signal.aborted) break;
-      commitComposer();
+      acceptComposer();
       const index = chunk.index ?? 0;
       if (chunk.type === "delta" && chunk.text) {
         deltaBuffer.append(index, chunk.text);
@@ -583,9 +629,10 @@ async function runCompareTurn({
         if (chunk.session_id) latest.setSessionId(chunk.session_id);
         break;
       } else if (chunk.type === "error") {
-        throw new Error(chunk.error ?? "Compare stream error");
+        throw streamError(chunk.error);
       }
     }
+    if (!signal.aborted) acceptComposer();
   } finally {
     if (signal.aborted) {
       deltaBuffer.dispose();
@@ -611,9 +658,9 @@ async function runRegenerateResponse({
   signal,
   startedAt,
   targetOverride,
-  researchEnabledOverride,
   regenerationSourceRequestId,
   generationProfileOverride,
+  reasoningLevelOverride,
 }: {
   turnId: string;
   responseIndex: number;
@@ -626,21 +673,24 @@ async function runRegenerateResponse({
   researchEnabledOverride?: boolean;
   regenerationSourceRequestId?: string;
   generationProfileOverride?: GenerationProfile;
+  reasoningLevelOverride: ReasoningLevel;
 }) {
   const state = useChatStore.getState();
   const selected = parseModelKey(state.selectedModelKey);
   const provider = targetOverride?.provider ?? selected.provider;
   const model = targetOverride?.model ?? selected.model;
   const smartMode = targetOverride?.provider ? false : state.smartMode;
-  const researchEnabled = researchEnabledOverride ?? state.researchMode;
   const request: ChatRequest = {
     prompt: submittedPrompt,
     credit_activity_id: createCreditActivityId(),
     initial_query: submittedPrompt,
     provider: smartMode ? undefined : provider || undefined,
     model: smartMode ? undefined : model || undefined,
-    routing: { smart_mode: smartMode, research_mode: researchEnabled },
-    generation: { profile: generationProfileOverride ?? MANAGED_GENERATION_PROFILE },
+    routing: { smart_mode: smartMode, web_mode: "auto" },
+    generation: generationForReasoningLevel(
+      reasoningLevelOverride,
+      generationProfileOverride ?? MANAGED_GENERATION_PROFILE,
+    ),
     attachments: attachmentItems.length > 0 ? attachmentItems : undefined,
     context,
     regeneration: regenerationSourceRequestId
@@ -708,7 +758,7 @@ async function runRegenerateResponse({
         if (chunk.session_id) latest.setSessionId(chunk.session_id);
         break;
       } else if (chunk.type === "error") {
-        throw new Error(chunk.error ?? "Stream error");
+        throw streamError(chunk.error);
       }
     }
   } finally {
@@ -805,7 +855,7 @@ function getTurnResponse(
   );
 }
 
-function markTurnResponsesFailed(turnId: string, message: string) {
+function markTurnResponsesFailed(turnId: string, visibleError: UserFacingError) {
   const state = useChatStore.getState();
   const turn = state.turns.find((item) => item.id === turnId);
   if (!turn) return;
@@ -821,7 +871,7 @@ function markTurnResponsesFailed(turnId: string, message: string) {
     state.updateTurnResponse(turnId, index, {
       ...response,
       text: "",
-      error: response.error ?? makeUiError(response, message),
+      error: response.error ?? makeUiError(response, visibleError),
       ui_status: "failed",
       failed_at: failedAt,
       started_at: response.started_at ?? failedAt,
@@ -829,13 +879,16 @@ function markTurnResponsesFailed(turnId: string, message: string) {
   });
 }
 
-function makeUiError(response: ChatResponse, message: string): ApiError {
+function makeUiError(response: ChatResponse, visibleError: UserFacingError): ApiError {
   return {
-    code: "stream_error",
-    message,
+    code: visibleError.code || "stream_error",
+    message: visibleError.message,
     provider: response.provider,
-    retryable: false,
-    details: {},
+    retryable: visibleError.retryable,
+    details: {
+      user_title: visibleError.title,
+      request_id: visibleError.requestId,
+    },
   };
 }
 
@@ -868,15 +921,43 @@ function toAttachmentItems(attachments: FileUploadResponse[]): AttachmentRequest
   }));
 }
 
-function deferredComposerClear(enabled: boolean): () => void {
-  let committed = !enabled;
-  return () => {
-    if (committed) return;
-    committed = true;
-    const state = useChatStore.getState();
-    void clearAttachmentUploads({ deleteRemote: false });
-    state.setPrompt("");
-    state.clearAttachments();
+function beginComposerSubmission({
+  enabled,
+  prompt,
+  attachments,
+}: {
+  enabled: boolean;
+  prompt: string;
+  attachments: FileUploadResponse[];
+}): { accept: () => void; restore: () => void } {
+  if (!enabled) return { accept: () => undefined, restore: () => undefined };
+
+  // Hand the prompt off to the optimistic turn immediately, but keep a local
+  // snapshot until the server accepts the stream so pre-stream failures remain editable.
+  let pending = true;
+  const uploadTasks = [...useAttachmentUploadStore.getState().tasks];
+  const state = useChatStore.getState();
+  void clearAttachmentUploads({ deleteRemote: false });
+  state.setPrompt("");
+  state.clearAttachments();
+
+  return {
+    accept: () => {
+      pending = false;
+    },
+    restore: () => {
+      if (!pending) return;
+      pending = false;
+
+      const latest = useChatStore.getState();
+      if (!latest.prompt) latest.setPrompt(prompt);
+      for (const attachment of attachments) latest.addAttachment(attachment);
+
+      const uploadState = useAttachmentUploadStore.getState();
+      const currentTaskIds = new Set(uploadState.tasks.map((task) => task.clientId));
+      const missingTasks = uploadTasks.filter((task) => !currentTaskIds.has(task.clientId));
+      if (missingTasks.length > 0) uploadState.addTasks(missingTasks);
+    },
   };
 }
 
@@ -890,29 +971,13 @@ async function refreshHistory() {
   }
 }
 
-function toFriendlyError(err: unknown): string {
-  if (err instanceof DOMException && err.name === "AbortError") return "Request cancelled.";
-  if (err instanceof ApiClientError) {
-    const detail = getDetailRecord(err.body);
-    const code = typeof detail?.code === "string" ? detail.code : "";
-    if (err.status === 403 && code === "session_auth_required") {
-      return "Your session is not ready. Sign in or enable the local dev session, then try again.";
-    }
-    if (code === "attachments_require_db") {
-      return "Attachments require the database-backed backend. Start the full app with PostgreSQL enabled.";
-    }
-    if (code === "no_attachment_compatible_provider") {
-      return "The selected model cannot use the attached files. Switch models or remove the attachment.";
-    }
-    return err.message;
-  }
-  return err instanceof Error ? err.message : "An unexpected error occurred.";
-}
-
-function getDetailRecord(body: unknown): Record<string, unknown> | null {
-  if (typeof body !== "object" || body === null) return null;
-  const detail = (body as Record<string, unknown>).detail;
-  return typeof detail === "object" && detail !== null ? (detail as Record<string, unknown>) : null;
+function streamError(rawMessage?: string): ApiClientError {
+  return new ApiClientError(
+    0,
+    rawMessage ?? "Stream error",
+    undefined,
+    { code: "stream_error", retryable: true },
+  );
 }
 
 function createCreditActivityId(): string {

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { FeatureChips } from "../components/composer/FeatureChips";
+import { ComposerOptionsMenu } from "../components/composer/ComposerOptionsMenu";
 import { ResultsSection } from "../components/results/ResultsSection";
 import { useChat } from "../hooks/useChat";
 import { buildConversationHistory } from "../hooks/useChat";
@@ -23,15 +23,9 @@ describe("prompt optimization", () => {
     useChatStore.setState({
       mode: "single",
       smartMode: true,
-      researchMode: false,
-      compareResearchMode: true,
       optimizeMode: false,
       selectedModelKey: "openai:gpt-5.1",
-      compareModelKeys: [
-        "openai:gpt-5.1",
-        "claude:claude-sonnet-4-5",
-        "",
-      ],
+      compareModelKeys: ["openai:gpt-5.1", "claude:claude-sonnet-4-5", ""],
       prompt: "",
       attachments: [],
       turns: [],
@@ -133,9 +127,9 @@ describe("prompt optimization", () => {
     fireEvent.click(screen.getByRole("button", { name: "Submit" }));
 
     await waitFor(() => {
-      expect(fetchMock.mock.calls.some(([input]) => String(input) === "/v1/history?limit=500")).toBe(
-        true,
-      );
+      expect(
+        fetchMock.mock.calls.some(([input]) => String(input) === "/v1/history?limit=500"),
+      ).toBe(true);
     });
     const optimizeCall = fetchMock.mock.calls.find(([input]) => String(input) === "/v1/optimize");
     const chatCall = fetchMock.mock.calls.find(([input]) => String(input) === "/v1/chat/stream");
@@ -340,18 +334,20 @@ describe("prompt optimization", () => {
 
   it("keeps Improve available in Compare mode", () => {
     render(
-      <FeatureChips
-        compareMode
-        smartMode={false}
-        researchMode={true}
+      <ComposerOptionsMenu
         optimizeMode={true}
-        onSmartToggle={vi.fn()}
-        onResearchToggle={vi.fn()}
         onOptimizeToggle={vi.fn()}
+        reasoningValue="auto"
+        supportedReasoningLevels={["low", "medium", "high", "max"]}
+        reasoningContextLabel="Selected models"
+        onReasoningChange={vi.fn()}
+        modeLabel="Compare"
       />,
     );
 
-    expect(screen.getByRole("switch", { name: "Prompt optimization" })).toHaveAttribute(
+    fireEvent.click(screen.getByRole("button", { name: "More options" }));
+
+    expect(screen.getByRole("switch", { name: /Improve prompt/ })).toHaveAttribute(
       "aria-checked",
       "true",
     );
@@ -413,16 +409,16 @@ describe("prompt optimization", () => {
         "Improving your prompt",
       );
     });
-    expect(document.querySelector("[data-turn-id]")?.querySelectorAll("article"))
-      .toHaveLength(0);
+    expect(useChatStore.getState().prompt).toBe("");
+    expect(document.querySelector("[data-turn-id]")?.querySelectorAll("article")).toHaveLength(0);
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
     await waitFor(() => {
       expect(screen.getByText("Optimization stopped.")).toBeInTheDocument();
     });
-    expect(document.querySelector("[data-turn-id]")?.querySelectorAll("article"))
-      .toHaveLength(0);
+    expect(document.querySelector("[data-turn-id]")?.querySelectorAll("article")).toHaveLength(0);
+    expect(useChatStore.getState().prompt).toBe("Cancel this optimization");
     expect(useChatStore.getState().streaming).toBe(false);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/v1/optimize");
