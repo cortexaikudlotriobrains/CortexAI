@@ -364,7 +364,7 @@ test("desktop composer uses the refresh hairline shell and soft textarea focus s
     await expectSoftComposerShell(page);
 });
 
-test("desktop feature chips show accessible tooltips in Ask and Compare", async ({ responsiveApp }) => {
+test("desktop Smart tooltip and options dialog stay accessible in Ask and Compare", async ({ responsiveApp }) => {
     const { page } = responsiveApp;
     await page.setViewportSize({ width: 1440, height: 900 });
 
@@ -373,23 +373,34 @@ test("desktop feature chips show accessible tooltips in Ask and Compare", async 
         "Smart routing",
         "Gets you the best answer automatically",
     );
-    await expectChipTooltip(
-        page,
-        "Prompt optimization",
-        "Helps you ask better for better results",
-    );
     await expect(page.getByRole("switch", { name: "Research mode" })).toHaveCount(0);
+    const askOptions = page.getByRole("button", { name: "More options" });
+    await expect(askOptions).toHaveAttribute("data-improve-enabled", "false");
+    await expect(askOptions).toHaveAttribute("data-reasoning-level", "auto");
+    await expect(askOptions).toHaveAttribute("data-options-configured", "false");
+    await expect(askOptions).toHaveAttribute("aria-haspopup", "dialog");
+    await askOptions.click();
+    await expect(page.getByRole("dialog", { name: "More options" })).toBeVisible();
+    await expect(page.getByRole("switch", { name: /Improve prompt/ })).toBeVisible();
+    await expect(
+        page.getByRole("radio", { name: "Auto — Cortex chooses for each request" }),
+    ).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByText("Applied to Smart routing", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "More options" }).click();
 
     await page.locator("#btnCompareMode").click();
-    await expectChipTooltip(
-        page,
-        "Prompt optimization",
-        "Helps you ask better for better results",
-    );
+    const compareOptions = page.getByRole("button", { name: "More options" });
+    await expect(compareOptions).toHaveAttribute("data-reasoning-level", /low|medium|high|max/);
+    await expect(compareOptions).toHaveAttribute("data-options-configured", "true");
+    await expect(page.getByRole("button", { name: "Reset reasoning to Auto" })).toBeVisible();
+    await compareOptions.click();
+    await expect(page.getByRole("switch", { name: /Improve prompt/ })).toBeVisible();
+    await expect(page.getByRole("radiogroup", { name: "Reasoning" })).toBeVisible();
+    await expect(page.getByText("Shared across selected models", { exact: true })).toBeVisible();
     await expectNoHorizontalOverflow(page);
 });
 
-test("dark theme gives enabled Ask feature chips a distinct accent state", async ({ responsiveApp }) => {
+test("dark theme gives enabled Smart and Improve states distinct treatment", async ({ responsiveApp }) => {
     const { page } = responsiveApp;
     await page.setViewportSize({ width: 1440, height: 900 });
 
@@ -397,23 +408,27 @@ test("dark theme gives enabled Ask feature chips a distinct accent state", async
     await page.getByRole("menuitem", { name: "Switch to dark theme" }).click();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 
-    const switches = [
-        page.getByRole("switch", { name: "Smart routing" }),
-        page.getByRole("switch", { name: "Prompt optimization" }),
-    ];
-    for (const featureSwitch of switches) {
-        if ((await featureSwitch.getAttribute("aria-checked")) !== "true") {
-            await featureSwitch.click();
-        }
-        await page.getByRole("navigation", { name: "Workspace mode" }).hover();
-        await expect(featureSwitch).toHaveCSS("background-color", "rgb(52, 52, 103)");
-        await expect(featureSwitch).toHaveCSS("color", "rgb(255, 255, 255)");
-        await expect(featureSwitch).toHaveCSS("box-shadow", /rgb\(139, 139, 240\)/);
+    const smart = page.getByRole("switch", { name: "Smart routing" });
+    if ((await smart.getAttribute("aria-checked")) !== "true") {
+        await smart.click();
     }
+    await page.getByRole("navigation", { name: "Workspace mode" }).hover();
+    await expect(smart).toHaveCSS("background-color", "rgb(52, 52, 103)");
+    await expect(smart).toHaveCSS("color", "rgb(255, 255, 255)");
+    await expect(smart).toHaveCSS("box-shadow", /rgb\(139, 139, 240\)/);
 
-    await switches[0].click();
-    await expect(switches[0]).not.toHaveCSS("background-color", "rgb(52, 52, 103)");
-    await expect(switches[0]).not.toHaveCSS("color", "rgb(255, 255, 255)");
+    await page.getByRole("button", { name: "More options" }).click();
+    const improve = page.getByRole("switch", { name: /Improve prompt/ });
+    await improve.click();
+    await expect(improve).toHaveAttribute("aria-checked", "true");
+    const options = page.getByRole("button", { name: "More options" });
+    await expect(options).toHaveAttribute("data-improve-enabled", "true");
+    await expect(options).toHaveAttribute("data-options-configured", "true");
+    await expect(page.getByRole("button", { name: "Turn off Improve prompt" })).toBeVisible();
+
+    await smart.click();
+    await expect(smart).not.toHaveCSS("background-color", "rgb(52, 52, 103)");
+    await expect(smart).not.toHaveCSS("color", "rgb(255, 255, 255)");
 });
 
 test("dark theme keeps the top Ask and Compare tabs legible", async ({ responsiveApp }) => {
@@ -467,8 +482,9 @@ test("Compare omits Web and retains the Improve control", async ({ responsiveApp
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.locator("#btnCompareMode").click();
 
-    const improve = page.getByRole("switch", { name: "Prompt optimization" });
     await expect(page.getByRole("switch", { name: "Research mode" })).toHaveCount(0);
+    await page.getByRole("button", { name: "More options" }).click();
+    const improve = page.getByRole("switch", { name: /Improve prompt/ });
     await expect(improve).toBeVisible();
     await expect(improve).toHaveAttribute("aria-checked", "false");
     await improve.click();
@@ -477,7 +493,9 @@ test("Compare omits Web and retains the Improve control", async ({ responsiveApp
     await page.getByRole("button", { name: "Account" }).click();
     await page.getByRole("menuitem", { name: "Switch to dark theme" }).click();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-    await expect(improve).toHaveCSS("color", "rgb(255, 255, 255)");
+    await page.getByRole("button", { name: "More options" }).click();
+    await expect(improve).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    await expect(improve).toHaveCSS("color", "rgb(241, 243, 246)");
 });
 
 test("desktop Ask and Compare keep feature controls beside Attach", async ({ responsiveApp }) => {
@@ -485,8 +503,8 @@ test("desktop Ask and Compare keep feature controls beside Attach", async ({ res
     await page.setViewportSize({ width: 1440, height: 900 });
 
     for (const [mode, switchNames] of [
-        ["Ask", ["Smart routing", "Prompt optimization"]],
-        ["Compare", ["Prompt optimization"]],
+        ["Ask", ["Smart routing"]],
+        ["Compare", []],
     ]) {
         await page
             .getByRole("navigation", { name: "Workspace mode" })
@@ -546,7 +564,8 @@ test("Improve clears the composer and keeps response cards hidden until optimiza
         ].join("\n"),
     }));
 
-    await page.getByRole("switch", { name: "Prompt optimization" }).click();
+    await page.getByRole("button", { name: "More options" }).click();
+    await page.getByRole("switch", { name: /Improve prompt/ }).click();
     await page.locator("#promptInput").fill("rough browser prompt");
     await page.locator("#submitBtn").click();
 
@@ -746,8 +765,14 @@ async function expectCenteredComposer(page) {
 
 async function expectComposerToolbarOrder(page, switchNames) {
     const attach = page.getByRole("button", { name: "Attach files" });
+    const options = page.getByRole("button", { name: "More options" });
     const send = page.getByRole("button", { name: "Send message" });
-    const controls = [attach, ...switchNames.map(name => page.getByRole("switch", { name })), send];
+    const controls = [
+        attach,
+        ...switchNames.map(name => page.getByRole("switch", { name })),
+        options,
+        send,
+    ];
     const bounds = [];
 
     for (const control of controls) {
@@ -812,4 +837,23 @@ test("iPad portrait switches to mobile navigation without overlap", async ({ res
     });
     expect(metrics.composerBottom).toBeLessThanOrEqual(metrics.navTop + 1);
     await expectNoHorizontalOverflow(page);
+});
+
+test("iPad keeps the options popover fully visible above the composer", async ({ responsiveApp }) => {
+    const { page } = responsiveApp;
+    await page.setViewportSize({ width: 820, height: 1180 });
+
+    const composer = page.locator("#promptInput").locator("xpath=../..");
+    await page.getByRole("button", { name: "More options", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "More options" });
+    await expect(dialog).toHaveAttribute("data-layout", "popover");
+
+    const dialogBounds = await dialog.boundingBox();
+    const composerBounds = await composer.boundingBox();
+    expect(dialogBounds).not.toBeNull();
+    expect(composerBounds).not.toBeNull();
+    expect(dialogBounds.x).toBeGreaterThanOrEqual(0);
+    expect(dialogBounds.x + dialogBounds.width).toBeLessThanOrEqual(820);
+    expect(dialogBounds.y).toBeGreaterThanOrEqual(0);
+    expect(dialogBounds.y + dialogBounds.height).toBeLessThanOrEqual(composerBounds.y);
 });

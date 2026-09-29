@@ -88,6 +88,14 @@ starts at the selected model's lowest supported public level. Compare starts at 
 enables only the intersection supported by every selected target. A model with no
 controllable reasoning exposes an unavailable control. Work has no new control.
 
+After a successful Smart Ask completes, the response card shows the authoritative
+effective `Low`, `Medium`, `High`, or `Max` effort beside AI-credit usage. The metric
+uses both `routing_mode=smart` and `generation_budget.effective_reasoning_effort`, so it
+reflects the route and budget actually executed rather than the request-time preview.
+Each level has distinct text and color styling; color is never the only signal. Manual
+Ask, Compare, Work, pending/failed cards, and unknown or disabled efforts omit it. The
+same fields are retained in history so restored Smart responses render consistently.
+
 `GET /v1/model-options` and the opt-in `/v1/models` expose `reasoning_levels`,
 `default_reasoning_level`, and `reasoning_controllable` in addition to the native
 reasoning metadata. The React UI consumes only these normalized fields.

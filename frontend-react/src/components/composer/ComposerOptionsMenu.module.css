@@ -1,0 +1,541 @@
+.trigger {
+  display: inline-flex;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--cx-hairline);
+  border-radius: 11px;
+  background: var(--cx-surface);
+  color: var(--cx-ink-600);
+  cursor: pointer;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+.trigger svg {
+  width: 17px;
+  height: 17px;
+}
+
+.trigger:hover {
+  border-color: var(--cx-accent-border);
+  background: var(--cx-surface-2);
+  color: var(--cx-ink-900);
+  transform: translateY(-1px);
+}
+
+.trigger.open,
+.trigger.open:hover {
+  border-color: var(--cx-feature-active-bg);
+  background: var(--cx-feature-active-bg);
+  color: var(--cx-feature-active-fg);
+}
+
+.trigger:focus-visible,
+.improveRow:focus-visible,
+.reasoningOption:focus-visible,
+.chipBody:focus-visible,
+.chipReset:focus-visible {
+  outline: 2px solid var(--cx-accent);
+  outline-offset: 2px;
+}
+
+.screenReaderOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.menu {
+  position: fixed;
+  z-index: 1001;
+  overflow: auto;
+  border: 1px solid var(--cx-hairline);
+  background: var(--cx-surface);
+  color: var(--cx-ink-900);
+}
+
+.popover {
+  max-height: calc(100vh - 24px);
+  border-radius: 16px;
+  box-shadow: 0 22px 48px -20px rgba(11, 18, 32, .32);
+  padding: 14px 12px 12px;
+  animation: popoverIn 160ms ease both;
+}
+
+.menuHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--cx-ink-500);
+  font: 700 12px/18px var(--font-sans);
+  padding: 0 8px 7px;
+}
+
+.menuHeader span:first-child {
+  color: var(--cx-ink-900);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.menuHeader span:last-child {
+  white-space: nowrap;
+}
+
+.improveRow,
+.reasoningHeader {
+  display: grid;
+  width: 100%;
+  min-height: 52px;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--cx-ink-900);
+  padding: 10px;
+  text-align: left;
+}
+
+.improveRow {
+  cursor: pointer;
+}
+
+.improveRow[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: .62;
+}
+
+.rowIcon {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--cx-feature-active-bg);
+  color: var(--cx-feature-active-fg);
+}
+
+.rowIcon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.rowCopy,
+.optionCopy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.rowCopy strong,
+.optionCopy strong {
+  color: var(--cx-ink-900);
+  font: 700 13px/17px var(--font-sans);
+}
+
+.rowCopy small,
+.optionCopy small {
+  color: var(--cx-ink-500);
+  font: 500 12px/16px var(--font-sans);
+}
+
+.switch {
+  display: inline-flex;
+  width: 36px;
+  height: 22px;
+  align-items: center;
+  border-radius: 999px;
+  background: var(--cx-surface-3);
+  transition: background-color 180ms ease;
+}
+
+.switch span {
+  width: 16px;
+  height: 16px;
+  margin-left: 3px;
+  border-radius: 50%;
+  background: var(--cx-surface);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .2);
+  transition: transform 180ms ease;
+}
+
+.improveRow[aria-checked="true"] .switch {
+  background: var(--cx-accent);
+}
+
+.improveRow[aria-checked="true"] .switch span {
+  transform: translateX(14px);
+}
+
+.divider {
+  height: 1px;
+  margin: 3px 0 10px;
+  background: var(--cx-hairline-soft);
+}
+
+.reasoningHeader {
+  grid-template-columns: 32px minmax(0, 1fr);
+  min-height: 48px;
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+
+.reasoningList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 2px 4px 46px;
+}
+
+.reasoningOption {
+  display: grid;
+  width: 100%;
+  min-height: 44px;
+  grid-template-columns: minmax(0, 1fr) 22px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--cx-ink-900);
+  cursor: pointer;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.reasoningOption:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--cx-accent-soft) 42%, transparent);
+}
+
+.reasoningOption:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+
+.selectedOption,
+.selectedOption:hover:not(:disabled) {
+  background: var(--cx-accent-soft);
+}
+
+.checkSpace {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  color: var(--cx-accent);
+}
+
+.checkSpace svg {
+  width: 16px;
+  height: 16px;
+}
+
+.note {
+  margin-top: 4px;
+  border-top: 1px solid var(--cx-hairline-soft);
+  color: var(--cx-ink-500);
+  font: 500 12px/17px var(--font-sans);
+  padding: 10px 6px 0;
+}
+
+.backdrop {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  border: 0;
+  background: rgba(11, 18, 32, .38);
+  cursor: default;
+  padding: 0;
+  animation: backdropIn 200ms ease both;
+}
+
+.sheet {
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  max-height: min(88dvh, 760px);
+  border-right: 0;
+  border-bottom: 0;
+  border-left: 0;
+  border-radius: 26px 26px 0 0;
+  padding: 8px 14px calc(30px + env(safe-area-inset-bottom));
+  transform: translateY(var(--sheet-drag-y, 0));
+  animation: sheetIn 200ms ease both;
+}
+
+.sheetHandle {
+  width: 38px;
+  height: 5px;
+  margin: 0 auto 8px;
+  border-radius: 999px;
+  background: var(--cx-hairline);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.chips {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: none;
+}
+
+.chips::-webkit-scrollbar {
+  display: none;
+}
+
+.optionChip {
+  display: inline-flex;
+  height: 32px;
+  flex: 0 0 auto;
+  align-items: center;
+  border-radius: 16px;
+  background: var(--cx-accent-soft);
+  color: var(--cx-accent-hover);
+  animation: chipIn 180ms ease both;
+  white-space: nowrap;
+}
+
+.chipBody,
+.chipReset {
+  display: inline-flex;
+  height: 100%;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.chipBody {
+  gap: 6px;
+  border-radius: 16px 0 0 16px;
+  font: 700 12.5px/16px var(--font-sans);
+  padding: 0 4px 0 11px;
+}
+
+.chipReset {
+  width: 28px;
+  justify-content: center;
+  border-radius: 0 16px 16px 0;
+  padding: 0 6px 0 0;
+}
+
+.chipIcon {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 13px;
+}
+
+.chipReset svg {
+  width: 12px;
+  height: 12px;
+}
+
+.chipBody:hover,
+.chipReset:hover {
+  color: var(--cx-accent);
+}
+
+@media (max-width: 1023px) {
+  .trigger {
+    width: 44px;
+    height: 44px;
+    flex-basis: 44px;
+    border-radius: 12px;
+  }
+
+  .trigger svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .popover {
+    border-radius: 18px;
+  }
+
+  .improveRow {
+    min-height: 60px;
+  }
+
+  .rowIcon {
+    width: 34px;
+    height: 34px;
+  }
+
+  .switch {
+    width: 44px;
+    height: 26px;
+  }
+
+  .switch span {
+    width: 20px;
+    height: 20px;
+  }
+
+  .improveRow[aria-checked="true"] .switch span {
+    transform: translateX(18px);
+  }
+
+  .reasoningOption {
+    min-height: 50px;
+  }
+
+  .optionChip {
+    height: 36px;
+    border-radius: 18px;
+  }
+
+  .chipBody {
+    border-radius: 18px 0 0 18px;
+    font-size: 13px;
+  }
+
+  .chipReset {
+    width: 34px;
+    border-radius: 0 18px 18px 0;
+  }
+
+  .chipIcon {
+    display: none;
+  }
+}
+
+@media (max-width: 767px) {
+  .menuHeader {
+    padding: 0 12px 7px;
+    font-size: 14px;
+  }
+
+  .menuHeader span:first-child {
+    font-size: 16px;
+  }
+
+  .improveRow,
+  .reasoningHeader {
+    grid-template-columns: 36px minmax(0, 1fr) auto;
+  }
+
+  .reasoningHeader {
+    grid-template-columns: 36px minmax(0, 1fr);
+  }
+
+  .rowIcon {
+    width: 36px;
+    height: 36px;
+  }
+
+  .rowCopy strong,
+  .optionCopy strong {
+    font-size: 14px;
+    line-height: 18px;
+  }
+
+  .rowCopy small,
+  .optionCopy small {
+    font-size: 13px;
+    line-height: 18px;
+  }
+
+  .divider {
+    margin-top: 5px;
+    margin-bottom: 10px;
+  }
+
+  .reasoningList {
+    gap: 2px;
+    margin-right: 0;
+    margin-left: 0;
+  }
+
+  .reasoningOption {
+    min-height: 54px;
+    padding: 8px 12px;
+  }
+
+  .optionCopy {
+    flex-flow: row wrap;
+    align-items: baseline;
+    gap: 0 6px;
+  }
+
+  .note {
+    font-size: 13px;
+    line-height: 18px;
+    padding: 12px 12px 0;
+  }
+}
+
+@keyframes popoverIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes sheetIn {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(var(--sheet-drag-y, 0));
+  }
+}
+
+@keyframes backdropIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes chipIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trigger,
+  .switch,
+  .switch span,
+  .menu,
+  .backdrop,
+  .optionChip {
+    transition: none;
+    animation: none;
+  }
+
+  .trigger:hover {
+    transform: none;
+  }
+}

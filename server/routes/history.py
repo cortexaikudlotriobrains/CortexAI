@@ -67,6 +67,7 @@ class HistoryEntry(BaseModel):
     effective_max_output_tokens: Optional[int] = None
     effective_reasoning_mode: Optional[str] = None
     effective_reasoning_effort: Optional[str] = None
+    routing_mode: Optional[str] = None
     generation_policy_version: Optional[str] = None
     completion_status: str = "complete"
     stop_cause: str = "unknown"

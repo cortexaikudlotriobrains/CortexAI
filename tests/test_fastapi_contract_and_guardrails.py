@@ -150,6 +150,12 @@ class FakeOrchestrator:
         self.last_ask_model_type = model_type
         self.last_ask_context = context
         self.last_ask_kwargs = dict(kwargs)
+        routing_mode = (
+            "smart"
+            if str(kwargs.get("routing_mode") or "").strip().lower() == "smart"
+            and not model_type
+            else "explicit"
+        )
         return UnifiedResponse(
             request_id="req_ask_1",
             text="OK",
@@ -160,7 +166,10 @@ class FakeOrchestrator:
             estimated_cost=0.00001,
             finish_reason="stop",
             error=None,
-            metadata=self._metadata_for_research_mode(kwargs.get("research_mode")),
+            metadata={
+                **self._metadata_for_research_mode(kwargs.get("research_mode")),
+                "routing": {"mode": routing_mode},
+            },
         )
 
     def prepare_messages_for_turn(
@@ -1658,7 +1667,7 @@ def test_chat_dto_uses_requested_model_for_versioned_served_model_credits():
         estimated_cost=0.0,
         finish_reason="stop",
         error=None,
-        metadata={},
+        metadata={"routing": {"mode": " SMART "}},
     )
 
     dto = ChatResponseDTO.from_unified_response(response)
@@ -1666,6 +1675,7 @@ def test_chat_dto_uses_requested_model_for_versioned_served_model_credits():
     assert dto.requested_model == "gpt-4o-mini"
     assert dto.served_model == "gpt-4o-mini-2024-07-18"
     assert dto.pricing_model == "gpt-4o-mini-2024-07-18"
+    assert dto.routing_mode == "smart"
     assert dto.ai_credits == 916
     assert dto.credit_usage_estimated is False
 
@@ -2527,6 +2537,7 @@ def test_chat_accepts_auto_routing_without_provider(client, app):
     body = r.json()
     assert body.get("provider") in set(get_provider_ids())
     assert isinstance(body.get("model"), str)
+    assert body.get("routing_mode") == "smart"
     assert app.state.fake_orchestrator.last_ask_model_type is None
     assert app.state.fake_orchestrator.last_ask_kwargs.get("routing_mode") == "smart"
 

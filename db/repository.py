@@ -3142,6 +3142,11 @@ def get_llm_history_entries(
         if routing_decisions is not None and "trace" in routing_cols
         else None
     )
+    routing_mode_col = (
+        routing_decisions.c.routing_mode
+        if routing_decisions is not None and "routing_mode" in routing_cols
+        else None
+    )
 
     prompt_expr = req_prompt_col if req_prompt_col is not None else literal(None)
     prompt_hash_expr = req_prompt_hash_col if req_prompt_hash_col is not None else literal(None)
@@ -3214,6 +3219,7 @@ def get_llm_history_entries(
         llm_responses.c.pricing_unknown if "pricing_unknown" in resp_cols else literal(False)
     )
     routing_trace_expr = routing_trace_col if routing_trace_col is not None else literal(None)
+    routing_mode_expr = routing_mode_col if routing_mode_col is not None else literal(None)
     session_title_expr = sessions.c.title if "title" in session_cols else literal(None)
     response_revision_root_expr = (
         req_revision_root_col if req_revision_root_col is not None else literal(None)
@@ -3300,6 +3306,7 @@ def get_llm_history_entries(
             cost_expr.label("cost"),
             error_expr.label("error_message"),
             error_code_expr.label("error_code"),
+            routing_mode_expr.label("routing_mode"),
             routing_trace_expr.label("routing_trace"),
         )
         .select_from(from_clause)
@@ -3393,6 +3400,7 @@ def get_llm_history_entries(
                 "effective_max_output_tokens": payload.get("effective_max_output_tokens"),
                 "effective_reasoning_mode": payload.get("effective_reasoning_mode"),
                 "effective_reasoning_effort": payload.get("effective_reasoning_effort"),
+                "routing_mode": payload.get("routing_mode"),
                 "generation_policy_version": payload.get("generation_policy_version"),
                 "completion_status": str(payload.get("completion_status") or "complete"),
                 "stop_cause": str(payload.get("stop_cause") or "unknown"),

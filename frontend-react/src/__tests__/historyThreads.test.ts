@@ -117,6 +117,27 @@ describe("history threads", () => {
     },
   );
 
+  it("restores Smart routing and effective reasoning metadata", () => {
+    const [restored] = buildTurnsFromHistoryEntries([
+      entry({
+        routing_mode: "smart",
+        generation_profile: "auto",
+        effective_max_output_tokens: 8_192,
+        effective_reasoning_mode: "standard",
+        effective_reasoning_effort: "high",
+        generation_policy_version: "generation-budget-v3",
+      }),
+    ]);
+
+    expect(restored.responses[0]).toMatchObject({
+      routing_mode: "smart",
+      generation_budget: {
+        effective_reasoning_mode: "standard",
+        effective_reasoning_effort: "high",
+      },
+    });
+  });
+
   it("searches all prompts, responses, providers, and models in a thread", () => {
     const threads = buildHistoryThreads([
       entry({ prompt: "Initial question", response: "Contains a deployment checklist" }),

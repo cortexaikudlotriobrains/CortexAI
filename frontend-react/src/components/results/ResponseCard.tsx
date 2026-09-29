@@ -19,7 +19,8 @@ import remarkGfm from "remark-gfm";
 import { getModelPresentation } from "../../config/modelPresentation";
 import { presentResponseError } from "../../errors/userFacingError";
 import { remarkCitations } from "../../markdown/remarkCitations";
-import type { ChatResponse, ResponseRunStatus } from "../../types";
+import { reasoningLevelFromResponse } from "../../reasoning/reasoningLevels";
+import type { ChatResponse, ReasoningLevel, ResponseRunStatus } from "../../types";
 import { formatAiCredits } from "../../utils/aiCredits";
 import { CortexIcon } from "../shared/CortexIcon";
 import { ProviderLogo } from "../shared/ProviderLogo";
@@ -87,10 +88,13 @@ export function ResponseCard({
   const isFailed = hasError || response.ui_status === "failed";
   const aiCredits = response.ai_credits ?? 0;
   const hasCredits = !loadingStatus && !isFailed && aiCredits > 0;
+  const reasoningLevel =
+    !loadingStatus && !isFailed ? resolveResponseReasoningLevel(response) : null;
+  const hasReasoningLevel = reasoningLevel !== null;
   const cacheSavings = Math.max(0, response.cache_savings_ai_credits ?? 0);
   const hasCompletedMetrics = durationMs !== null;
   const hasMetaContent =
-    !!loadingStatus || isFailed || hasCompletedMetrics || hasCredits;
+    !!loadingStatus || isFailed || hasCompletedMetrics || hasCredits || hasReasoningLevel;
   const metaPinned = !!loadingStatus || isFailed;
   const showRegenerate = !!onRegenerate && !loadingStatus;
   const isIncomplete = response.completion_status === "incomplete";
@@ -197,6 +201,23 @@ export function ResponseCard({
                     <CortexIcon name="cost" />
                     {formatAiCredits(aiCredits)} credits
                     {response.credit_usage_estimated ? " estimated" : ""}
+                  </span>
+                )}
+                {reasoningLevel && (
+                  <span
+                    className={`${styles.metricPill} ${styles.reasoningMetric} ${reasoningMetricTone(
+                      reasoningLevel,
+                    )}`}
+                    data-response-reasoning-effort={reasoningLevel}
+                    aria-label={`${formatReasoningLevel(
+                      reasoningLevel,
+                    )} reasoning. Smart selected this effort for the response; deeper reasoning can take longer.`}
+                    title={`Smart selected ${formatReasoningLevel(
+                      reasoningLevel,
+                    )} reasoning for this response. Deeper reasoning can take longer.`}
+                  >
+                    <CortexIcon name="smart" />
+                    {formatReasoningLevel(reasoningLevel)} reasoning
                   </span>
                 )}
               </>
@@ -664,6 +685,29 @@ function useElapsedMs(
   }, [running, startedAtMs]);
 
   return Math.max(0, (stoppedAtMs ?? nowMs) - startedAtMs);
+}
+
+type DisplayReasoningLevel = Exclude<ReasoningLevel, "auto">;
+
+function resolveResponseReasoningLevel(
+  response: ChatResponse,
+): DisplayReasoningLevel | null {
+  if (response.routing_mode?.trim().toLowerCase() !== "smart") return null;
+  const level = reasoningLevelFromResponse(
+    response.generation_budget?.effective_reasoning_effort,
+  );
+  return level === "auto" ? null : level;
+}
+
+function formatReasoningLevel(level: DisplayReasoningLevel): string {
+  return level.charAt(0).toUpperCase() + level.slice(1);
+}
+
+function reasoningMetricTone(level: DisplayReasoningLevel): string {
+  if (level === "low") return styles.reasoningLow;
+  if (level === "medium") return styles.reasoningMedium;
+  if (level === "high") return styles.reasoningHigh;
+  return styles.reasoningMax;
 }
 
 function resolveFailedDurationMs(response: ChatResponse, elapsedMs: number) {

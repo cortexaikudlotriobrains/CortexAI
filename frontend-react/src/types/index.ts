@@ -135,6 +135,7 @@ export interface ChatResponse {
   replacement_model?: string;
   migration_reason?: string;
   reasoning_mode?: string;
+  routing_mode?: string;
   latency_ms: number | null;
   token_usage: TokenUsage | null;
   estimated_cost: number;
@@ -440,6 +441,7 @@ export interface HistoryEntry {
   effective_max_output_tokens?: number;
   effective_reasoning_mode?: string;
   effective_reasoning_effort?: string;
+  routing_mode?: string;
   generation_policy_version?: string;
   completion_status?: "complete" | "incomplete" | "failed";
   stop_cause?: string;

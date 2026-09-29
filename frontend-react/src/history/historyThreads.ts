@@ -169,6 +169,7 @@ function toChatResponse(entry: HistoryEntry): ChatResponse {
     text: isError ? "" : entry.response,
     provider: entry.provider,
     model: entry.model,
+    routing_mode: entry.routing_mode,
     latency_ms: finiteNumberOrNull(entry.latency_ms),
     token_usage:
       finiteNumberOrNull(entry.tokens) === null

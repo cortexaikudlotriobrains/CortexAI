@@ -149,7 +149,7 @@ export function AttachmentStrip({
           aria-label="Attach files"
           onClick={() => fileInputRef.current?.click()}
         >
-          <CortexIcon name="attach" />
+          <CortexIcon name="composer-attach" strokeWidth={2} />
         </button>
       </div>
 
