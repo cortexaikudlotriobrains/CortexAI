@@ -41,6 +41,7 @@ from server.billing.stripe_gateway import (
     StripeBillingConfig,
     StripeGateway,
     load_stripe_billing_config,
+    provider_failure_details,
     stripe_billing_is_enabled,
 )
 from server.dependencies import AuthResult, get_auth
@@ -219,12 +220,19 @@ def test_gateway_sends_only_server_owned_checkout_and_portal_parameters():
     assert checkout_params["success_url"] == "https://app.example.com/success"
     assert checkout_params["cancel_url"] == "https://app.example.com/cancel"
     assert checkout_params["client_reference_id"] == str(account_id)
+    assert checkout_params["ui_mode"] == "hosted_page"
+    assert checkout_params["origin_context"] == "web"
+    assert checkout_params["submit_type"] == "auto"
+    assert checkout_params["billing_address_collection"] == "auto"
+    assert checkout_params["phone_number_collection"] == {"enabled": False}
+    assert checkout_params["automatic_tax"] == {"enabled": False}
+    assert checkout_params["allow_promotion_codes"] is True
+    assert checkout_params["payment_method_collection"] == "if_required"
+    assert "discounts" not in checkout_params
     assert "amount" not in checkout_params
     assert "currency" not in checkout_params
-    assert checkout_options == {
-        "idempotency_key": "checkout-unit",
-        "stripe_version": "2026-06-24.dahlia",
-    }
+    assert checkout_options["idempotency_key"].startswith("checkout-unit-")
+    assert checkout_options["stripe_version"] == "2026-06-24.dahlia"
     assert portal.calls == [
         (
             {
@@ -263,6 +271,63 @@ def test_gateway_normalizes_sdk_failures_without_exposing_provider_details():
         )
 
     assert "secret" not in str(exc_info.value).lower()
+
+
+@pytest.mark.unit
+def test_checkout_idempotency_key_is_scoped_to_request_parameters():
+    client, _, checkout, _ = _fake_stripe_client()
+    config = StripeBillingConfig(
+        enabled=True,
+        secret_key="sk_test_unit",
+        checkout_success_url="https://app.example.com/success",
+        checkout_cancel_url="https://app.example.com/cancel",
+        portal_return_url="https://app.example.com/account",
+        price_ids={"plus": "price_plus123"},
+    )
+    gateway = StripeGateway(config, client=client)
+    account_id = uuid4()
+    user_id = uuid4()
+
+    for customer_id in ("cus_first123", "cus_first123", "cus_second123"):
+        asyncio.run(
+            gateway.create_checkout_session(
+                billing_account_id=account_id,
+                user_id=user_id,
+                customer_id=customer_id,
+                plan_code="plus",
+                price_id="price_plus123",
+                idempotency_key="checkout-unit",
+            )
+        )
+
+    keys = [options["idempotency_key"] for _, options in checkout.calls]
+    assert keys[0] == keys[1]
+    assert keys[0] != keys[2]
+
+
+@pytest.mark.unit
+def test_provider_failure_details_expose_stripe_diagnostics():
+    class FakeStripeError(Exception):
+        http_status = 400
+        code = "resource_missing"
+        request_id = "req_unit123"
+        error = SimpleNamespace(message="No such customer: 'cus_old123'")
+
+    try:
+        try:
+            raise FakeStripeError("raw")
+        except FakeStripeError as exc:
+            raise BillingProviderError("Stripe Checkout Session creation failed") from exc
+    except BillingProviderError as wrapped:
+        details = provider_failure_details(wrapped)
+
+    assert details == {
+        "provider_error_type": "FakeStripeError",
+        "provider_http_status": 400,
+        "provider_code": "resource_missing",
+        "provider_request_id": "req_unit123",
+        "provider_message": "No such customer: 'cus_old123'",
+    }
 
 
 @pytest.mark.unit

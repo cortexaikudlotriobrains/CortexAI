@@ -428,6 +428,8 @@ The hosted Checkout and Portal routes require signed-session or Cognito bearer i
 {"checkout_url":"https://checkout.stripe.com/...","destination":"checkout"}
 ```
 
+Hosted Checkout accepts Stripe Dashboard promotion codes (`allow_promotion_codes=true`) and collects a payment method only when the discounted total is above zero (`payment_method_collection=if_required`). The request body still cannot carry a coupon or discount.
+
 An existing provider-live subscription is not duplicated. The same endpoint creates a Portal session and returns its hosted URL with `destination: "portal"`. The browser still follows only the returned short-lived URL and never selects the Customer or redirect target.
 
 `POST /v1/billing/portal-session` accepts no body or `{}` and returns `{"portal_url":"https://billing.stripe.com/..."}` for the persisted Customer. Missing Customer state returns `409 stripe_customer_required`; normalized Stripe errors return `502 billing_provider_unavailable`. Hosted URLs are never persisted, and neither hosted-session endpoint grants paid access.

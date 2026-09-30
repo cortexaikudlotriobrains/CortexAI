@@ -40,6 +40,7 @@ from server.billing.subscription_service import resolve_effective_subscription
 from server.billing.stripe_gateway import (
     StripeBillingConfig,
     StripeGateway,
+    provider_failure_details,
     require_stripe_billing_config,
     stripe_billing_is_enabled,
 )
@@ -111,7 +112,12 @@ def _raise_billing_http_error(error: Exception, *, request_id: str) -> None:
     if isinstance(error, BillingProviderError):
         logger.warning(
             "Stripe hosted billing session creation failed",
-            extra={"extra_fields": {"request_id": request_id}},
+            extra={
+                "extra_fields": {
+                    "request_id": request_id,
+                    **provider_failure_details(error),
+                }
+            },
         )
         raise billing_provider_http_exception() from error
     if isinstance(error, BillingIdentityError):

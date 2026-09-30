@@ -44,6 +44,16 @@ invoice.payment_failed
 
 Listening only to required event types reduces load and avoids retaining unrelated event metadata. The endpoint has no Cognito/session/API-key authentication because Stripe's signature is its authentication boundary.
 
+## Promotion codes and free-access coupons
+
+Checkout always shows Stripe's promotion-code field and uses `payment_method_collection=if_required`. Codes are created and revoked only in the Stripe Dashboard (per mode); the API never accepts a coupon from the browser.
+
+1. Product catalogue → **Coupons** → create a coupon (for example 100% off, duration `once`, `repeating` for N months, or `forever`). Optionally restrict it to the Plus/Pro products.
+2. Add a customer-facing **Promotion code** to it (for example `EARLYACCESS`), with optional expiry, redemption limit, or first-time-customer restriction.
+3. The user enters the code on hosted Checkout. When the discounted total is $0, Checkout completes with no card, and the verified webhook grants the plan from the subscription Price exactly as for a paid checkout.
+
+A 100% `once` or `repeating` coupon leaves the subscription without a payment method when the discount ends. The next invoice then fails and the normal `past_due` → grace → Free path applies unless the user adds a card through the Customer Portal. Use `forever` only for intentional complimentary accounts, or use Cortex grants (`tools/grant_subscription.py`) when no Stripe subscription is wanted.
+
 ## Local test-mode validation
 
 For fast entitlement UX testing without Stripe, run `python run_app.py --subscription-plan free`, `plus`, `pro`, or `unrestricted`. These profiles are accepted only when both runner hosts are loopback addresses, force billing off and local dev-session login on, and override conflicting subscription values from `.env`. `unrestricted` uses the Pro feature set with very large subscription allowances while retaining authentication, provider requirements, upload/file safety ceilings, and production guards. Omit `--subscription-plan` when validating the real Stripe lifecycle below.
@@ -84,5 +94,5 @@ Set `BILLING_ENABLED=false` to stop hosted-session and webhook processing and fa
 For duplicate, failed, stale, unknown-Price, multiple-live-subscription, or signing-secret incidents, follow `docs/runbooks/subscription-incidents.md`. Hosted-session errors remain:
 
 - `409 stripe_customer_required`: no persisted Customer exists for Portal; use Checkout for a first purchase or reviewed reconciliation.
-- `502 billing_provider_unavailable`: Stripe rejected or could not complete a hosted-session request.
+- `502 billing_provider_unavailable`: Stripe rejected or could not complete a hosted-session request. The API response stays generic; the server warning `Stripe hosted billing session creation failed` carries `provider_error_type`, `provider_http_status`, `provider_code`, `provider_request_id`, and `provider_message` for diagnosis (look up the request ID in the Stripe Dashboard logs). Common causes are a persisted `stripe_customer_id` from the other Stripe mode (`resource_missing` / "No such customer" after switching test↔live keys), a Price ID from the other mode or an archived Price, and account restrictions. Checkout idempotency keys are scoped to the exact request parameters, so a corrected Customer, Price, or redirect URL takes effect on the next attempt instead of replaying Stripe's cached failure.
 - Startup configuration error: verify secret/Price prefixes, all server redirect URLs, the endpoint-specific signing secret, and any explicit API version.
