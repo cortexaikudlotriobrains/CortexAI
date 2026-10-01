@@ -25,14 +25,20 @@ itself force a new search.
 | --- | --- | --- | --- |
 | OpenAI | Responses `web_search` | `tool_choice=required` | `web_search_call` output items |
 | Claude | `web_search_20250305` server tool | provider tool choice | server-tool usage/result blocks |
-| Gemini | Interactions `google_search` | allowed-tool mode `any` | Google search call/result outputs |
+| Gemini | Interactions `google_search` | required-search system instruction | Google search call/result steps and grounding usage |
 | Grok | Responses `web_search` | provider tool choice | server-side tool usage and citations |
 | DeepSeek | local `web_search` function backed by Tavily | first function turn requires the tool | successful local Tavily executions |
 
-Gemini 3.5 native-search requests omit the legacy `temperature` sampling control
-from Interactions API generation settings. Reasoning level, output-token limit,
-and Google Search tool-choice settings are preserved; this avoids a provider 400
-without weakening required-search behavior.
+Gemini native search requires `google-genai>=2.0.0` after Google's June 2026
+retirement of the legacy Interactions schema. Cortex reads the v2 `steps`
+response and grounding-tool usage and sends multi-turn history as
+`user_input`/`model_output` steps. It does not send the legacy `allowed_tools`
+selector: SDK 2.x interprets that selector as a client-function allowlist, while
+plain `tool_choice="any"` can force another tool call instead of allowing the
+model to write its final answer. Required mode is expressed by the bounded
+Google Search instruction and the mounted server-side tool. Gemini 3.5 requests
+also omit the legacy `temperature` sampling control while preserving reasoning
+level and the output-token limit.
 
 Every model request is capped at three billable search operations. OpenAI,
 Claude, Grok, and DeepSeek receive request- or loop-level enforcement. Gemini's
@@ -97,6 +103,9 @@ TAVILY_API_KEY=tvly-...
   values are supplied.
 - `TAVILY_API_KEY` is required for DeepSeek search and for the legacy path, but
   not for the other four native adapters.
+- Reinstall `requirements.txt` and restart every API worker during this rollout;
+  a worker still running `google-genai` 1.x will receive HTTP 400 for every
+  Gemini Interactions request after the legacy-schema retirement.
 
 CortexAI Work is intentionally out of scope and retains its separate
 `Web · Auto|On|Ask|Off` policy and approval behavior.

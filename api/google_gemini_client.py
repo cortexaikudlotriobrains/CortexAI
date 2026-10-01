@@ -202,18 +202,13 @@ class GeminiClient(BaseAIClient):
                     )
                     interaction_config: dict[str, Any] = {
                         "max_output_tokens": max_output_tokens,
-                        "tool_choice": {
-                            "allowed_tools": {
-                                "mode": (
-                                    "any"
-                                    if str(web_search_policy.get("mode") or "auto")
-                                    == "required"
-                                    else "auto"
-                                ),
-                                "tools": ["google_search"],
-                            }
-                        },
                     }
+                    # Google Search is a server-side tool in Interactions v2. Do
+                    # not send the legacy allowed_tools selector: SDK 2.x maps it
+                    # to allowed_function_names, which only accepts declared
+                    # client functions. The plain "any" selector is also unsafe
+                    # here because it forces another tool call instead of allowing
+                    # the model to produce its final answer after searching.
                     # Gemini 3.5 rejects legacy sampling controls on Interactions
                     # requests. Keep native-search payloads model-compatible instead
                     # of turning an otherwise valid Google Search request into a 400.
@@ -291,7 +286,11 @@ class GeminiClient(BaseAIClient):
                 prompt_tokens = self._usage_int(field_value(usage, "total_input_tokens", 0))
                 output_tokens = self._usage_int(field_value(usage, "total_output_tokens", 0))
                 reasoning_tokens = self._usage_int(
-                    field_value(usage, "total_reasoning_tokens", 0)
+                    field_value(
+                        usage,
+                        "total_thought_tokens",
+                        field_value(usage, "total_reasoning_tokens", 0),
+                    )
                 )
                 cached_input_tokens = self._usage_int(
                     field_value(usage, "total_cached_tokens", 0)
@@ -543,7 +542,7 @@ class GeminiClient(BaseAIClient):
                     )
             turns.append(
                 {
-                    "role": "model" if role == "assistant" else "user",
+                    "type": "model_output" if role == "assistant" else "user_input",
                     "content": content,
                 }
             )
@@ -615,6 +614,17 @@ class GeminiClient(BaseAIClient):
                 collect_content(field_value(item, "content", []))
             else:
                 collect_content([item])
+
+        # Interactions v2 reports authoritative grounding-tool counts in usage.
+        # Retain query-level step counting when present, but do not lose billing
+        # telemetry if a response omits the call arguments.
+        usage = field_value(response, "usage")
+        reported_operations = 0
+        for tool_count in sequence_value(field_value(usage, "grounding_tool_count", [])):
+            if str(field_value(tool_count, "type", "") or "").lower() != "google_search":
+                continue
+            reported_operations += cls._usage_int(field_value(tool_count, "count", 0))
+        operations = max(operations, reported_operations)
 
         sources = normalize_web_sources(raw_sources, limit=8)
         source_index = {
