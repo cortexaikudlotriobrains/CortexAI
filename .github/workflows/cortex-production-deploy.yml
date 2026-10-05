@@ -16,56 +16,22 @@ jobs:
       name: production
 
     steps:
-      - name: Show production OIDC claims
+      - name: Configure AWS production credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::051259248984:role/CortexAI-GitHub-ProductionDeploy
+          aws-region: us-east-1
+
+      - name: Verify AWS identity
         shell: bash
         run: |
           set -euo pipefail
 
-          RESPONSE="$(
-            curl -fsS \
-              -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-              "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com"
-          )"
+          echo "=== AWS CALLER IDENTITY ==="
+          aws sts get-caller-identity
 
-          export OIDC_TOKEN="$(
-            python3 -c 'import json,sys; print(json.load(sys.stdin)["value"])' <<< "$RESPONSE"
-          )"
-
-          python3 - <<'PY'
-          import os
-          import json
-          import base64
-
-          token = os.environ["OIDC_TOKEN"]
-          payload = token.split(".")[1]
-          payload += "=" * (-len(payload) % 4)
-
-          claims = json.loads(
-              base64.urlsafe_b64decode(payload.encode()).decode()
-          )
-
-          print("=== GitHub Production OIDC Claims ===")
-
-          for key in [
-              "iss",
-              "aud",
-              "sub",
-              "repository",
-              "repository_owner",
-              "ref",
-              "ref_type",
-              "event_name",
-              "environment",
-              "job_workflow_ref"
-          ]:
-              if key in claims:
-                  print(f"{key}: {claims[key]}")
-          PY
-
-          unset OIDC_TOKEN
-
-      - name: Deployment disabled during identity verification
-        run: |
-          echo "Production identity verification completed."
-          echo "NO AWS ROLE WAS ASSUMED."
+          echo
+          echo "Production deploy role assumed successfully."
+          echo "NO SSM COMMAND WAS SENT."
+          echo "NO EC2 CHANGE WAS MADE."
           echo "NO DEPLOYMENT WAS PERFORMED."
