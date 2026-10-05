@@ -8,49 +8,67 @@ permissions:
   contents: read
 
 jobs:
-  production-deploy:
-    name: Approve CortexAI Production
+
+  # ============================================================
+  # PHASE 1
+  # Read-only production analysis.
+  #
+  # NO production environment approval is required here.
+  # This role cannot deploy Cortex.
+  # ============================================================
+
+  plan:
+    name: Analyze Production Deployment
     runs-on: ubuntu-latest
 
-    environment:
-      name: production
+    outputs:
+      target_sha: ${{ steps.analyze.outputs.target_sha }}
+      migrations: ${{ steps.analyze.outputs.migrations }}
+      config_changed: ${{ steps.analyze.outputs.config_changed }}
 
     steps:
-      - name: Configure AWS production credentials
+
+      - name: Configure AWS read-only credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::051259248984:role/CortexAI-GitHub-ProductionDeploy
+          role-to-assume: arn:aws:iam::051259248984:role/CortexAI-GitHub-ProductionRead
           aws-region: us-east-1
 
-      - name: Test locked deployment document
+      - name: Generate production deployment plan
+        id: analyze
         shell: bash
+        env:
+          WORKFLOW_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
 
-          # Deliberately invalid target SHA.
-          # It satisfies the 40-char SSM format but cannot match origin/develop.
-          TEST_SHA="0000000000000000000000000000000000000000"
+          echo "================================================="
+          echo " CORTEXAI PRODUCTION DEPLOYMENT PLAN"
+          echo "================================================="
+          echo
+          echo "Workflow commit:"
+          echo "$WORKFLOW_SHA"
+          echo
 
           COMMAND_ID="$(
             aws ssm send-command \
-              --document-name "CortexAI-Production-Deploy" \
+              --document-name "CortexAI-Production-Plan" \
               --instance-ids "i-0214c97ed4a33f7da" \
-              --parameters \
-                "approvedCommit=$TEST_SHA,dbApproved=no,configApproved=no" \
-              --comment "SAFE CortexAI deployment control-path test" \
+              --comment "CortexAI production deployment plan for $WORKFLOW_SHA" \
               --query "Command.CommandId" \
               --output text
           )"
 
           echo "SSM Command ID: $COMMAND_ID"
 
-          # The command is expected to fail safely because the approved SHA
-          # does not match origin/develop.
           set +e
+
           aws ssm wait command-executed \
             --command-id "$COMMAND_ID" \
             --instance-id "i-0214c97ed4a33f7da"
+
           WAIT_RESULT=$?
+
           set -e
 
           STATUS="$(
@@ -78,11 +96,9 @@ jobs:
           )"
 
           echo
-          echo "=== STATUS ==="
-          echo "$STATUS"
-
-          echo
-          echo "=== OUTPUT ==="
+          echo "================================================="
+          echo " PRODUCTION PLAN"
+          echo "================================================="
           echo "$OUTPUT"
 
           if [ -n "$ERROR_OUTPUT" ] && [ "$ERROR_OUTPUT" != "None" ]; then
@@ -91,16 +107,336 @@ jobs:
             echo "$ERROR_OUTPUT"
           fi
 
-          echo
-          echo "=== SAFETY ASSERTION ==="
-
-          if echo "$OUTPUT" | grep -q "origin/develop changed after approval"; then
-            echo "PASS: deployment stopped at the SHA approval gate."
-            echo "NO CODE WAS PULLED."
-            echo "NO PROCESS WAS STOPPED."
-            echo "NO DATABASE WAS CHANGED."
-            echo "NO DEPLOYMENT WAS PERFORMED."
-          else
-            echo "ERROR: expected SHA safety gate was not observed."
+          if [ "$STATUS" != "Success" ]; then
+            echo
+            echo "ERROR: Production planning command failed."
             exit 1
           fi
+
+          # ----------------------------------------------------
+          # Extract the exact SHA analyzed by the EC2 planner.
+          # ----------------------------------------------------
+
+          TARGET_SHA="$(
+            printf '%s\n' "$OUTPUT" |
+              awk '
+                /Target origin\/develop:/ {
+                  getline
+                  print
+                  exit
+                }
+              ' |
+              tr -d '[:space:]'
+          )"
+
+          if [[ ! "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "ERROR: Could not determine target SHA from deployment plan."
+            exit 2
+          fi
+
+          echo
+          echo "Planner target SHA:  $TARGET_SHA"
+          echo "Workflow target SHA: $WORKFLOW_SHA"
+
+          # The workflow must approve exactly what the planner analyzed.
+          if [ "$TARGET_SHA" != "$WORKFLOW_SHA" ]; then
+            echo
+            echo "ERROR: develop changed while the deployment plan was being generated."
+            echo "Run the workflow again so the plan and deployment SHA are identical."
+            exit 3
+          fi
+
+          # ----------------------------------------------------
+          # Detect migration requirement.
+          # ----------------------------------------------------
+
+          if printf '%s\n' "$OUTPUT" |
+               grep -q "No database migration files detected."; then
+            MIGRATIONS="no"
+          else
+            MIGRATIONS="yes"
+          fi
+
+          # ----------------------------------------------------
+          # Detect production configuration contract changes.
+          # ----------------------------------------------------
+
+          if printf '%s\n' "$OUTPUT" |
+               grep -q ".env.example did not change."; then
+            CONFIG_CHANGED="no"
+          else
+            CONFIG_CHANGED="yes"
+          fi
+
+          echo
+          echo "=== RELEASE CLASSIFICATION ==="
+          echo "Target SHA:            $TARGET_SHA"
+          echo "Database migrations:   $MIGRATIONS"
+          echo "Config contract change:$CONFIG_CHANGED"
+
+          echo "target_sha=$TARGET_SHA" >> "$GITHUB_OUTPUT"
+          echo "migrations=$MIGRATIONS" >> "$GITHUB_OUTPUT"
+          echo "config_changed=$CONFIG_CHANGED" >> "$GITHUB_OUTPUT"
+
+          # ----------------------------------------------------
+          # Add the full plan to GitHub's deployment summary.
+          # This is what you review before approving production.
+          # ----------------------------------------------------
+
+          {
+            echo "# CortexAI Production Deployment Plan"
+            echo
+            echo "**Target commit:** \`$TARGET_SHA\`"
+            echo
+            echo "**Database migrations:** $MIGRATIONS"
+            echo
+            echo "**Production config review:** $CONFIG_CHANGED"
+            echo
+            echo "## EC2 Production Analysis"
+            echo
+            echo '```text'
+            echo "$OUTPUT"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # ----------------------------------------------------
+          # Database migration automation is intentionally
+          # disabled until:
+          #
+          # 1. MIGRATION_DATABASE_URL is securely configured.
+          # 2. Automated RDS snapshot creation/verification exists.
+          # 3. Snapshot permissions are narrowly scoped.
+          #
+          # Therefore migration releases fail BEFORE approval.
+          # ----------------------------------------------------
+
+          if [ "$MIGRATIONS" = "yes" ]; then
+            echo
+            echo "================================================="
+            echo " DATABASE MIGRATION RELEASE DETECTED"
+            echo "================================================="
+            echo
+            echo "This deployment is intentionally blocked."
+            echo
+            echo "Required before migration deployment:"
+            echo "1. Configure MIGRATION_DATABASE_URL securely."
+            echo "2. Create and verify a fresh RDS snapshot."
+            echo "3. Review migration order."
+            echo "4. Explicitly approve database changes."
+            echo
+            echo "NO DEPLOYMENT HAS OCCURRED."
+            exit 20
+          fi
+
+
+  # ============================================================
+  # PHASE 2
+  #
+  # GitHub stops here and asks YOU to approve the
+  # production environment.
+  #
+  # Only after approval can this job receive the AWS
+  # ProductionDeploy role.
+  # ============================================================
+
+  deploy:
+    name: Deploy Approved CortexAI Release
+
+    needs:
+      - plan
+
+    runs-on: ubuntu-latest
+
+    environment:
+      name: production
+
+    steps:
+
+      - name: Display approved deployment
+        shell: bash
+        run: |
+          echo "================================================="
+          echo " APPROVED CORTEXAI DEPLOYMENT"
+          echo "================================================="
+          echo
+          echo "Target commit:"
+          echo "${{ needs.plan.outputs.target_sha }}"
+          echo
+          echo "Database migrations:"
+          echo "${{ needs.plan.outputs.migrations }}"
+          echo
+          echo "Configuration contract changed:"
+          echo "${{ needs.plan.outputs.config_changed }}"
+
+      - name: Configure AWS production credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::051259248984:role/CortexAI-GitHub-ProductionDeploy
+          aws-region: us-east-1
+
+      - name: Deploy exact approved commit
+        id: deploy
+        shell: bash
+        env:
+          TARGET_SHA: ${{ needs.plan.outputs.target_sha }}
+          CONFIG_CHANGED: ${{ needs.plan.outputs.config_changed }}
+        run: |
+          set -euo pipefail
+
+          # The manual GitHub production-environment approval is
+          # the explicit approval of the plan displayed above.
+          #
+          # Database releases never reach this job yet because
+          # the plan job blocks them.
+          #
+          # If .env.example changed, approving the production
+          # environment constitutes explicit CONFIG approval.
+
+          if [ "$CONFIG_CHANGED" = "yes" ]; then
+            CONFIG_APPROVED="yes"
+          else
+            CONFIG_APPROVED="no"
+          fi
+
+          echo "Deploying exact approved SHA:"
+          echo "$TARGET_SHA"
+
+          COMMAND_ID="$(
+            aws ssm send-command \
+              --document-name "CortexAI-Production-Deploy" \
+              --instance-ids "i-0214c97ed4a33f7da" \
+              --parameters \
+                "approvedCommit=$TARGET_SHA,dbApproved=no,configApproved=$CONFIG_APPROVED" \
+              --comment "Approved CortexAI production deployment $TARGET_SHA" \
+              --query "Command.CommandId" \
+              --output text
+          )"
+
+          echo
+          echo "SSM Command ID: $COMMAND_ID"
+
+          set +e
+
+          aws ssm wait command-executed \
+            --command-id "$COMMAND_ID" \
+            --instance-id "i-0214c97ed4a33f7da"
+
+          WAIT_RESULT=$?
+
+          set -e
+
+          STATUS="$(
+            aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "i-0214c97ed4a33f7da" \
+              --query "Status" \
+              --output text
+          )"
+
+          OUTPUT="$(
+            aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "i-0214c97ed4a33f7da" \
+              --query "StandardOutputContent" \
+              --output text
+          )"
+
+          ERROR_OUTPUT="$(
+            aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "i-0214c97ed4a33f7da" \
+              --query "StandardErrorContent" \
+              --output text
+          )"
+
+          echo
+          echo "================================================="
+          echo " DEPLOYMENT RESULT"
+          echo "================================================="
+          echo
+          echo "Status: $STATUS"
+          echo
+          echo "$OUTPUT"
+
+          if [ -n "$ERROR_OUTPUT" ] && [ "$ERROR_OUTPUT" != "None" ]; then
+            echo
+            echo "=== STDERR ==="
+            echo "$ERROR_OUTPUT"
+          fi
+
+          {
+            echo "# CortexAI Production Deployment Result"
+            echo
+            echo "**Target commit:** \`$TARGET_SHA\`"
+            echo
+            echo "**SSM status:** $STATUS"
+            echo
+            echo '```text'
+            echo "$OUTPUT"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$STATUS" != "Success" ]; then
+            echo
+            echo "ERROR: Production deployment failed."
+            exit 1
+          fi
+
+          if ! printf '%s\n' "$OUTPUT" |
+               grep -q "DEPLOYMENT COMPLETED"; then
+            echo
+            echo "ERROR: SSM returned Success but deployment completion marker was not found."
+            exit 2
+          fi
+
+      - name: Verify public CortexAI health
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Checking public CortexAI health..."
+
+          for attempt in {1..10}; do
+
+            if HEALTH="$(
+              curl \
+                --fail \
+                --silent \
+                --show-error \
+                --max-time 15 \
+                "https://kudlo.triobrain.com/health"
+            )"; then
+
+              echo "$HEALTH"
+              echo
+              echo "CortexAI public health check PASSED."
+              exit 0
+
+            fi
+
+            echo "Health attempt $attempt failed. Retrying..."
+            sleep 5
+
+          done
+
+          echo "ERROR: CortexAI public health check failed."
+          exit 1
+
+      - name: Deployment completed
+        shell: bash
+        run: |
+          echo
+          echo "================================================="
+          echo " CORTEXAI PRODUCTION DEPLOYMENT COMPLETE"
+          echo "================================================="
+          echo
+          echo "Production commit:"
+          echo "${{ needs.plan.outputs.target_sha }}"
+          echo
+          echo "Required manual smoke tests:"
+          echo "Login"
+          echo "Ask"
+          echo "Compare"
+          echo "History"
+          echo "File upload"
+          echo "Changed feature"
