@@ -1,0 +1,91 @@
+name: CortexAI Production Plan
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  production-plan:
+    name: Analyze CortexAI Production
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::051259248984:role/CortexAI-GitHub-ProductionRead
+          aws-region: us-east-1
+
+      - name: Run production deployment plan
+        id: plan
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          COMMAND_ID="$(
+            aws ssm send-command \
+              --document-name "CortexAI-Production-Plan" \
+              --instance-ids "i-0214c97ed4a33f7da" \
+              --comment "CortexAI production deployment analysis" \
+              --query "Command.CommandId" \
+              --output text
+          )"
+
+          echo "SSM Command ID: $COMMAND_ID"
+
+          aws ssm wait command-executed \
+            --command-id "$COMMAND_ID" \
+            --instance-id "i-0214c97ed4a33f7da"
+
+          STATUS="$(
+            aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "i-0214c97ed4a33f7da" \
+              --query "Status" \
+              --output text
+          )"
+
+          echo "Status: $STATUS"
+
+          OUTPUT="$(
+            aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "i-0214c97ed4a33f7da" \
+              --query "StandardOutputContent" \
+              --output text
+          )"
+
+          ERROR_OUTPUT="$(
+            aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "i-0214c97ed4a33f7da" \
+              --query "StandardErrorContent" \
+              --output text
+          )"
+
+          echo
+          echo "=============================="
+          echo " CORTEXAI PRODUCTION PLAN"
+          echo "=============================="
+          echo "$OUTPUT"
+
+          if [ -n "$ERROR_OUTPUT" ] && [ "$ERROR_OUTPUT" != "None" ]; then
+            echo
+            echo "=== STDERR ==="
+            echo "$ERROR_OUTPUT"
+          fi
+
+          {
+            echo "## CortexAI Production Deployment Plan"
+            echo
+            echo '```text'
+            echo "$OUTPUT"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$STATUS" != "Success" ]; then
+            exit 1
+          fi
