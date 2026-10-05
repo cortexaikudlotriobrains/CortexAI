@@ -44,10 +44,7 @@ describe("ResultsSection layout states", () => {
   });
 
   it("leaves Ask turns content-sized in a mixed multi-turn transcript", () => {
-    setTurns([
-      askTurn("ask-1", "Ask question"),
-      compareTurn("compare-1", "Compare follow-up"),
-    ]);
+    setTurns([askTurn("ask-1", "Ask question"), compareTurn("compare-1", "Compare follow-up")]);
 
     render(<ResultsSection />);
 
@@ -59,10 +56,7 @@ describe("ResultsSection layout states", () => {
   });
 
   it("renders Compare prompts with the same user bubble as Ask prompts", () => {
-    setTurns([
-      askTurn("ask-1", "Ask question"),
-      compareTurn("compare-1", "Compare question"),
-    ]);
+    setTurns([askTurn("ask-1", "Ask question"), compareTurn("compare-1", "Compare question")]);
 
     render(<ResultsSection />);
 
@@ -110,8 +104,9 @@ describe("ResultsSection layout states", () => {
       const turnElement = document.querySelector(`[data-turn-id="${turn.id}"]`);
       expect(screen.getByRole("status")).toHaveTextContent("Improving your prompt");
       expect(turnElement?.querySelectorAll("article")).toHaveLength(0);
-      expect(screen.queryByRole("tablist", { name: "Compare model responses" }))
-        .not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("tablist", { name: "Compare model responses" }),
+      ).not.toBeInTheDocument();
       expect(document.querySelector(".compare-summary-card")).not.toBeInTheDocument();
 
       act(() => {
@@ -126,8 +121,9 @@ describe("ResultsSection layout states", () => {
       expect(screen.getByText("Prompt optimized")).toBeInTheDocument();
       expect(turnElement?.querySelectorAll("article")).toHaveLength(expectedResponseCards);
       if (turn.mode === "compare") {
-        expect(screen.getByRole("tablist", { name: "Compare model responses" }))
-          .toBeInTheDocument();
+        expect(
+          screen.getByRole("tablist", { name: "Compare model responses" }),
+        ).toBeInTheDocument();
       }
     },
   );
@@ -145,7 +141,7 @@ describe("ResultsSection layout states", () => {
 
     expect(screen.getByText("GPT has started responding.")).toBeInTheDocument();
     expect(screen.getAllByRole("status")).toHaveLength(1);
-    expect(screen.getByRole("status")).toHaveTextContent("Generating response\u2026");
+    expect(screen.getByRole("status")).toHaveTextContent("Preparing this response\u2026");
     expect(screen.queryByRole("button", { name: "Jump to latest" })).not.toBeInTheDocument();
   });
 
@@ -220,7 +216,7 @@ describe("ResultsSection layout states", () => {
     expect(claudePanel.className).toContain("mobileResponsePanelActive");
   });
 
-  it("uses the submitted turn flags for source-enabled Ask loading copy", () => {
+  it("does not infer source activity from the submitted turn flags", () => {
     const turn = askTurn("ask-streaming", "Research this");
     turn.status = "streaming";
     turn.researchEnabled = true;
@@ -229,9 +225,7 @@ describe("ResultsSection layout states", () => {
 
     render(<ResultsSection />);
 
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Checking sources and preparing an answer\u2026",
-    );
+    expect(screen.getByRole("status")).toHaveTextContent("Starting\u2026");
     expect(screen.queryByRole("button", { name: "Jump to latest" })).not.toBeInTheDocument();
   });
 

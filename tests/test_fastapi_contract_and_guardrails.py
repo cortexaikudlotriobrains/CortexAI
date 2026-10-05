@@ -152,8 +152,7 @@ class FakeOrchestrator:
         self.last_ask_kwargs = dict(kwargs)
         routing_mode = (
             "smart"
-            if str(kwargs.get("routing_mode") or "").strip().lower() == "smart"
-            and not model_type
+            if str(kwargs.get("routing_mode") or "").strip().lower() == "smart" and not model_type
             else "explicit"
         )
         return UnifiedResponse(
@@ -1840,6 +1839,20 @@ def test_chat_stream_returns_ndjson_events(client, caplog):
     event_types = [e.get("type") for e in events]
 
     assert "start" in event_types
+    activity_events = [event["activity"] for event in events if event.get("type") == "activity"]
+    activity_types = [event["event_type"] for event in activity_events]
+    assert activity_types == [
+        "REQUEST_RECEIVED",
+        "REQUEST_IN_PROGRESS",
+        "ANSWER_STARTED",
+        "ANSWER_DELTA",
+        "ANSWER_COMPLETED",
+        "REQUEST_COMPLETED",
+    ]
+    assert [event["sequence_number"] for event in activity_events] == list(
+        range(1, len(activity_events) + 1)
+    )
+    assert all(event["request_id"] for event in activity_events)
     assert "response_done" in event_types
     assert "done" in event_types
     log_events = [getattr(record, "extra_fields", {}).get("event") for record in caplog.records]
@@ -1849,6 +1862,67 @@ def test_chat_stream_returns_ndjson_events(client, caplog):
     assert "chat.stream.provider_call_completed" in log_events
     assert "chat.stream.response_done_sent" in log_events
     assert "chat.stream.done_sent" in log_events
+    activity_logs = [
+        getattr(record, "extra_fields", {})
+        for record in caplog.records
+        if getattr(record, "extra_fields", {}).get("event") == "chat.stream.activity"
+    ]
+    assert [fields["sequence"] for fields in activity_logs] == list(
+        range(1, len(activity_logs) + 1)
+    )
+    done_fields = next(
+        getattr(record, "extra_fields", {})
+        for record in caplog.records
+        if getattr(record, "extra_fields", {}).get("event") == "chat.stream.done_sent"
+    )
+    assert done_fields["provider_started_at"].endswith("Z")
+    assert done_fields["first_provider_event_at"].endswith("Z")
+    assert done_fields["time_to_first_useful_output_ms"] >= 0
+
+
+def test_chat_stream_forwards_real_provider_deltas_without_replaying_final_text(client, app):
+    def live_ask(
+        prompt: str, model_type: Optional[str] = None, context: Any = None, **kwargs
+    ) -> UnifiedResponse:
+        observer = kwargs.get("_provider_stream_observer")
+        assert observer is not None
+        observer.emit_provider_event({"type": "response.created"})
+        observer.emit_text("Hel")
+        observer.emit_text("lo")
+        observer.emit_provider_event({"type": "response.completed"})
+        return UnifiedResponse(
+            request_id="req-live-chat",
+            text="Hello",
+            provider=model_type or "openai",
+            model=kwargs.get("model_name") or "gpt-4o-mini",
+            latency_ms=10,
+            token_usage=TokenUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+            estimated_cost=0.00001,
+            finish_reason="stop",
+            error=None,
+            metadata={"routing": {"mode": "explicit"}},
+        )
+
+    app.state.fake_orchestrator.ask = live_ask
+    response = client.post(
+        "/v1/chat/stream",
+        json={"prompt": "hello", "provider": "openai", "model": "gpt-4o-mini"},
+        headers={"X-API-Key": "dev-key-1"},
+        cookies={"cortex_session": "test-session-cookie"},
+    )
+
+    assert response.status_code == 200
+    events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+    line_events = [event["text"] for event in events if event.get("type") == "line"]
+    activity_types = [
+        event["activity"]["event_type"]
+        for event in events
+        if event.get("type") == "activity"
+    ]
+    assert line_events == ["Hel", "lo"]
+    assert activity_types.count("ANSWER_STARTED") == 1
+    assert activity_types.count("ANSWER_DELTA") == 1
+    assert activity_types.count("REQUEST_COMPLETED") == 1
 
 
 def test_chat_stream_unexpected_failure_uses_public_error_contract(client, app):
@@ -2310,6 +2384,19 @@ def test_compare_stream_returns_ndjson_events(client, caplog):
     event_types = [e.get("type") for e in events]
 
     assert "start" in event_types
+    activity_events = [event for event in events if event.get("type") == "activity"]
+    activity_types = [event["activity"]["event_type"] for event in activity_events]
+    assert activity_types.count("REQUEST_IN_PROGRESS") == 2
+    assert activity_types.count("ANSWER_STARTED") == 2
+    assert activity_types.count("ANSWER_DELTA") == 2
+    assert activity_types.count("ANSWER_COMPLETED") == 2
+    assert activity_types[-1] == "REQUEST_COMPLETED"
+    per_target_progress = {
+        event["index"]
+        for event in activity_events
+        if event["activity"]["event_type"] == "REQUEST_IN_PROGRESS"
+    }
+    assert per_target_progress == {0, 1}
     assert event_types.count("response_done") >= 2
     assert "done" in event_types
     log_events = [getattr(record, "extra_fields", {}).get("event") for record in caplog.records]
@@ -2321,11 +2408,113 @@ def test_compare_stream_returns_ndjson_events(client, caplog):
     assert "compare.stream.done_sent" in log_events
 
 
-def test_compare_stream_unexpected_failure_uses_public_error_contract(client, app):
-    def _raise_internal_error(*_args, **_kwargs):
+def test_compare_stream_multiplexes_provider_deltas_per_target_without_replay(client, app):
+    def live_ask(
+        prompt: str, model_type: Optional[str] = None, context: Any = None, **kwargs
+    ) -> UnifiedResponse:
+        observer = kwargs.get("_provider_stream_observer")
+        assert observer is not None
+        prefix = "Open" if model_type == "openai" else "Gem"
+        suffix = "AI" if model_type == "openai" else "ini"
+        observer.emit_text(prefix)
+        observer.emit_text(suffix)
+        return UnifiedResponse(
+            request_id=f"req-live-{model_type}",
+            text=f"{prefix}{suffix}",
+            provider=model_type or "unknown",
+            model=kwargs.get("model_name") or "model-test",
+            latency_ms=10,
+            token_usage=TokenUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+            estimated_cost=0.00001,
+            finish_reason="stop",
+            error=None,
+            metadata={"routing": {"mode": "explicit"}},
+        )
+
+    app.state.fake_orchestrator.ask = live_ask
+    response = client.post(
+        "/v1/compare/stream",
+        json={
+            "prompt": "hello",
+            "targets": [
+                {"provider": "openai", "model": "gpt-4o-mini"},
+                {"provider": "gemini", "model": "gemini-2.5-flash"},
+            ],
+        },
+        headers={"X-API-Key": "dev-key-1"},
+        cookies={"cortex_session": "test-session-cookie"},
+    )
+
+    assert response.status_code == 200
+    events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+    target_text = {
+        index: "".join(
+            event["text"]
+            for event in events
+            if event.get("type") == "line" and event.get("index") == index
+        )
+        for index in (0, 1)
+    }
+    assert target_text == {0: "OpenAI", 1: "Gemini"}
+    assert sum(
+        1
+        for event in events
+        if event.get("type") == "activity"
+        and event["activity"]["event_type"] == "ANSWER_STARTED"
+    ) == 2
+
+
+def test_compare_stream_keeps_other_targets_running_after_one_provider_raises(client, app):
+    original_ask = app.state.fake_orchestrator.ask
+
+    def ask_with_one_failure(
+        prompt: str, model_type: Optional[str] = None, context: Any = None, **kwargs
+    ):
+        if model_type == "openai":
+            raise RuntimeError("private provider failure")
+        return original_ask(prompt, model_type=model_type, context=context, **kwargs)
+
+    app.state.fake_orchestrator.ask = ask_with_one_failure
+    response = client.post(
+        "/v1/compare/stream",
+        json={
+            "prompt": "hello",
+            "targets": [
+                {"provider": "openai", "model": "gpt-4o-mini"},
+                {"provider": "gemini", "model": "gemini-2.5-flash"},
+            ],
+        },
+        headers={"X-API-Key": "dev-key-1"},
+        cookies={"cortex_session": "test-session-cookie"},
+    )
+
+    assert response.status_code == 200
+    events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+    response_done = {
+        event["index"]: event["response"]
+        for event in events
+        if event.get("type") == "response_done"
+    }
+    assert response_done[0]["error"]["code"] == "provider_error"
+    assert response_done[1]["error"] is None
+    assert response_done[1]["text"] == "OK"
+    assert any(
+        event.get("type") == "activity"
+        and event.get("index") == 0
+        and event["activity"]["event_type"] == "REQUEST_FAILED"
+        for event in events
+    )
+    assert any(event.get("type") == "done" for event in events)
+    assert "private provider failure" not in response.text
+
+
+def test_compare_stream_unexpected_failure_uses_public_error_contract(client, app, monkeypatch):
+    from server.routes import compare as compare_route
+
+    async def _raise_internal_error(**_kwargs):
         raise RuntimeError("provider token leaked from private-worker")
 
-    app.state.fake_orchestrator.ask = _raise_internal_error
+    monkeypatch.setattr(compare_route, "_run_compare_target", _raise_internal_error)
     response = client.post(
         "/v1/compare/stream",
         json={
@@ -2540,6 +2729,7 @@ def test_chat_accepts_auto_routing_without_provider(client, app):
     assert body.get("routing_mode") == "smart"
     assert app.state.fake_orchestrator.last_ask_model_type is None
     assert app.state.fake_orchestrator.last_ask_kwargs.get("routing_mode") == "smart"
+    assert "_provider_stream_observer" not in app.state.fake_orchestrator.last_ask_kwargs
 
 
 def test_chat_rejects_model_without_provider(client):

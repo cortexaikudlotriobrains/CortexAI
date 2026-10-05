@@ -171,7 +171,8 @@ sequenceDiagram
         API->>PF: resolve owner + authorize exact effective ceiling + rate limit
         API->>BYOK: resolve tenant provider keys
     end
-    API->>ORCH: ask(...)
+    API-->>FE: NDJSON start + request_received/request_in_progress activity
+    API->>ORCH: ask(..., activity callback + manual provider stream observer)
     ORCH->>SR: plan route and fallback policy with reasoning capability constraint
     loop attempt until valid response or stop
         ORCH->>GB: resolve candidate-specific reasoning and output parameters
@@ -183,8 +184,9 @@ sequenceDiagram
         PC-->>ORCH: UnifiedResponse
         ORCH->>ORCH: validate + circuit breaker + fallback
     end
-    ORCH-->>API: final UnifiedResponse
-    API-->>FE: NDJSON start/line/response_done(status+budget+retry)/done
+    PC-->>API: native safe activity + answer deltas (manual OpenAI/Claude/Gemini/Grok)
+    ORCH-->>API: authoritative final UnifiedResponse
+    API-->>FE: NDJSON activity/line, then response_done(status+budget+retry)/done
     opt DB mode enabled
         API->>PERSIST: save session+messages+request+response+routing+usage+savings
     end
@@ -203,8 +205,7 @@ sequenceDiagram
     participant PF as persistence preflight
     participant GB as generation budget resolver
     participant BYOK as runtime BYOK resolver
-    participant ORCH as CortexOrchestrator.compare
-    participant MMO as MultiModelOrchestrator
+    participant ORCH as CortexOrchestrator.ask (per target)
     participant PC as Provider clients (N)
     participant LLM as External APIs
     participant PERSIST as persist_compare_interaction
@@ -218,21 +219,22 @@ sequenceDiagram
         API->>PF: authorize exact per-target ceilings + rate limit
         API->>BYOK: resolve tenant provider keys
     end
-    API->>ORCH: compare(...)
-    ORCH->>MMO: get_comparisons_sync(...)
+    API-->>FE: NDJSON response_start + indexed request_in_progress activity
     par each target
-        MMO->>PC: get_completion(..., target generation params)
+        API->>ORCH: ask(..., target generation params + activity/stream observer)
+        ORCH->>PC: get_completion(...)
         PC->>LLM: provider API request
         LLM-->>PC: provider response
-        PC-->>MMO: UnifiedResponse
+        PC-->>ORCH: UnifiedResponse
+        PC-->>API: indexed native activity + answer deltas (supported targets)
+        ORCH-->>API: authoritative target response
+        API-->>FE: indexed activity/line, then response_done
     end
-    MMO-->>ORCH: MultiUnifiedResponse
-    ORCH-->>API: normalized compare responses
-    API-->>FE: NDJSON response_start/line/response_done per target + done(compare summary)
+    API-->>FE: NDJSON done(compare summary)
     opt DB mode enabled
         API->>PERSIST: persist grouped requests with request_group_id
     end
-    FE-->>User: Render side-by-side model outputs and summary
+    FE-->>User: Render independently progressing cards, partial failures, and summary
 ```
 
 ## User Journey: History, Reporting, BYOK

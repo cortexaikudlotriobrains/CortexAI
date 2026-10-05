@@ -74,6 +74,7 @@ class OpenAIClient(BaseAIClient):
         """
         request_id = self._resolve_request_id_from_kwargs(kwargs)
         start_time = time.time()
+        stream_observer = kwargs.pop("_stream_observer", None)
 
         model = kwargs.get("model", self.model_name)
         cache_context = self._resolve_cache_context(
@@ -114,6 +115,7 @@ class OpenAIClient(BaseAIClient):
                 reasoning_effort=reasoning_effort,
                 cache_context=cache_context,
                 web_search_policy=web_search_policy if web_search_enabled else None,
+                stream_observer=stream_observer,
             )
 
             latency_ms = self._measure_latency(start_time)
@@ -282,6 +284,7 @@ class OpenAIClient(BaseAIClient):
         reasoning_effort: str,
         cache_context: "CacheContext",
         web_search_policy: dict[str, Any] | None = None,
+        stream_observer: Any = None,
     ) -> tuple[Any, str, dict[str, Any] | None]:
         if web_search_policy or self._should_use_responses_api_for_model(
             model, attachments=attachments
@@ -302,6 +305,7 @@ class OpenAIClient(BaseAIClient):
                 request_id=request_id,
                 model=model,
                 payload=payload,
+                stream_observer=stream_observer,
             )
 
         request_payload = {
@@ -320,11 +324,19 @@ class OpenAIClient(BaseAIClient):
             request_payload["max_completion_tokens"] = max_completion_tokens
         else:
             request_payload["max_tokens"] = max_tokens
+        if stream_observer is not None:
+            request_payload["stream_options"] = {"include_usage": True}
         self._apply_prompt_cache_options(request_payload, cache_context)
 
         try:
-            return self.client.chat.completions.create(**request_payload), "chat.completions", None
+            return (
+                self._create_chat_completion(request_payload, stream_observer),
+                "chat.completions",
+                None,
+            )
         except Exception as request_exc:
+            if stream_observer is not None and stream_observer.has_emitted:
+                raise
             # OpenAI newer model families reject max_tokens and require max_completion_tokens.
             if (
                 "max_tokens" in request_payload
@@ -342,7 +354,9 @@ class OpenAIClient(BaseAIClient):
                         }
                     },
                 )
-                return self.client.chat.completions.create(**retry_payload), "chat.completions", {
+                return self._create_chat_completion(
+                    retry_payload, stream_observer
+                ), "chat.completions", {
                     "dropped_param": "max_tokens",
                     "replacement_param": "max_completion_tokens",
                     "retry_reason": "unsupported_max_tokens_parameter",
@@ -376,6 +390,7 @@ class OpenAIClient(BaseAIClient):
                     request_id=request_id,
                     model=model,
                     payload=payload,
+                    stream_observer=stream_observer,
                 )
 
             dropped_param, retry_payload = self._build_retry_payload_without_unsupported_parameter(
@@ -390,6 +405,7 @@ class OpenAIClient(BaseAIClient):
                     "max_completion_tokens",
                     "response_format",
                     "reasoning_effort",
+                    "stream_options",
                     "prompt_cache_key",
                     "prompt_cache_retention",
                 },
@@ -406,7 +422,9 @@ class OpenAIClient(BaseAIClient):
                         }
                     },
                 )
-                return self.client.chat.completions.create(**retry_payload), "chat.completions", {
+                return self._create_chat_completion(
+                    retry_payload, stream_observer
+                ), "chat.completions", {
                     "dropped_param": dropped_param,
                     "retry_reason": "unsupported_parameter",
                     "endpoint": "chat.completions",
@@ -596,10 +614,13 @@ class OpenAIClient(BaseAIClient):
         request_id: str,
         model: str,
         payload: dict[str, Any],
+        stream_observer: Any = None,
     ) -> tuple[Any, str, dict[str, Any] | None]:
         try:
-            return self.client.responses.create(**payload), "responses", None
+            return self._create_responses_completion(payload, stream_observer), "responses", None
         except Exception as exc:
+            if stream_observer is not None and stream_observer.has_emitted:
+                raise
             dropped_param, retry_payload = self._build_retry_payload_without_unsupported_parameter(
                 payload,
                 exc,
@@ -628,12 +649,47 @@ class OpenAIClient(BaseAIClient):
                         }
                     },
                 )
-                return self.client.responses.create(**retry_payload), "responses", {
+                return self._create_responses_completion(
+                    retry_payload, stream_observer
+                ), "responses", {
                     "dropped_param": dropped_param,
                     "retry_reason": "unsupported_parameter",
                     "endpoint": "responses",
                 }
             raise
+
+    def _create_responses_completion(
+        self,
+        payload: dict[str, Any],
+        stream_observer: Any,
+    ) -> Any:
+        if stream_observer is None:
+            return self.client.responses.create(**payload)
+
+        with self.client.responses.stream(**payload) as stream:
+            for event in stream:
+                stream_observer.emit_provider_event(event)
+                if str(self._field(event, "type", "")).lower() == "response.output_text.delta":
+                    stream_observer.emit_text(self._field(event, "delta", ""))
+            stream_observer.raise_if_cancelled()
+            return stream.get_final_response()
+
+    def _create_chat_completion(
+        self,
+        payload: dict[str, Any],
+        stream_observer: Any,
+    ) -> Any:
+        if stream_observer is None:
+            return self.client.chat.completions.create(**payload)
+
+        with self.client.chat.completions.stream(**payload) as stream:
+            for event in stream:
+                stream_observer.emit_provider_event(event)
+                event_type = str(self._field(event, "type", "")).lower()
+                if event_type == "content.delta":
+                    stream_observer.emit_text(self._field(event, "delta", ""))
+            stream_observer.raise_if_cancelled()
+            return stream.get_final_completion()
 
     @staticmethod
     def _field(obj: Any, name: str, default: Any = None) -> Any:

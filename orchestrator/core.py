@@ -26,6 +26,11 @@ from models.unified_response import (
     TokenUsage,
     UnifiedResponse,
 )
+from models.cortex_activity import (
+    ActivityCallback,
+    CortexActivitySignal,
+    CortexActivityType,
+)
 from models.user_context import UserContext
 from orchestrator.multi_orchestrator import MultiModelOrchestrator
 from orchestrator.cache_context import stable_context_digest
@@ -72,6 +77,29 @@ _TRUE_ENV_VALUES = {"1", "true", "yes", "on"}
 
 def _env_flag(name: str, default: str = "false") -> bool:
     return str(os.getenv(name, default) or "").strip().lower() in _TRUE_ENV_VALUES
+
+
+def _emit_activity(
+    callback: ActivityCallback | None,
+    event_type: CortexActivityType,
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    if not callable(callback):
+        return
+    try:
+        callback(
+            CortexActivitySignal(
+                event_type=event_type,
+                provider=provider,
+                model=model,
+                metadata=dict(metadata or {}),
+            )
+        )
+    except Exception:
+        logger.exception("Activity callback failed")
 
 
 class CortexOrchestrator:
@@ -409,6 +437,7 @@ Never claim you performed web browsing yourself; the system handles retrieval.
         context: UserContext | None = None,
         research_mode: str = "auto",
         use_shared_research: bool = True,
+        activity_callback: ActivityCallback | None = None,
     ) -> dict[str, Any]:
         """Build one optimized/research-injected message payload for a turn."""
         optimized_prompt, opt_metadata = self._optimize_prompt_if_enabled(
@@ -420,12 +449,15 @@ Never claim you performed web browsing yourself; the system handles retrieval.
 
         messages = self._build_messages(optimized_prompt, context, research_mode=research_mode)
         if use_shared_research and self.research_service:
-            messages, research_metadata = self._apply_research_if_needed(
-                prompt=optimized_prompt,
-                messages=messages,
-                research_mode=research_mode,
-                context=context,
-            )
+            research_kwargs: dict[str, Any] = {
+                "prompt": optimized_prompt,
+                "messages": messages,
+                "research_mode": research_mode,
+                "context": context,
+            }
+            if callable(activity_callback):
+                research_kwargs["activity_callback"] = activity_callback
+            messages, research_metadata = self._apply_research_if_needed(**research_kwargs)
         elif use_shared_research:
             research_metadata = self._empty_research_metadata("service_not_configured")
         else:
@@ -559,6 +591,7 @@ Never claim you performed web browsing yourself; the system handles retrieval.
         messages: list[dict[str, str]],
         research_mode: str,
         context: UserContext | None = None,
+        activity_callback: ActivityCallback | None = None,
     ) -> tuple[list[dict[str, str]], dict[str, Any]]:
         """
         Apply web research if needed based on research_mode and session state.
@@ -637,6 +670,11 @@ Never claim you performed web browsing yourself; the system handles retrieval.
                     for s in state.sources
                 ],
             }
+            _emit_activity(
+                activity_callback,
+                CortexActivityType.ANALYZING_RESULTS,
+                metadata={"source_count": len(state.sources), "reused": True},
+            )
             return injected_messages, metadata
 
         # 4) Check if we should perform new search
@@ -716,6 +754,7 @@ Never claim you performed web browsing yourself; the system handles retrieval.
         # Execute search
         logger.info(f"Executing new search: {query[:50]}...")
         use_cache = research_mode != "on"
+        _emit_activity(activity_callback, CortexActivityType.SEARCH_STARTED)
         research_ctx = self.research_service.build(query, use_cache=use_cache)
 
         if research_ctx.used:
@@ -773,6 +812,20 @@ Never claim you performed web browsing yourself; the system handles retrieval.
                     for s in sources
                 ],
             }
+            _emit_activity(
+                activity_callback,
+                CortexActivityType.SEARCH_COMPLETED,
+                metadata={
+                    "source_count": len(sources),
+                    "success": True,
+                    "reused": bool(research_ctx.cache_hit),
+                },
+            )
+            _emit_activity(
+                activity_callback,
+                CortexActivityType.ANALYZING_RESULTS,
+                metadata={"source_count": len(sources)},
+            )
             if bool(research_ctx.cache_hit):
                 logger.info(
                     "Reused research context",
@@ -789,6 +842,11 @@ Never claim you performed web browsing yourself; the system handles retrieval.
         else:
             # Search failed
             logger.warning(f"Research failed: {research_ctx.error}")
+            _emit_activity(
+                activity_callback,
+                CortexActivityType.SEARCH_COMPLETED,
+                metadata={"source_count": 0, "success": False},
+            )
             return messages, {
                 "research_used": False,
                 "research_reused": False,
@@ -1442,9 +1500,41 @@ Never claim you performed web browsing yourself; the system handles retrieval.
             prepared_research_metadata = kwargs.pop("_prepared_research_metadata", None)
             prepared_opt_metadata = kwargs.pop("_prepared_opt_metadata", None)
             prepared_prompt = kwargs.pop("_prepared_prompt", None)
+            activity_callback = kwargs.pop("_activity_callback", None)
+            provider_stream_observer = kwargs.pop("_provider_stream_observer", None)
             native_web_search = bool(kwargs.pop("_native_web_search", False))
             if native_web_search:
-                kwargs.setdefault("web_search_executor", self._execute_provider_search)
+
+                def execute_provider_search(query: str) -> dict[str, Any]:
+                    _emit_activity(
+                        activity_callback,
+                        CortexActivityType.SEARCH_STARTED,
+                        provider=model_type,
+                        model=model_name,
+                    )
+                    result = self._execute_provider_search(query)
+                    source_count = len(result.get("sources") or [])
+                    _emit_activity(
+                        activity_callback,
+                        CortexActivityType.SEARCH_COMPLETED,
+                        provider=model_type,
+                        model=model_name,
+                        metadata={
+                            "source_count": source_count,
+                            "success": bool(result.get("ok")),
+                        },
+                    )
+                    if result.get("ok"):
+                        _emit_activity(
+                            activity_callback,
+                            CortexActivityType.ANALYZING_RESULTS,
+                            provider=model_type,
+                            model=model_name,
+                            metadata={"source_count": source_count},
+                        )
+                    return result
+
+                kwargs.setdefault("web_search_executor", execute_provider_search)
 
             if prepared_messages is not None:
                 optimized_prompt = str(prepared_prompt or prompt)
@@ -1463,6 +1553,7 @@ Never claim you performed web browsing yourself; the system handles retrieval.
                     context=context,
                     research_mode=research_mode,
                     use_shared_research=not native_web_search,
+                    activity_callback=activity_callback,
                 )
                 optimized_prompt = prepared_turn["prompt"]
                 messages = prepared_turn["messages"]
@@ -1508,7 +1599,10 @@ Never claim you performed web browsing yourself; the system handles retrieval.
                     model_name,
                     api_key_override=provider_api_keys.get(provider_norm),
                 )
-                resp = client.get_completion(messages=messages, **kwargs)
+                direct_kwargs = dict(kwargs)
+                if provider_stream_observer is not None:
+                    direct_kwargs["_stream_observer"] = provider_stream_observer
+                resp = client.get_completion(messages=messages, **direct_kwargs)
                 resp = self._normalize_empty_success_response(resp)
                 resp = replace(
                     resp,
@@ -1600,7 +1694,10 @@ Never claim you performed web browsing yourself; the system handles retrieval.
                     model_name,
                     api_key_override=provider_api_keys.get(provider_norm),
                 )
-                resp = client.get_completion(messages=messages, **kwargs)
+                direct_kwargs = dict(kwargs)
+                if provider_stream_observer is not None:
+                    direct_kwargs["_stream_observer"] = provider_stream_observer
+                resp = client.get_completion(messages=messages, **direct_kwargs)
                 resp = self._normalize_empty_success_response(resp)
                 resp = replace(
                     resp,

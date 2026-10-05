@@ -1,4 +1,6 @@
 import { ThinkingOrb } from "thinking-orbs";
+import { activityDisplayMessage } from "../../streaming/activityPresentation";
+import type { CortexActivityEvent } from "../../types";
 import styles from "./ResponseLoadingState.module.css";
 
 export type ResponseLoadingMode = "ask" | "compare";
@@ -7,19 +9,19 @@ interface ResponseLoadingStateProps {
   mode: ResponseLoadingMode;
   researchEnabled?: boolean;
   optimizeEnabled?: boolean;
+  activity?: CortexActivityEvent;
 }
 
 export function ResponseLoadingState({
   mode,
   researchEnabled = false,
   optimizeEnabled = false,
+  activity,
 }: ResponseLoadingStateProps) {
-  const message = getResponseLoadingMessage({
-    mode,
-    researchEnabled,
-    optimizeEnabled,
-  });
-  const orbState = researchEnabled ? "searching" : "working";
+  const message =
+    activityDisplayMessage(activity) ??
+    getResponseLoadingMessage({ mode, researchEnabled, optimizeEnabled });
+  const orbState = activity?.phase.includes("search") ? "searching" : "working";
 
   return (
     <div className={styles.loading} role="status" aria-live="polite">
@@ -32,7 +34,9 @@ export function ResponseLoadingState({
           state={orbState}
           theme="auto"
         />
-        <span className={styles.message}>{message}</span>
+        <span className={styles.message} data-activity-event={activity?.event_type}>
+          {message}
+        </span>
       </div>
       <div className={styles.skeleton} aria-hidden="true">
         <span />
@@ -43,13 +47,6 @@ export function ResponseLoadingState({
   );
 }
 
-function getResponseLoadingMessage({
-  mode,
-  researchEnabled,
-  optimizeEnabled,
-}: ResponseLoadingStateProps): string {
-  if (optimizeEnabled) return "Refining prompt and preparing response\u2026";
-  if (researchEnabled) return "Checking sources and preparing an answer\u2026";
-  if (mode === "ask") return "Thinking through your request\u2026";
-  return "Generating response\u2026";
+function getResponseLoadingMessage({ mode }: ResponseLoadingStateProps): string {
+  return mode === "ask" ? "Starting…" : "Preparing this response…";
 }

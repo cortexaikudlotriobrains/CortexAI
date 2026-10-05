@@ -1,5 +1,11 @@
 import { apiClientErrorFromStreamEvent, post, streamPost } from "./client";
-import type { CompareRequest, CompareResponse, CompareStreamChunk, ChatResponse } from "../types";
+import type {
+  ChatResponse,
+  CompareRequest,
+  CompareResponse,
+  CompareStreamChunk,
+  CortexActivityEvent,
+} from "../types";
 
 export async function sendCompare(request: CompareRequest): Promise<CompareResponse> {
   return post<CompareResponse>("/v1/compare", request);
@@ -40,6 +46,13 @@ export async function* streamCompare(
       case "line":
         yield { type: "delta", index: asIndex(event.index), text: String(event.text ?? "") };
         break;
+      case "activity": {
+        const activity = asActivityEvent(event.activity);
+        if (activity) {
+          yield { type: "activity", index: asOptionalIndex(event.index), activity };
+        }
+        break;
+      }
       case "response_done":
         yield {
           type: "response_done",
@@ -64,6 +77,25 @@ function asIndex(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+function asOptionalIndex(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
 function asOptionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function asActivityEvent(value: unknown): CortexActivityEvent | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const activity = value as Partial<CortexActivityEvent>;
+  if (
+    typeof activity.request_id !== "string" ||
+    typeof activity.event_type !== "string" ||
+    typeof activity.display_message !== "string" ||
+    typeof activity.sequence_number !== "number" ||
+    !Number.isFinite(activity.sequence_number)
+  ) {
+    return undefined;
+  }
+  return activity as CortexActivityEvent;
 }

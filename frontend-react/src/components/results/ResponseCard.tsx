@@ -1,12 +1,4 @@
-import {
-  Children,
-  cloneElement,
-  isValidElement,
-  memo,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { Children, cloneElement, isValidElement, memo, useEffect, useRef, useState } from "react";
 import type {
   ComponentPropsWithoutRef,
   CSSProperties,
@@ -20,15 +12,13 @@ import { getModelPresentation } from "../../config/modelPresentation";
 import { presentResponseError } from "../../errors/userFacingError";
 import { remarkCitations } from "../../markdown/remarkCitations";
 import { reasoningLevelFromResponse } from "../../reasoning/reasoningLevels";
+import { activityDisplayMessage, useSmoothedActivity } from "../../streaming/activityPresentation";
 import type { ChatResponse, ReasoningLevel, ResponseRunStatus } from "../../types";
 import { formatAiCredits } from "../../utils/aiCredits";
 import { CortexIcon } from "../shared/CortexIcon";
 import { ProviderLogo } from "../shared/ProviderLogo";
 import { Citation } from "./Citation";
-import {
-  ResponseLoadingState,
-  type ResponseLoadingMode,
-} from "./ResponseLoadingState";
+import { ResponseLoadingState, type ResponseLoadingMode } from "./ResponseLoadingState";
 import { SuggestedFollowUps } from "./SuggestedFollowUps";
 import styles from "./ResponseCard.module.css";
 
@@ -73,18 +63,18 @@ export function ResponseCard({
   const modelPresentation = getModelPresentation(response.provider, response.model);
   const accent = resolveProviderAccent(response.provider, slotIndex);
   const loadingStatus = resolveLoadingStatus(response, !!isStreaming, hasError);
+  const isCancelled = response.ui_status === "cancelled";
   const hasVisibleResponseText = response.text.trim().length > 0;
-  const responseText = hasError
-    ? visibleError?.message ?? "The model couldn't complete this request."
-    : response.text || (loadingStatus ? "" : "(empty response)");
+  const displayedActivity = useSmoothedActivity(response.activity, !!isStreaming);
+  const liveActivityMessage = activityDisplayMessage(displayedActivity);
+  const responseText =
+    hasError || isCancelled
+      ? response.text
+      : response.text || (loadingStatus ? "" : "(empty response)");
   const showLoading = !!loadingStatus && !hasVisibleResponseText;
-  const elapsedMs = useElapsedMs(
-    response.started_at,
-    response.first_visible_at,
-    showLoading,
-  );
+  const elapsedMs = useElapsedMs(response.started_at, response.first_visible_at, showLoading);
   const durationMs = resolveDisplayDurationMs(response);
-  const failedDurationMs = resolveFailedDurationMs(response, elapsedMs);
+  const stoppedDurationMs = resolveStoppedDurationMs(response, elapsedMs);
   const isFailed = hasError || response.ui_status === "failed";
   const aiCredits = response.ai_credits ?? 0;
   const hasCredits = !loadingStatus && !isFailed && aiCredits > 0;
@@ -94,8 +84,13 @@ export function ResponseCard({
   const cacheSavings = Math.max(0, response.cache_savings_ai_credits ?? 0);
   const hasCompletedMetrics = durationMs !== null;
   const hasMetaContent =
-    !!loadingStatus || isFailed || hasCompletedMetrics || hasCredits || hasReasoningLevel;
-  const metaPinned = !!loadingStatus || isFailed;
+    !!loadingStatus ||
+    isFailed ||
+    isCancelled ||
+    hasCompletedMetrics ||
+    hasCredits ||
+    hasReasoningLevel;
+  const metaPinned = !!loadingStatus || isFailed || isCancelled;
   const showRegenerate = !!onRegenerate && !loadingStatus;
   const isIncomplete = response.completion_status === "incomplete";
   const canRetryWithMoreRoom =
@@ -132,9 +127,7 @@ export function ResponseCard({
       style={responseCardStyle(accent)}
       className={`${styles.card} ${compact ? styles.compact : ""} ${
         hasError ? styles.errorCard : ""
-      } ${
-        softError ? styles.softErrorCard : ""
-      }`}
+      } ${softError ? styles.softErrorCard : ""}`}
       data-response-index={slotIndex}
       data-response-error={hasError ? "true" : "false"}
       data-response-streaming={isStreaming ? "true" : "false"}
@@ -165,18 +158,21 @@ export function ResponseCard({
             id={statsId}
             className={`${styles.metaRow} ${metaPinned ? styles.metaRowPinned : ""} ${
               loadingStatus ? styles.loadingMetaRow : ""
-            } ${
-              isFailed ? styles.failedMetaRow : ""
-            }`}
+            } ${isFailed ? styles.failedMetaRow : ""}`}
           >
             {loadingStatus ? (
               <span className={`${styles.metricPill} ${styles.loadingMeta}`}>
                 <CortexIcon name="latency" />
-                {formatElapsedClock(elapsedMs)} elapsed · {loadingStatusText(loadingStatus)}
+                {formatElapsedClock(elapsedMs)} elapsed ·{" "}
+                {loadingStatusText(loadingStatus, liveActivityMessage)}
               </span>
             ) : isFailed ? (
               <span className={`${styles.metricPill} ${styles.failedMeta}`}>
-                Failed after {formatDurationSeconds(failedDurationMs)}
+                Failed after {formatDurationSeconds(stoppedDurationMs)}
+              </span>
+            ) : isCancelled ? (
+              <span className={`${styles.metricPill} ${styles.loadingMeta}`}>
+                Stopped after {formatDurationSeconds(stoppedDurationMs)}
               </span>
             ) : (
               <>
@@ -230,21 +226,29 @@ export function ResponseCard({
         id={`response-text-${slotIndex}`}
         className={`${styles.body} ${isStreaming ? styles.streaming : ""}`}
       >
-        {hasError ? (
-          <div className={styles.errorMsg}>
-            <span aria-hidden="true">!</span>
-            <div>
-              <strong>{visibleError?.title}</strong>
-              <p>{visibleError?.message}</p>
-            </div>
-          </div>
-        ) : showLoading ? (
+        {showLoading ? (
           <ResponseLoadingState
             mode={loadingMode}
             researchEnabled={researchEnabled}
             optimizeEnabled={optimizeEnabled}
+            activity={displayedActivity}
           />
-        ) : (
+        ) : hasError ? (
+          <>
+            {hasVisibleResponseText && (
+              <ResponseMarkdown text={responseText} sources={response.web_source_items} />
+            )}
+            <div
+              className={`${styles.errorMsg} ${hasVisibleResponseText ? styles.partialError : ""}`}
+            >
+              <span aria-hidden="true">!</span>
+              <div>
+                <strong>{visibleError?.title}</strong>
+                <p>{visibleError?.message}</p>
+              </div>
+            </div>
+          </>
+        ) : isCancelled && !hasVisibleResponseText ? null : (
           <ResponseMarkdown text={responseText} sources={response.web_source_items} />
         )}
         {cacheSavings > 0 && !hasError && !showLoading && (
@@ -256,6 +260,19 @@ export function ResponseCard({
           <span className={styles.cursor} aria-hidden="true" />
         )}
       </div>
+
+      {isCancelled && (
+        <div className={styles.incompleteNotice} role="status">
+          <div>
+            <strong>Generation stopped.</strong>
+            <span>
+              {hasVisibleResponseText
+                ? "The partial answer was preserved."
+                : "No answer text was received before it stopped."}
+            </span>
+          </div>
+        </div>
+      )}
 
       {isIncomplete && (
         <div className={styles.incompleteNotice} role="status">
@@ -364,7 +381,12 @@ const ResponseMarkdown = memo(function ResponseMarkdown({
         ),
         a: ({ href, children, ...props }) => {
           return (
-            <a href={href} target={isExternal(href) ? "_blank" : undefined} rel="noreferrer" {...props}>
+            <a
+              href={href}
+              target={isExternal(href) ? "_blank" : undefined}
+              rel="noreferrer"
+              {...props}
+            >
               {children}
             </a>
           );
@@ -378,20 +400,12 @@ const ResponseMarkdown = memo(function ResponseMarkdown({
   );
 });
 
-function MarkdownTable({
-  children,
-  ...props
-}: ComponentPropsWithoutRef<"table">) {
+function MarkdownTable({ children, ...props }: ComponentPropsWithoutRef<"table">) {
   const headerLabels = tableHeaderLabels(children);
   const labelledChildren = labelTableCells(children, headerLabels);
 
   return (
-    <div
-      className={styles.tableWrap}
-      role="region"
-      aria-label="Response table"
-      tabIndex={0}
-    >
+    <div className={styles.tableWrap} role="region" aria-label="Response table" tabIndex={0}>
       <table {...props}>{labelledChildren}</table>
     </div>
   );
@@ -410,14 +424,10 @@ function isMarkdownElement(
 }
 
 function tableHeaderLabels(children: ReactNode): string[] {
-  const head = Children.toArray(children).find((child) =>
-    isMarkdownElement(child, "thead"),
-  );
+  const head = Children.toArray(children).find((child) => isMarkdownElement(child, "thead"));
   if (!head || !isMarkdownElement(head, "thead")) return [];
 
-  const row = Children.toArray(head.props.children).find((child) =>
-    isMarkdownElement(child, "tr"),
-  );
+  const row = Children.toArray(head.props.children).find((child) => isMarkdownElement(child, "tr"));
   if (!row || !isMarkdownElement(row, "tr")) return [];
 
   return Children.toArray(row.props.children)
@@ -543,7 +553,8 @@ function getModelBadge(provider: string, model: string) {
   const value = `${provider} ${model}`.toLowerCase();
   if (value.includes("smart")) return { label: "SMART · MODEL", tone: "advanced" as const };
   if (value.includes("gemini")) return { label: "FASTEST", tone: "fastest" as const };
-  if (value.includes("grok") || value.includes("xai")) return { label: "RAW", tone: "raw" as const };
+  if (value.includes("grok") || value.includes("xai"))
+    return { label: "RAW", tone: "raw" as const };
   if (value.includes("claude") || value.includes("anthropic")) {
     return { label: "ADVANCED", tone: "advanced" as const };
   }
@@ -640,7 +651,12 @@ function resolveLoadingStatus(
   streaming: boolean,
   hasError: boolean,
 ): ResponseRunStatus | null {
-  if (hasError || response.ui_status === "failed" || response.ui_status === "complete") {
+  if (
+    hasError ||
+    response.ui_status === "failed" ||
+    response.ui_status === "cancelled" ||
+    response.ui_status === "complete"
+  ) {
     return null;
   }
   if (!streaming) return null;
@@ -650,7 +666,8 @@ function resolveLoadingStatus(
   return "streaming";
 }
 
-function loadingStatusText(status: ResponseRunStatus) {
+function loadingStatusText(status: ResponseRunStatus, activityMessage?: string) {
+  if (activityMessage) return activityMessage.replace(/…$/, "");
   switch (status) {
     case "queued":
       return "Queued";
@@ -689,13 +706,9 @@ function useElapsedMs(
 
 type DisplayReasoningLevel = Exclude<ReasoningLevel, "auto">;
 
-function resolveResponseReasoningLevel(
-  response: ChatResponse,
-): DisplayReasoningLevel | null {
+function resolveResponseReasoningLevel(response: ChatResponse): DisplayReasoningLevel | null {
   if (response.routing_mode?.trim().toLowerCase() !== "smart") return null;
-  const level = reasoningLevelFromResponse(
-    response.generation_budget?.effective_reasoning_effort,
-  );
+  const level = reasoningLevelFromResponse(response.generation_budget?.effective_reasoning_effort);
   return level === "auto" ? null : level;
 }
 
@@ -710,11 +723,11 @@ function reasoningMetricTone(level: DisplayReasoningLevel): string {
   return styles.reasoningMax;
 }
 
-function resolveFailedDurationMs(response: ChatResponse, elapsedMs: number) {
+function resolveStoppedDurationMs(response: ChatResponse, elapsedMs: number) {
   const startedAtMs = parseTimestamp(response.started_at);
-  const failedAtMs = parseTimestamp(response.failed_at);
-  if (startedAtMs !== null && failedAtMs !== null) {
-    return Math.max(0, failedAtMs - startedAtMs);
+  const stoppedAtMs = parseTimestamp(response.failed_at) ?? parseTimestamp(response.cancelled_at);
+  if (startedAtMs !== null && stoppedAtMs !== null) {
+    return Math.max(0, stoppedAtMs - startedAtMs);
   }
   const latencyMs = validDurationMs(response.latency_ms);
   if (latencyMs !== null) return latencyMs;
@@ -735,9 +748,7 @@ function resolveDisplayDurationMs(response: ChatResponse): number | null {
 }
 
 function validDurationMs(value: number | null | undefined): number | null {
-  return typeof value === "number" && Number.isFinite(value) && value > 0
-    ? value
-    : null;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
 }
 
 function parseTimestamp(value: string | undefined): number | null {

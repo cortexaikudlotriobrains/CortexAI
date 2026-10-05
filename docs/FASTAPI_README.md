@@ -67,6 +67,7 @@ FRONTEND_DIR=frontend-react/dist
 # NATIVE_WEB_SEARCH_PROVIDERS=openai,claude,gemini,grok,deepseek
 # COMPARE_NATIVE_WEB_SEARCH_ENABLED=true
 # DEEPSEEK_AGENTIC_SEARCH_ENABLED=true
+# PROVIDER_LIVE_STREAMING_PROVIDERS=openai,claude,gemini,grok
 # WEB_SEARCH_MAX_OPERATIONS=3
 # WEB_SEARCH_MAX_DISPLAY_SOURCES=8
 # DEEPSEEK_WEB_SEARCH_MAX_RESULTS=5
@@ -150,7 +151,8 @@ If `FRONTEND_DIR` is unset, `server/app.py` serves `frontend-react/dist`. Set th
 - Focused validation: `python -m pytest tests/test_billing_metering.py tests/test_billing_entitlements.py tests/test_stripe_billing.py tests/test_stripe_webhooks.py tests/test_baseline_safety_rails.py tests/test_fastapi_contract_and_guardrails.py -q`. Use `BILLING_TEST_DATABASE_URL` with `tests/test_billing_postgres_integration.py` for real row-lock concurrency coverage.
 - `/v1/model-options` remains available to session-authenticated clients when the rich catalogue is disabled. `/v1/models?enabled_only=true` returns `404 Not Found` by default; set `ENABLE_MODELS_CATALOG=true` to expose the retained selectable/full catalogue contract again without restoring code.
 - Model catalogue rows expose native reasoning metadata plus normalized `reasoning_levels`, `default_reasoning_level`, and `reasoning_controllable` fields. React uses the normalized fields to drive the inline Reasoning radiogroup in the composer More options dialog; provider aliases remain a server concern.
-- Pending Ask and Compare cards show independent contextual loading blocks with a compact thought orb and skeleton lines. Source-enabled requests use the orb's `searching` treatment; other pending requests use its neutral `working` treatment, while the existing text remains the authoritative status. A card removes its loading state on its first streamed token or error without waiting for the other Compare targets, and motion respects `prefers-reduced-motion`.
+- Pending Ask and Compare cards show one stable activity block driven by normalized backend `activity` events. Initial acknowledgement is immediate and generic; search, file, tool, MCP, code, or review wording appears only when Cortex has evidence for that phase. Semantic states use a short UI debounce to avoid flashes, but answer output is never delayed. A card makes activity secondary on its first renderable text without waiting for other Compare targets, and motion respects `prefers-reduced-motion`.
+- Failed and cancelled streams preserve already-visible answer text. Safe failure guidance renders below a partial answer, and cancellation renders an explicit stopped state instead of an empty-response placeholder.
 - Smart Ask pending cards remain model-neutral because the `start` provider/model is a routing preview that can differ after research and runtime context are applied. They show `Smart routing` while waiting and adopt the authoritative provider/model from `response_done`.
 - Frontend response card controls render as a minimal icon row for copy, regenerate, and feedback actions. Copy shows a brief visible success confirmation in the toolbar. Regenerate uses the existing `/v1/chat/stream` path, refills the clicked response card in place, and preserves the original source-enabled flag. Compare card regeneration is intentionally single-target so clicking one card does not rerun or replace the other comparison cards.
 - Frontend response sources render inline as publisher-name citation pills derived from `web_source_items`; grouped markers such as `[1][2][3]` collapse into one pill with a preview card listing each linked source. Desktop keeps the hover preview viewport-contained and directly beside its pill, while phone-sized mobile keeps the tap-to-open bottom sheet.
@@ -680,6 +682,7 @@ Rules:
 
 `POST /v1/chat/stream` returns NDJSON events:
 - `start`
+- `activity`
 - `heartbeat`
 - `line`
 - `response_done`
@@ -687,6 +690,9 @@ Rules:
 - `error`
 
 Notes:
+- `activity.activity` is a normalized Cortex lifecycle object with `request_id`, optional `conversation_id`, nullable `provider`/`model`, `mode`, `event_type`, `phase`, safe `display_message`, UTC `timestamp`, `sequence_number`, and allowlisted `metadata`. Provider-specific event names, hidden reasoning, raw tool arguments, credentials, and private IDs do not cross this boundary.
+- Supported normalized types cover request, thinking, search/file/tool/MCP/code, analysis, answer, waiting, completion, failure, and cancellation states.
+- Manual Ask uses provider SDK streams for OpenAI, Claude, Gemini, and Grok. The adapter accumulates the same final provider response while forwarding safe normalized events and real text deltas; billing, persistence, citations, and `response_done` continue to use the final `UnifiedResponse`. OpenAI-compatible stream accumulation requires `openai>=2.14.0,<3.0.0`. Smart Ask, DeepSeek, and rollout-disabled providers use buffered completion replay. `PROVIDER_LIVE_STREAMING_PROVIDERS` defaults to `openai,claude,gemini,grok`; set it to an allowlist or `off`. Provider terminal events are internal—the route emits public `REQUEST_COMPLETED` only after finalization.
 - `start` includes the routed preview `provider` and `model`, plus `session_id`, `research_mode`, and an initial `web_source_items` array. Smart-mode clients should not present the preview as the final selected model.
 - `response_done` includes the full `ChatResponseDTO`, including `session_id`, authoritative `routing_mode`, effective generation/reasoning budget, and `web_source_items`.
 - `done` includes the resolved `session_id`.
@@ -791,6 +797,7 @@ Persistence:
 
 `POST /v1/compare/stream` returns NDJSON events:
 - `start`
+- `activity` (request-wide or indexed)
 - `heartbeat`
 - `response_start`
 - `line`
@@ -799,6 +806,7 @@ Persistence:
 - `error`
 
 Notes:
+- Every valid target receives `response_start` plus indexed `REQUEST_IN_PROGRESS` when its provider task begins. OpenAI, Claude, Gemini, and Grok targets forward native text deltas and known provider activity through their own index; queued deltas are drained before that target's `response_done`, preventing final-text replay from duplicating a fast provider stream. DeepSeek and rollout-disabled targets retain buffered replay. Request-wide activity omits `index` and applies to still-running cards. A failed target emits indexed `REQUEST_FAILED` while other targets continue.
 - `start` includes `session_id`, `research_mode`, and target count.
 - Each `response_done` includes one full `ChatResponseDTO`.
 - Final `done` includes the aggregate compare payload with both `request_group_id` and `session_id`.

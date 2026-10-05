@@ -71,6 +71,7 @@ class GrokClient(BaseAIClient):
         """
         request_id = self._resolve_request_id_from_kwargs(kwargs)
         start_time = time.time()
+        stream_observer = kwargs.pop("_stream_observer", None)
 
         model = kwargs.get("model", self.model_name)
         cache_context = self._resolve_cache_context(
@@ -131,6 +132,8 @@ class GrokClient(BaseAIClient):
             }
             if reasoning_mode:
                 request_payload["reasoning_effort"] = reasoning_mode
+            if stream_observer is not None:
+                request_payload["stream_options"] = {"include_usage": True}
             if cache_context.enabled and grok_prompt_cache_enabled():
                 request_payload["extra_headers"] = {
                     "x-grok-conv-id": cache_context.cache_scope_key
@@ -171,11 +174,19 @@ class GrokClient(BaseAIClient):
                         response_payload["temperature"] = temperature
                     if reasoning_mode:
                         response_payload["reasoning"] = {"effort": reasoning_mode}
-                    response = self.client.responses.create(**response_payload)
+                    response = self._create_responses_completion(
+                        response_payload,
+                        stream_observer,
+                    )
                     endpoint = "responses"
                 else:
-                    response = self.client.chat.completions.create(**request_payload)
+                    response = self._create_chat_completion(
+                        request_payload,
+                        stream_observer,
+                    )
             except Exception as request_exc:
+                if stream_observer is not None and stream_observer.has_emitted:
+                    raise
                 if web_search_enabled:
                     raise
                 dropped_param, retry_payload = self._build_retry_payload_without_unsupported_parameter(
@@ -188,6 +199,7 @@ class GrokClient(BaseAIClient):
                         "frequency_penalty",
                         "max_tokens",
                         "reasoning_effort",
+                        "stream_options",
                         "extra_headers",
                     },
                 )
@@ -203,7 +215,10 @@ class GrokClient(BaseAIClient):
                             }
                         },
                     )
-                    response = self.client.chat.completions.create(**retry_payload)
+                    response = self._create_chat_completion(
+                        retry_payload,
+                        stream_observer,
+                    )
                     adaptive_retry = {
                         "dropped_param": dropped_param,
                         "retry_reason": "unsupported_parameter",
@@ -364,6 +379,41 @@ class GrokClient(BaseAIClient):
             return self._create_error_response(
                 request_id=request_id, error=error, latency_ms=latency_ms, model=model
             )
+
+    def _create_responses_completion(
+        self,
+        payload: dict[str, Any],
+        stream_observer: Any,
+    ) -> Any:
+        if stream_observer is None:
+            return self.client.responses.create(**payload)
+
+        with self.client.responses.stream(**payload) as stream:
+            for event in stream:
+                stream_observer.emit_provider_event(event)
+                if str(field_value(event, "type", "") or "").lower() == (
+                    "response.output_text.delta"
+                ):
+                    stream_observer.emit_text(field_value(event, "delta", ""))
+            stream_observer.raise_if_cancelled()
+            return stream.get_final_response()
+
+    def _create_chat_completion(
+        self,
+        payload: dict[str, Any],
+        stream_observer: Any,
+    ) -> Any:
+        if stream_observer is None:
+            return self.client.chat.completions.create(**payload)
+
+        with self.client.chat.completions.stream(**payload) as stream:
+            for event in stream:
+                stream_observer.emit_provider_event(event)
+                event_type = str(field_value(event, "type", "") or "").lower()
+                if event_type == "content.delta":
+                    stream_observer.emit_text(field_value(event, "delta", ""))
+            stream_observer.raise_if_cancelled()
+            return stream.get_final_completion()
 
     @classmethod
     def _build_chat_messages(

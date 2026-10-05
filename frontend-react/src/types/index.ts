@@ -24,14 +24,7 @@ export type AttachmentUsageRole = "primary" | "reference";
 export type AttachmentTransformMode = "auto" | "text_only" | "vision_pages" | "table_summary";
 export type GenerationProfile = "auto" | "quick" | "balanced" | "deep" | "extended";
 export type ReasoningMode = "auto" | "off" | "on";
-export type ReasoningEffort =
-  | "auto"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh"
-  | "max";
+export type ReasoningEffort = "auto" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 export type ReasoningLevel = "auto" | "low" | "medium" | "high" | "max";
 
 export interface GenerationRequest {
@@ -105,7 +98,49 @@ export type ResponseRunStatus =
   | "finalizing"
   | "complete"
   | "incomplete"
+  | "cancelled"
   | "failed";
+
+export type CortexActivityType =
+  | "REQUEST_RECEIVED"
+  | "REQUEST_IN_PROGRESS"
+  | "THINKING_STARTED"
+  | "THINKING_COMPLETED"
+  | "SEARCH_STARTED"
+  | "SEARCH_COMPLETED"
+  | "FILE_SEARCH_STARTED"
+  | "FILE_SEARCH_COMPLETED"
+  | "FILE_READING_STARTED"
+  | "FILE_READING_COMPLETED"
+  | "TOOL_STARTED"
+  | "TOOL_COMPLETED"
+  | "MCP_TOOL_STARTED"
+  | "MCP_TOOL_COMPLETED"
+  | "CODE_EXECUTION_STARTED"
+  | "CODE_EXECUTION_COMPLETED"
+  | "ANALYZING_RESULTS"
+  | "ANSWER_STARTED"
+  | "ANSWER_DELTA"
+  | "ANSWER_COMPLETED"
+  | "WAITING_FOR_USER"
+  | "WAITING_FOR_APPROVAL"
+  | "REQUEST_COMPLETED"
+  | "REQUEST_FAILED"
+  | "REQUEST_CANCELLED";
+
+export interface CortexActivityEvent {
+  request_id: string;
+  conversation_id?: string | null;
+  provider?: string | null;
+  model?: string | null;
+  mode: "chat" | "compare" | "work" | string;
+  event_type: CortexActivityType;
+  phase: string;
+  display_message: string;
+  timestamp: string;
+  sequence_number: number;
+  metadata: Record<string, unknown>;
+}
 
 export interface ApiError {
   code: string;
@@ -177,6 +212,8 @@ export interface ChatResponse {
   first_visible_at?: string;
   completed_at?: string;
   failed_at?: string;
+  cancelled_at?: string;
+  activity?: CortexActivityEvent;
 }
 
 export interface CompareResponse {
@@ -866,17 +903,18 @@ export interface AppState {
 }
 
 export interface StreamChunk {
-  type: "delta" | "done" | "error" | "metadata" | "start";
+  type: "delta" | "done" | "error" | "metadata" | "start" | "activity";
   text?: string;
   error?: string;
   metadata?: Partial<ChatResponse>;
   provider?: string;
   model?: string;
   session_id?: string;
+  activity?: CortexActivityEvent;
 }
 
 export interface CompareStreamChunk {
-  type: "start" | "response_start" | "delta" | "response_done" | "done" | "error";
+  type: "start" | "response_start" | "delta" | "response_done" | "done" | "error" | "activity";
   index?: number;
   text?: string;
   error?: string;
@@ -885,4 +923,5 @@ export interface CompareStreamChunk {
   response?: ChatResponse;
   compare?: CompareResponse;
   session_id?: string;
+  activity?: CortexActivityEvent;
 }

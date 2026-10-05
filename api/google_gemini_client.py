@@ -1,5 +1,6 @@
 import os
 import time
+from types import SimpleNamespace
 from typing import Any
 
 from google import genai
@@ -142,6 +143,7 @@ class GeminiClient(BaseAIClient):
         """
         request_id = self._resolve_request_id_from_kwargs(kwargs)
         start_time = time.time()
+        stream_observer = kwargs.pop("_stream_observer", None)
 
         model_name = kwargs.get("model", self.model_name)
         self._resolve_cache_context(kwargs, provider="gemini", model=model_name)
@@ -216,25 +218,34 @@ class GeminiClient(BaseAIClient):
                         interaction_config["temperature"] = temperature
                     if reasoning_effort and reasoning_effort != "none":
                         interaction_config["thinking_level"] = reasoning_effort
-                    response = self.client.interactions.create(
-                        model=model_name,
-                        input=self._build_interactions_input(
+                    interaction_payload = {
+                        "model": model_name,
+                        "input": self._build_interactions_input(
                             normalized_messages,
                             attachments=binary_attachments,
                         ),
-                        system_instruction="\n\n".join(
+                        "system_instruction": "\n\n".join(
                             part for part in (system_instruction, web_instruction) if part
                         ),
-                        tools=[{"type": "google_search"}],
-                        generation_config=interaction_config,
-                        store=False,
+                        "tools": [{"type": "google_search"}],
+                        "generation_config": interaction_config,
+                        "store": False,
+                    }
+                    response = self._create_interaction(
+                        interaction_payload,
+                        stream_observer,
                     )
                     endpoint = "interactions.create"
                 else:
-                    response = self.client.models.generate_content(
-                        model=model_name, contents=gemini_contents, config=config
+                    response = self._generate_content(
+                        model=model_name,
+                        contents=gemini_contents,
+                        config=config,
+                        stream_observer=stream_observer,
                     )
             except Exception as request_exc:
+                if stream_observer is not None and stream_observer.has_emitted:
+                    raise
                 if web_search_enabled:
                     raise
                 dropped_param, retry_config = self._build_retry_payload_without_unsupported_parameter(
@@ -254,8 +265,11 @@ class GeminiClient(BaseAIClient):
                             }
                         },
                     )
-                    response = self.client.models.generate_content(
-                        model=model_name, contents=gemini_contents, config=retry_config
+                    response = self._generate_content(
+                        model=model_name,
+                        contents=gemini_contents,
+                        config=retry_config,
+                        stream_observer=stream_observer,
                     )
                     adaptive_retry = {
                         "dropped_param": dropped_param,
@@ -466,6 +480,86 @@ class GeminiClient(BaseAIClient):
             return self._create_error_response(
                 request_id=request_id, error=error, latency_ms=latency_ms, model=model_name
             )
+
+    def _create_interaction(
+        self,
+        payload: dict[str, Any],
+        stream_observer: Any,
+    ) -> Any:
+        if stream_observer is None:
+            return self.client.interactions.create(**payload)
+
+        final_interaction = None
+        stream = self.client.interactions.create(**payload, stream=True)
+        try:
+            for wrapped_event in stream:
+                event = field_value(wrapped_event, "data", wrapped_event)
+                stream_observer.emit_provider_event(event)
+                event_type = str(field_value(event, "event_type", "") or "").lower()
+                if event_type == "step.delta":
+                    delta = field_value(event, "delta")
+                    if str(field_value(delta, "type", "") or "").lower() == "text":
+                        stream_observer.emit_text(field_value(delta, "text", ""))
+                if event_type == "interaction.completed":
+                    final_interaction = field_value(event, "interaction")
+        finally:
+            close = getattr(stream, "close", None)
+            if callable(close):
+                close()
+
+        stream_observer.raise_if_cancelled()
+        if final_interaction is None:
+            raise RuntimeError("Gemini interaction stream ended without a completed interaction")
+        return final_interaction
+
+    def _generate_content(
+        self,
+        *,
+        model: str,
+        contents: list[dict[str, Any]],
+        config: dict[str, Any],
+        stream_observer: Any,
+    ) -> Any:
+        if stream_observer is None:
+            return self.client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=config,
+            )
+
+        text_parts: list[str] = []
+        last_chunk = None
+        stream = self.client.models.generate_content_stream(
+            model=model,
+            contents=contents,
+            config=config,
+        )
+        try:
+            for chunk in stream:
+                stream_observer.emit_provider_event(chunk)
+                try:
+                    chunk_text = field_value(chunk, "text", "")
+                except (AttributeError, TypeError, ValueError):
+                    chunk_text = ""
+                if chunk_text:
+                    text_parts.append(str(chunk_text))
+                    stream_observer.emit_text(chunk_text)
+                last_chunk = chunk
+        finally:
+            close = getattr(stream, "close", None)
+            if callable(close):
+                close()
+
+        stream_observer.raise_if_cancelled()
+        if last_chunk is None:
+            raise RuntimeError("Gemini content stream ended without a response")
+        return SimpleNamespace(
+            text="".join(text_parts),
+            usage_metadata=field_value(last_chunk, "usage_metadata"),
+            model_version=field_value(last_chunk, "model_version", model),
+            candidates=field_value(last_chunk, "candidates", []),
+            prompt_feedback=field_value(last_chunk, "prompt_feedback"),
+        )
 
     @staticmethod
     def _extract_grounding(

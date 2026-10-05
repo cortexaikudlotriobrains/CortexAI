@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any, BinaryIO, Mapping, Sequence
 
+from models.cortex_activity import safe_tool_activity_message
 from server.work.config import WorkConfig
 from server.work.provider import (
     AgentProvider,
@@ -198,7 +199,10 @@ def normalize_anthropic_event(event: Any) -> ProviderEvent:
     elif provider_type in {"agent.tool_use", "agent.mcp_tool_use", "agent.custom_tool_use"}:
         normalized_type = "tool_started"
         tool_name = str(data.get("name") or "tool")
-        display = f"Using {tool_name}"
+        display = safe_tool_activity_message(
+            tool_name,
+            mcp=provider_type == "agent.mcp_tool_use",
+        )
         payload.update({"tool_name": tool_name, "tool_use_id": provider_id})
         server_name = data.get("mcp_server_name") or data.get("server_name") or data.get("server")
         if server_name:

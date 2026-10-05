@@ -237,6 +237,7 @@ class ClaudeClient(BaseAIClient):
     ) -> UnifiedResponse:
         request_id = self._resolve_request_id_from_kwargs(kwargs)
         start_time = time.time()
+        stream_observer = kwargs.pop("_stream_observer", None)
 
         requested_model = kwargs.get("model")
         model = (
@@ -322,8 +323,10 @@ class ClaudeClient(BaseAIClient):
 
             adaptive_retry = None
             try:
-                response = self.client.messages.create(**request_payload)
+                response = self._create_message(request_payload, stream_observer)
             except Exception as request_exc:
+                if stream_observer is not None and stream_observer.has_emitted:
+                    raise
                 dropped_param, retry_payload = self._build_retry_payload_without_unsupported_parameter(
                     request_payload,
                     request_exc,
@@ -346,7 +349,7 @@ class ClaudeClient(BaseAIClient):
                             }
                         },
                     )
-                    response = self.client.messages.create(**retry_payload)
+                    response = self._create_message(retry_payload, stream_observer)
                     adaptive_retry = {
                         "dropped_param": dropped_param,
                         "retry_reason": "unsupported_parameter",
@@ -422,7 +425,7 @@ class ClaudeClient(BaseAIClient):
             )
 
             metadata = {
-                "endpoint": "messages.create",
+                "endpoint": "messages.stream" if stream_observer is not None else "messages.create",
                 "pricing_unknown": bool(cost.get("pricing_unknown", False)),
                 **build_web_search_metadata(
                     provider="claude",
@@ -479,6 +482,21 @@ class ClaudeClient(BaseAIClient):
             return self._create_error_response(
                 request_id=request_id, error=error, latency_ms=latency_ms, model=model
             )
+
+    def _create_message(self, payload: dict[str, Any], stream_observer: Any) -> Any:
+        if stream_observer is None:
+            return self.client.messages.create(**payload)
+
+        with self.client.messages.stream(**payload) as stream:
+            for event in stream:
+                stream_observer.emit_provider_event(event)
+                if str(field_value(event, "type", "")).lower() != "content_block_delta":
+                    continue
+                delta = field_value(event, "delta")
+                if str(field_value(delta, "type", "")).lower() == "text_delta":
+                    stream_observer.emit_text(field_value(delta, "text", ""))
+            stream_observer.raise_if_cancelled()
+            return stream.get_final_message()
 
     @classmethod
     def list_available_models(cls, api_key: str = None, **kwargs) -> None:

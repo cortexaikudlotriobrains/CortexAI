@@ -1,5 +1,5 @@
 import { apiClientErrorFromStreamEvent, post, streamPost } from "./client";
-import type { ChatRequest, ChatResponse, StreamChunk } from "../types";
+import type { ChatRequest, ChatResponse, CortexActivityEvent, StreamChunk } from "../types";
 
 export async function* streamChat(
   request: ChatRequest,
@@ -34,6 +34,11 @@ export async function* streamChat(
       case "line":
         yield { type: "delta", text: String(event.text ?? "") };
         break;
+      case "activity": {
+        const activity = asActivityEvent(event.activity);
+        if (activity) yield { type: "activity", activity };
+        break;
+      }
       case "response_done":
         yield { type: "metadata", metadata: event.response as Partial<ChatResponse> };
         break;
@@ -52,4 +57,19 @@ export async function sendChat(request: ChatRequest): Promise<ChatResponse> {
 
 function asOptionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function asActivityEvent(value: unknown): CortexActivityEvent | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const activity = value as Partial<CortexActivityEvent>;
+  if (
+    typeof activity.request_id !== "string" ||
+    typeof activity.event_type !== "string" ||
+    typeof activity.display_message !== "string" ||
+    typeof activity.sequence_number !== "number" ||
+    !Number.isFinite(activity.sequence_number)
+  ) {
+    return undefined;
+  }
+  return activity as CortexActivityEvent;
 }

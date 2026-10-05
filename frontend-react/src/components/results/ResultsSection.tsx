@@ -219,9 +219,7 @@ const CompareTurn = memo(function CompareTurn({
 
     const tabs = responseTabsRef.current;
     const sentinel = responseTabsSentinelRef.current;
-    const scrollRoot = tabs?.closest(
-      'section[aria-label="Chat transcript"]',
-    ) as HTMLElement | null;
+    const scrollRoot = tabs?.closest('section[aria-label="Chat transcript"]') as HTMLElement | null;
     if (!tabs || !sentinel || !scrollRoot) return;
 
     let frameId: number | null = null;
@@ -297,10 +295,7 @@ const CompareTurn = memo(function CompareTurn({
                 aria-label="Compare model responses"
               >
                 {turn.responses.map((response, index) => {
-                  const presentation = getModelPresentation(
-                    response.provider,
-                    response.model,
-                  );
+                  const presentation = getModelPresentation(response.provider, response.model);
                   const selected = index === activeResponseIndex;
                   const tone = responseSwitcherTone(response.provider, presentation.color);
                   const tabStyle = {
@@ -329,9 +324,7 @@ const CompareTurn = memo(function CompareTurn({
                         event.preventDefault();
                         setActiveResponseIndex(nextIndex);
                         window.requestAnimationFrame(() => {
-                          document
-                            .getElementById(`${turn.id}-response-tab-${nextIndex}`)
-                            ?.focus();
+                          document.getElementById(`${turn.id}-response-tab-${nextIndex}`)?.focus();
                         });
                       }}
                     >
@@ -343,14 +336,9 @@ const CompareTurn = memo(function CompareTurn({
                           size={13}
                         />
                       </span>
-                      <span className={styles.mobileResponseTabLabel}>
-                        {presentation.label}
-                      </span>
+                      <span className={styles.mobileResponseTabLabel}>{presentation.label}</span>
                       {selected && (
-                        <span
-                          className={styles.mobileResponseTabDot}
-                          aria-hidden="true"
-                        />
+                        <span className={styles.mobileResponseTabDot} aria-hidden="true" />
                       )}
                     </button>
                   );
@@ -363,10 +351,7 @@ const CompareTurn = memo(function CompareTurn({
             className={`${styles.compareGrid} ${styles.compareGridTranscript} ${compareGridClass}`}
           >
             {turn.responses.map((response, index) => {
-              const presentation = getModelPresentation(
-                response.provider,
-                response.model,
-              );
+              const presentation = getModelPresentation(response.provider, response.model);
               return (
                 <div
                   key={`${turn.id}-${index}-${response.request_id}`}
@@ -375,9 +360,7 @@ const CompareTurn = memo(function CompareTurn({
                     index === activeResponseIndex ? styles.mobileResponsePanelActive : ""
                   }`}
                   role={hasResponseTabs ? "tabpanel" : "region"}
-                  aria-labelledby={
-                    hasResponseTabs ? `${turn.id}-response-tab-${index}` : undefined
-                  }
+                  aria-labelledby={hasResponseTabs ? `${turn.id}-response-tab-${index}` : undefined}
                   aria-label={hasResponseTabs ? undefined : `${presentation.label} response`}
                   data-response-panel
                 >
@@ -397,20 +380,14 @@ const CompareTurn = memo(function CompareTurn({
               );
             })}
           </div>
-          {onAnalyze && (
-            <CortexAnalysisZone turn={turn} onAnalyze={onAnalyze} />
-          )}
+          {onAnalyze && <CortexAnalysisZone turn={turn} onAnalyze={onAnalyze} />}
         </>
       )}
     </article>
   );
 });
 
-function nextResponseTabIndex(
-  key: string,
-  currentIndex: number,
-  tabCount: number,
-): number | null {
+function nextResponseTabIndex(key: string, currentIndex: number, tabCount: number): number | null {
   if (tabCount < 1) return null;
   if (key === "ArrowRight") return (currentIndex + 1) % tabCount;
   if (key === "ArrowLeft") return (currentIndex - 1 + tabCount) % tabCount;
@@ -421,7 +398,7 @@ function nextResponseTabIndex(
 
 function resolveCompareMetricHighlights(responses: ChatTurn["responses"]) {
   const durations = responses.map((response) =>
-    response.error || response.ui_status === "failed"
+    response.error || response.ui_status === "failed" || response.ui_status === "cancelled"
       ? null
       : responseDurationMs(response),
   );
@@ -457,9 +434,7 @@ function responseDurationMs(response: ChatTurn["responses"][number]) {
 }
 
 function positiveNumber(value: number | null | undefined) {
-  return typeof value === "number" && Number.isFinite(value) && value > 0
-    ? value
-    : null;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
 }
 
 function minMetric(values: Array<number | null>) {
@@ -473,7 +448,12 @@ function parseTimestamp(value: string | undefined): number | null {
 }
 
 function isResponseLoading(turn: ChatTurn, response: ChatTurn["responses"][number]) {
-  if (response.error || response.ui_status === "complete" || response.ui_status === "failed") {
+  if (
+    response.error ||
+    response.ui_status === "complete" ||
+    response.ui_status === "failed" ||
+    response.ui_status === "cancelled"
+  ) {
     return false;
   }
   return turn.status === "optimizing" || turn.status === "streaming";
@@ -487,10 +467,7 @@ function shouldHideResponsesForOptimization(turn: ChatTurn) {
   );
 }
 
-function shouldShowSuggestedFollowUps(
-  turn: ChatTurn,
-  response: ChatTurn["responses"][number],
-) {
+function shouldShowSuggestedFollowUps(turn: ChatTurn, response: ChatTurn["responses"][number]) {
   return (
     turn.mode === "single" &&
     turn.status === "complete" &&
@@ -660,7 +637,5 @@ function TurnAttachments({ turn }: { turn: ChatTurn }) {
 }
 
 function responseStartIndexForTurn(turns: ChatTurn[], turnIndex: number): number {
-  return turns
-    .slice(0, turnIndex)
-    .reduce((total, turn) => total + turn.responses.length, 0);
+  return turns.slice(0, turnIndex).reduce((total, turn) => total + turn.responses.length, 0);
 }

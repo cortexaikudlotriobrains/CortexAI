@@ -56,6 +56,21 @@ strategies. Cortex Analysis receives those per-response sources and a compact
 used/operation summary, but its synthesis request has web search explicitly
 disabled.
 
+## Live Progress Boundary
+
+Ask and Compare expose provider-neutral `activity` events in their NDJSON
+streams. Cortex-owned research, including DeepSeek's local Tavily function loop,
+emits `search_started`, `search_completed`, and `analyzing_results` only at the
+corresponding real execution boundaries. OpenAI, Claude, Gemini, and Grok manual
+Ask/Compare adapters consume their native provider streams. Known hosted-search
+events are normalized into safe activity, and real answer deltas are forwarded
+immediately while the adapter still builds the final response used for
+authoritative search counts and billing. The UI must not claim that provider
+search started merely because `web_mode` is enabled; unknown or absent provider
+events remain generic progress. Smart Ask and DeepSeek retain their existing
+buffered paths. OpenAI-compatible native stream accumulation requires
+`openai>=2.14.0,<3.0.0`.
+
 ## Billing
 
 The reservation covers the maximum three operations for each potential Ask
@@ -86,6 +101,7 @@ NATIVE_WEB_SEARCH_MODE=enabled
 NATIVE_WEB_SEARCH_PROVIDERS=openai,claude,gemini,grok,deepseek
 COMPARE_NATIVE_WEB_SEARCH_ENABLED=true
 DEEPSEEK_AGENTIC_SEARCH_ENABLED=true
+PROVIDER_LIVE_STREAMING_PROVIDERS=openai,claude,gemini,grok
 WEB_SEARCH_MAX_OPERATIONS=3
 WEB_SEARCH_MAX_DISPLAY_SOURCES=8
 DEEPSEEK_WEB_SEARCH_MAX_RESULTS=5
@@ -99,6 +115,9 @@ TAVILY_API_KEY=tvly-...
   receives no native tool and does not borrow another provider's sources.
 - `COMPARE_NATIVE_WEB_SEARCH_ENABLED=false` rolls Compare back independently.
 - `DEEPSEEK_AGENTIC_SEARCH_ENABLED=false` disables the DeepSeek tool loop.
+- `PROVIDER_LIVE_STREAMING_PROVIDERS` is an independent manual Ask/Compare
+  stream allowlist. Set it to a subset for staged rollout or `off` to retain
+  buffered delivery; it does not enable DeepSeek or Smart streaming.
 - The three product caps are hard upper bounds even if larger environment
   values are supplied.
 - `TAVILY_API_KEY` is required for DeepSeek search and for the legacy path, but

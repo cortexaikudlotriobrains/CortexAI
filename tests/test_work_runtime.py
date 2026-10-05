@@ -48,6 +48,7 @@ def test_anthropic_event_normalization_redacts_tool_secrets_and_thinking():
         }
     )
     assert tool.type == "tool_started"
+    assert tool.display_message == "Using a connected service…"
     assert tool.payload["input_summary"] == {
         "to": "person@example.com",
         "authorization": "[redacted]",
