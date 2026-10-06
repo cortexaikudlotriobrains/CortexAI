@@ -1,5 +1,6 @@
 import os
 import time
+from collections.abc import Mapping
 from types import SimpleNamespace
 from typing import Any
 
@@ -490,16 +491,55 @@ class GeminiClient(BaseAIClient):
             return self.client.interactions.create(**payload)
 
         final_interaction = None
+        streamed_steps: dict[int, dict[str, Any]] = {}
+        streamed_text: list[str] = []
         stream = self.client.interactions.create(**payload, stream=True)
         try:
             for wrapped_event in stream:
                 event = field_value(wrapped_event, "data", wrapped_event)
                 stream_observer.emit_provider_event(event)
                 event_type = str(field_value(event, "event_type", "") or "").lower()
-                if event_type == "step.delta":
+                if event_type == "step.start":
+                    index = self._stream_step_index(event)
+                    step = self._stream_payload(field_value(event, "step"))
+                    current = streamed_steps.setdefault(index, {})
+                    private = {
+                        key: current[key]
+                        for key in ("_text_parts", "_annotations")
+                        if key in current
+                    }
+                    current.update(step)
+                    current.update(private)
+                elif event_type == "step.delta":
+                    index = self._stream_step_index(event)
                     delta = field_value(event, "delta")
-                    if str(field_value(delta, "type", "") or "").lower() == "text":
-                        stream_observer.emit_text(field_value(delta, "text", ""))
+                    delta_type = str(field_value(delta, "type", "") or "").lower()
+                    current = streamed_steps.setdefault(index, {})
+                    if not current.get("type"):
+                        current["type"] = (
+                            "model_output"
+                            if delta_type in {"text", "text_annotation_delta"}
+                            else delta_type
+                        )
+                    if delta_type == "text":
+                        text = str(field_value(delta, "text", "") or "")
+                        if text:
+                            streamed_text.append(text)
+                            current.setdefault("_text_parts", []).append(text)
+                            stream_observer.emit_text(text)
+                    elif delta_type == "text_annotation_delta":
+                        annotations = current.setdefault("_annotations", [])
+                        for annotation in sequence_value(
+                            field_value(delta, "annotations", [])
+                        ):
+                            annotations.append(
+                                self._stream_payload(annotation) or annotation
+                            )
+                    else:
+                        delta_payload = self._stream_payload(delta)
+                        for key, value in delta_payload.items():
+                            if key != "type" and value is not None:
+                                current[key] = value
                 if event_type == "interaction.completed":
                     final_interaction = field_value(event, "interaction")
         finally:
@@ -510,7 +550,63 @@ class GeminiClient(BaseAIClient):
         stream_observer.raise_if_cancelled()
         if final_interaction is None:
             raise RuntimeError("Gemini interaction stream ended without a completed interaction")
-        return final_interaction
+
+        # Interactions streaming completion events contain a partial interaction.
+        # In particular, successful events may include status and usage while
+        # omitting every step. Rebuild the response from the streamed lifecycle so
+        # final extraction, persistence, and billing see the same answer that the
+        # observer already delivered to the client.
+        interaction = self._stream_payload(final_interaction)
+        if not sequence_value(interaction.get("steps", [])):
+            interaction["steps"] = [
+                self._finalize_streamed_step(streamed_steps[index])
+                for index in sorted(streamed_steps)
+            ]
+        if streamed_text and not str(interaction.get("output_text") or ""):
+            interaction["output_text"] = "".join(streamed_text)
+        return interaction
+
+    @staticmethod
+    def _stream_step_index(event: Any) -> int:
+        try:
+            return int(field_value(event, "index", 0) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _stream_payload(value: Any) -> dict[str, Any]:
+        if isinstance(value, Mapping):
+            return dict(value)
+        model_dump = getattr(value, "model_dump", None)
+        if callable(model_dump):
+            dumped = model_dump(mode="python", by_alias=True, exclude_none=True)
+            if isinstance(dumped, Mapping):
+                return dict(dumped)
+        attributes = getattr(value, "__dict__", None)
+        if isinstance(attributes, Mapping):
+            return dict(attributes)
+        return {}
+
+    @staticmethod
+    def _finalize_streamed_step(step: dict[str, Any]) -> dict[str, Any]:
+        finalized = {
+            key: value for key, value in step.items() if key not in {"_text_parts", "_annotations"}
+        }
+        text = "".join(str(part) for part in step.get("_text_parts", []))
+        if text:
+            content = list(sequence_value(finalized.get("content", [])))
+            if not any(
+                str(field_value(item, "type", "") or "").lower() == "text"
+                and str(field_value(item, "text", "") or "")
+                for item in content
+            ):
+                text_content: dict[str, Any] = {"type": "text", "text": text}
+                annotations = list(step.get("_annotations", []))
+                if annotations:
+                    text_content["annotations"] = annotations
+                content.append(text_content)
+            finalized["content"] = content
+        return finalized
 
     def _generate_content(
         self,

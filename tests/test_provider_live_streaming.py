@@ -213,15 +213,84 @@ def test_claude_message_stream_returns_final_message_and_live_deltas():
     }
 
 
-def test_gemini_interactions_stream_returns_completed_interaction():
-    final = SimpleNamespace(status="completed", steps=[])
+def test_gemini_interactions_stream_rebuilds_partial_completed_interaction():
+    final = SimpleNamespace(
+        status="completed",
+        model="gemini-test",
+        steps=[],
+        usage=SimpleNamespace(
+            total_input_tokens=4,
+            total_output_tokens=2,
+            total_tokens=6,
+            grounding_tool_count=[SimpleNamespace(type="google_search", count=1)],
+        ),
+    )
     events = [
         SimpleNamespace(event_type="interaction.created"),
         SimpleNamespace(
+            event_type="step.start",
+            index=0,
+            step=SimpleNamespace(type="google_search_call"),
+        ),
+        SimpleNamespace(
             event_type="step.delta",
             index=0,
-            delta=SimpleNamespace(type="text", text="Gemini live"),
+            delta=SimpleNamespace(
+                type="google_search_call",
+                arguments=SimpleNamespace(queries=["Gemini streaming"]),
+            ),
         ),
+        SimpleNamespace(event_type="step.stop", index=0),
+        SimpleNamespace(
+            event_type="step.start",
+            index=1,
+            step=SimpleNamespace(type="google_search_result"),
+        ),
+        SimpleNamespace(
+            event_type="step.delta",
+            index=1,
+            delta=SimpleNamespace(
+                type="google_search_result",
+                result=[
+                    SimpleNamespace(
+                        url="https://example.com/gemini",
+                        title="Gemini streaming",
+                    )
+                ],
+            ),
+        ),
+        SimpleNamespace(event_type="step.stop", index=1),
+        SimpleNamespace(
+            event_type="step.start",
+            index=2,
+            step=SimpleNamespace(type="model_output", content=[]),
+        ),
+        SimpleNamespace(
+            event_type="step.delta",
+            index=2,
+            delta=SimpleNamespace(type="text", text="Gemini "),
+        ),
+        SimpleNamespace(
+            event_type="step.delta",
+            index=2,
+            delta=SimpleNamespace(type="text", text="live"),
+        ),
+        SimpleNamespace(
+            event_type="step.delta",
+            index=2,
+            delta=SimpleNamespace(
+                type="text_annotation_delta",
+                annotations=[
+                    SimpleNamespace(
+                        type="url_citation",
+                        url="https://example.com/gemini",
+                        title="Gemini streaming",
+                        end_index=11,
+                    )
+                ],
+            ),
+        ),
+        SimpleNamespace(event_type="step.stop", index=2),
         SimpleNamespace(event_type="interaction.completed", interaction=final),
     ]
     calls = []
@@ -235,13 +304,22 @@ def test_gemini_interactions_stream_returns_completed_interaction():
     observer, activities, deltas = _observer("gemini")
 
     result = client._create_interaction({"model": "gemini-test"}, observer)
+    text, operations, sources = client._extract_interaction_search(result)
 
-    assert result is final
+    assert result["status"] == "completed"
+    assert result["usage"] is final.usage
+    assert result["output_text"] == "Gemini live"
+    assert [step["type"] for step in result["steps"]] == [
+        "google_search_call",
+        "google_search_result",
+        "model_output",
+    ]
+    assert text == "Gemini live[1]"
+    assert operations == 1
+    assert sources == [{"url": "https://example.com/gemini", "title": "Gemini streaming"}]
     assert calls == [{"model": "gemini-test", "stream": True}]
-    assert [delta.text for delta in deltas] == ["Gemini live"]
-    assert CortexActivityType.REQUEST_COMPLETED not in {
-        signal.event_type for signal in activities
-    }
+    assert [delta.text for delta in deltas] == ["Gemini ", "live"]
+    assert CortexActivityType.REQUEST_COMPLETED not in {signal.event_type for signal in activities}
 
 
 def test_grok_chat_stream_uses_openai_compatible_live_events():

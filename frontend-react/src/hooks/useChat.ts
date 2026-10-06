@@ -14,6 +14,7 @@ import {
 import { makePlaceholderResponse, useChatStore } from "../store/chatStore";
 import { clearAttachmentUploads } from "../uploads/attachmentUploadQueue";
 import { StreamDeltaBuffer } from "../streaming/streamDeltaBuffer";
+import { terminalResponseText } from "../streaming/terminalResponse";
 import {
   activityRunStatus,
   activityTargetIndexes,
@@ -481,7 +482,7 @@ async function runAskTurn({
         latest.updateTurnResponse(activeTurnId, 0, {
           ...current,
           ...finalResponse,
-          text: chunk.metadata.text ?? latest.responses[0]?.text ?? "",
+          text: terminalResponseText(chunk.metadata.text, current.text),
           started_at: current.started_at ?? startedAt,
           ui_status: finalResponse.error ? "failed" : "finalizing",
           failed_at: finalResponse.error ? new Date().toISOString() : current.failed_at,
@@ -509,7 +510,7 @@ async function runAskTurn({
     const completedResponse = {
       ...current,
       ...finalResponse,
-      text: finalResponse.text ?? current.text,
+      text: terminalResponseText(finalResponse.text, current.text),
       session_id: finalResponse.session_id ?? latest.sessionId ?? current.session_id,
       started_at: current.started_at ?? startedAt,
       completed_at: finalResponse.error ? current.completed_at : completedAt,
@@ -655,6 +656,7 @@ async function runCompareTurn({
         latest.updateTurnResponse(activeTurnId, index, {
           ...current,
           ...chunk.response,
+          text: terminalResponseText(chunk.response.text, current.text),
           started_at: current.started_at ?? startedAt,
           completed_at: failed ? current.completed_at : completedAt,
           failed_at: failed ? (current.failed_at ?? completedAt) : current.failed_at,

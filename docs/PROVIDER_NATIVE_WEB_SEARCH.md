@@ -38,7 +38,11 @@ plain `tool_choice="any"` can force another tool call instead of allowing the
 model to write its final answer. Required mode is expressed by the bounded
 Google Search instruction and the mounted server-side tool. Gemini 3.5 requests
 also omit the legacy `temperature` sampling control while preserving reasoning
-level and the output-token limit.
+level and the output-token limit. During native streaming, Cortex accumulates
+the step lifecycle and combines it with the partial `interaction.completed`
+resource, which may report terminal status and usage without repeating answer
+or search steps. This keeps streamed text, citations, tool counts, persistence,
+and final billing based on one complete normalized response.
 
 Every model request is capped at three billable search operations. OpenAI,
 Claude, Grok, and DeepSeek receive request- or loop-level enforcement. Gemini's
