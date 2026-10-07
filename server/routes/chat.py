@@ -17,11 +17,15 @@ from config.provider_catalog import (
     get_provider_default_models,
     get_provider_ids,
 )
+from config.provider_streaming import provider_live_streaming_enabled
 from config.web_search import load_native_web_search_config
+from models.cortex_activity import CortexActivitySignal, CortexActivityType
+from models.provider_stream import ProviderTextDelta
 from models.user_context import UserContext
 from orchestrator.core import CortexOrchestrator
 from orchestrator.model_registry import ModelRegistry
 from server import attachments as attachments_service
+from server.activity_stream import ActivityStream
 from server.billing.enforcement_service import (
     BillableModelUsage,
     ReservedRequestUsage,
@@ -57,7 +61,6 @@ from tools.web.native_policy import (
 from utils.logger import get_logger
 
 router = APIRouter(prefix="/v1", tags=["Chat"])
-STREAM_LINE_DELAY_S = 0.1
 STREAM_HEARTBEAT_INTERVAL_S = 15.0
 API_DB_ENABLED = persistence_service.API_DB_ENABLED
 ApiKeyPersistenceResolution = persistence_service.ApiKeyPersistenceResolution
@@ -518,9 +521,8 @@ def _to_ndjson(event: dict) -> str:
 
 def _research_was_performed(response: object) -> bool:
     metadata = getattr(response, "metadata", None)
-    return (
-        research_credit_usage_from_metadata(metadata).provider_credits_used > 0
-        or bool(billable_web_search_usages((response,)))
+    return research_credit_usage_from_metadata(metadata).provider_credits_used > 0 or bool(
+        billable_web_search_usages((response,))
     )
 
 
@@ -1285,10 +1287,18 @@ async def chat_stream(
         response_generation_budget = generation_budget
         stream_started_at = time.monotonic()
         heartbeat_interval_s = _stream_heartbeat_interval_s()
+        activity_stream = ActivityStream(
+            request_id=req_id,
+            conversation_id=requested_session_id,
+            mode="chat",
+            loop=asyncio.get_running_loop(),
+        )
         provider_task: asyncio.Task | None = None
+        activity_task: asyncio.Task | None = None
         billing_finalization_attempted = False
         response: object | None = None
         meaningful_output_emitted = False
+        live_text_emitted = False
         stream_log = StreamLogContext(
             stream_name="chat",
             request_id=req_id,
@@ -1296,6 +1306,58 @@ async def chat_stream(
             model=target_model,
             research_mode=research_mode,
         )
+
+        def activity_line(
+            event_type: CortexActivityType,
+            *,
+            provider: str = target_provider,
+            model: str = target_model,
+            metadata: dict[str, Any] | None = None,
+        ) -> str | None:
+            signal = CortexActivitySignal(
+                event_type=event_type,
+                provider=provider or None,
+                model=model or None,
+                metadata=dict(metadata or {}),
+            )
+            payload = activity_stream.serialize(signal, index=0)
+            if payload is None:
+                return None
+            stream_log.mark_activity(event_type.value)
+            stream_log.log(
+                "activity",
+                activity_type=event_type.value,
+                sequence=payload["activity"]["sequence_number"],
+                target_index=0,
+            )
+            return _to_ndjson(payload)
+
+        def queued_activity_line(
+            item: tuple[int | None, CortexActivitySignal | ProviderTextDelta],
+        ) -> str | None:
+            nonlocal live_text_emitted, meaningful_output_emitted
+            index, signal = item
+            if isinstance(signal, ProviderTextDelta):
+                if not signal.text:
+                    return None
+                live_text_emitted = True
+                meaningful_output_emitted = True
+                stream_log.mark_provider_event()
+                return _to_ndjson(
+                    {"type": "line", "index": 0 if index is None else index, "text": signal.text}
+                )
+            payload = activity_stream.serialize(signal, index=0 if index is None else index)
+            if payload is None:
+                return None
+            stream_log.mark_activity(signal.event_type.value)
+            stream_log.log(
+                "activity",
+                activity_type=signal.event_type.value,
+                sequence=payload["activity"]["sequence_number"],
+                target_index=0 if index is None else index,
+            )
+            return _to_ndjson(payload)
+
         stream_log.log("opened")
         start_line = _to_ndjson(
             {
@@ -1319,8 +1381,33 @@ async def chat_stream(
             raise
         stream_log.log("start_event_sent")
 
+        received_line = activity_line(CortexActivityType.REQUEST_RECEIVED)
+        if received_line is not None:
+            yield stream_log.record_event(received_line)
+        progress_line = activity_line(CortexActivityType.REQUEST_IN_PROGRESS)
+        if progress_line is not None:
+            yield stream_log.record_event(progress_line)
+
         try:
             stream_log.log("provider_call_started")
+            stream_log.mark_provider_started()
+            provider_kwargs = {
+                **kwargs,
+                "_activity_callback": activity_stream.callback(
+                    index=0,
+                    provider=target_provider,
+                    model=target_model,
+                ),
+            }
+            if (
+                execution_plan.strategy == "explicit_manual"
+                and provider_live_streaming_enabled(target_provider)
+            ):
+                provider_kwargs["_provider_stream_observer"] = activity_stream.observer(
+                    index=0,
+                    provider=target_provider,
+                    model=target_model,
+                )
             provider_task = asyncio.create_task(
                 asyncio.to_thread(
                     orchestrator.ask,
@@ -1332,24 +1419,40 @@ async def chat_stream(
                     research_mode=orchestrator_mode,
                     routing_mode=execution_plan.routing_mode,
                     routing_constraints=execution_plan.routing_constraints,
-                    **kwargs,
+                    **provider_kwargs,
                 )
             )
-            if heartbeat_interval_s > 0:
-                while not provider_task.done():
-                    done, _ = await asyncio.wait(
-                        {provider_task},
-                        timeout=heartbeat_interval_s,
-                        return_when=asyncio.FIRST_COMPLETED,
-                    )
-                    if done:
-                        break
+            while not provider_task.done():
+                if activity_task is None:
+                    activity_task = asyncio.create_task(activity_stream.get())
+                done, _ = await asyncio.wait(
+                    {provider_task, activity_task},
+                    timeout=heartbeat_interval_s if heartbeat_interval_s > 0 else None,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if activity_task in done:
+                    queued_line = queued_activity_line(activity_task.result())
+                    activity_task = None
+                    if queued_line is not None:
+                        yield stream_log.record_event(queued_line)
+                if provider_task in done:
+                    break
+                if not done:
                     elapsed_ms = int((time.monotonic() - stream_started_at) * 1000)
                     yield stream_log.record_event(
                         _to_ndjson({"type": "heartbeat", "elapsed_ms": elapsed_ms})
                     )
                     stream_log.log("heartbeat_sent", elapsed_ms=elapsed_ms)
+            if activity_task is not None and not activity_task.done():
+                activity_task.cancel()
+                activity_task = None
+            await asyncio.sleep(0)
+            for queued_item in activity_stream.drain():
+                queued_line = queued_activity_line(queued_item)
+                if queued_line is not None:
+                    yield stream_log.record_event(queued_line)
             response = await provider_task
+            stream_log.mark_provider_event()
             response = sanitize_provider_error_response(normalize_empty_success_response(response))
             if execution_plan.strategy == "smart_orchestrator":
                 response_model = str(response.requested_model or response.model or "").strip()
@@ -1369,6 +1472,23 @@ async def chat_stream(
             if not stream_text and response.error:
                 stream_text = get_client_safe_error_display_text(response.error)
 
+            if response.is_error:
+                failed_line = activity_line(
+                    CortexActivityType.REQUEST_FAILED,
+                    provider=str(getattr(response, "provider", "") or target_provider),
+                    model=str(getattr(response, "model", "") or target_model),
+                )
+                if failed_line is not None:
+                    yield stream_log.record_event(failed_line)
+            elif not live_text_emitted:
+                answer_line = activity_line(
+                    CortexActivityType.ANSWER_STARTED,
+                    provider=str(getattr(response, "provider", "") or target_provider),
+                    model=str(getattr(response, "model", "") or target_model),
+                )
+                if answer_line is not None:
+                    yield stream_log.record_event(answer_line)
+
             if billing_reservation is not None and response.is_error:
                 billing_finalization_attempted = True
                 _finalize_chat_usage(
@@ -1378,9 +1498,20 @@ async def chat_stream(
                     attachments_present=bool(resolved_attachments),
                 )
 
-            for line in _iter_stream_lines(stream_text):
+            first_answer_delta = True
+            replay_lines = () if live_text_emitted else _iter_stream_lines(stream_text)
+            for line in replay_lines:
                 if not response.is_error and line:
                     meaningful_output_emitted = True
+                    if first_answer_delta:
+                        delta_line = activity_line(
+                            CortexActivityType.ANSWER_DELTA,
+                            provider=str(getattr(response, "provider", "") or target_provider),
+                            model=str(getattr(response, "model", "") or target_model),
+                        )
+                        if delta_line is not None:
+                            yield stream_log.record_event(delta_line)
+                        first_answer_delta = False
                 yield stream_log.record_event(
                     _to_ndjson({"type": "line", "index": 0, "text": line})
                 )
@@ -1392,7 +1523,15 @@ async def chat_stream(
                         orchestrator=orchestrator,
                         attachments_present=bool(resolved_attachments),
                     )
-                await asyncio.sleep(STREAM_LINE_DELAY_S)
+
+            if not response.is_error:
+                completed_answer_line = activity_line(
+                    CortexActivityType.ANSWER_COMPLETED,
+                    provider=str(getattr(response, "provider", "") or target_provider),
+                    model=str(getattr(response, "model", "") or target_model),
+                )
+                if completed_answer_line is not None:
+                    yield stream_log.record_event(completed_answer_line)
 
             if billing_reservation is not None and not billing_finalization_attempted:
                 billing_finalization_attempted = True
@@ -1439,14 +1578,26 @@ async def chat_stream(
                 )
             )
             stream_log.log("response_done_sent")
+            if not response.is_error:
+                completed_request_line = activity_line(
+                    CortexActivityType.REQUEST_COMPLETED,
+                    provider=str(getattr(response, "provider", "") or target_provider),
+                    model=str(getattr(response, "model", "") or target_model),
+                )
+                if completed_request_line is not None:
+                    yield stream_log.record_event(completed_request_line)
             yield stream_log.record_event(
                 _to_ndjson({"type": "done", "mode": "chat", "session_id": resolved_session_id})
             )
             stream_log.log("done_sent", terminal_reason="done")
 
         except asyncio.CancelledError:
+            activity_stream.cancel()
             if provider_task is not None and not provider_task.done():
                 provider_task.cancel()
+            if activity_task is not None and not activity_task.done():
+                activity_task.cancel()
+            stream_log.mark_activity(CortexActivityType.REQUEST_CANCELLED.value)
             if not billing_finalization_attempted:
                 if (
                     billing_reservation is not None
@@ -1476,7 +1627,11 @@ async def chat_stream(
             )
             raise
         except Exception as exc:
+            activity_stream.cancel()
             public_error = unexpected_public_error(request_id=req_id)
+            failed_line = activity_line(CortexActivityType.REQUEST_FAILED)
+            if failed_line is not None:
+                yield stream_log.record_event(failed_line)
             if not billing_finalization_attempted:
                 if (
                     billing_reservation is not None
@@ -1528,6 +1683,8 @@ async def chat_stream(
                 except Exception:
                     logger.exception("Chat stream error persistence failed in DB mode")
             yield stream_log.record_event(_to_ndjson({"type": "error", **public_error}))
+        finally:
+            activity_stream.cancel()
 
     return StreamingResponse(
         event_stream(),

@@ -33,7 +33,8 @@ export class StreamDeltaBuffer {
       const response = turn.responses[index];
       if (
         response?.ui_status === "complete" ||
-        response?.ui_status === "failed"
+        response?.ui_status === "failed" ||
+        response?.ui_status === "cancelled"
       ) {
         continue;
       }

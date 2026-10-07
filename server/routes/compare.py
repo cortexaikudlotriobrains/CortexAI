@@ -13,6 +13,9 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 
 from config.web_search import load_native_web_search_config
+from config.provider_streaming import provider_live_streaming_enabled
+from models.cortex_activity import CortexActivitySignal, CortexActivityType
+from models.provider_stream import ProviderTextDelta
 from models.unified_response import (
     MultiUnifiedResponse,
     NormalizedError,
@@ -25,6 +28,7 @@ from orchestrator.generation_policy import GenerationBudgetResolution
 from orchestrator.model_registry import ModelRegistry
 from server import attachments as attachments_service
 from server import persistence as persistence_service
+from server.activity_stream import ActivityStream
 from server.billing.enforcement_service import (
     BillableModelUsage,
     ReservedRequestUsage,
@@ -67,7 +71,6 @@ from utils.logger import get_logger
 router = APIRouter(prefix="/v1", tags=["Compare"])
 
 MAX_COMPARE_TARGETS = 3
-STREAM_LINE_DELAY_S = 0.1
 STREAM_HEARTBEAT_INTERVAL_S = 15.0
 ATTACHMENTS_ONLY_FALLBACK_PROMPT = "Please analyze the attached file(s)."
 
@@ -206,10 +209,7 @@ def _max_research_usage(*usages: ResearchCreditUsage) -> ResearchCreditUsage:
 
 def _research_credit_usage(responses: list[UnifiedResponse]) -> ResearchCreditUsage:
     return _max_research_usage(
-        *(
-            research_credit_usage_from_metadata(response.metadata)
-            for response in responses
-        )
+        *(research_credit_usage_from_metadata(response.metadata) for response in responses)
     )
 
 
@@ -237,10 +237,7 @@ def _billable_stream_responses(
         response
         for index, response in enumerate(ordered_responses)
         if response is not None
-        and (
-            index in billable_response_indices
-            or bool(billable_web_search_usages((response,)))
-        )
+        and (index in billable_response_indices or bool(billable_web_search_usages((response,))))
     ]
 
 
@@ -282,16 +279,12 @@ def _billable_model_usages(
                 0, int(getattr(response.token_usage, "cache_write_tokens", 0) or 0)
             ),
             output_tokens=max(0, int(response.token_usage.completion_tokens or 0)),
-            reasoning_tokens=max(
-                0, int(getattr(response.token_usage, "reasoning_tokens", 0) or 0)
-            ),
+            reasoning_tokens=max(0, int(getattr(response.token_usage, "reasoning_tokens", 0) or 0)),
             output_text=response.text,
             provider_cost_usd=max(0.0, float(response.estimated_cost or 0.0)),
             pricing_snapshot=dict(response.pricing_snapshot or {}),
             pricing_version=str(response.pricing_version or "") or None,
-            provider_cost_owner=str(
-                (response.metadata or {}).get("provider_cost_owner", "cortex")
-            ),
+            provider_cost_owner=str((response.metadata or {}).get("provider_cost_owner", "cortex")),
         )
         for response in responses
         if not response.is_error
@@ -478,6 +471,9 @@ async def _run_compare_target(
         )
         return index, response
     except asyncio.TimeoutError:
+        stream_observer = call_kwargs.get("_provider_stream_observer")
+        if stream_observer is not None:
+            stream_observer.cancel()
         timeout_msg = f"Request timed out after {timeout_s}s"
         return index, _make_error_response(
             provider=provider,
@@ -486,6 +482,27 @@ async def _run_compare_target(
             message=timeout_msg,
             retryable=True,
             details={"timeout_seconds": timeout_s},
+        )
+    except Exception as exc:
+        logger.exception(
+            "Compare target provider execution failed",
+            extra={
+                "extra_fields": {
+                    "event": "compare.target.failed",
+                    "request_id": request_id,
+                    "target_index": index,
+                    "provider": provider,
+                    "model": model,
+                    "error_type": type(exc).__name__,
+                }
+            },
+        )
+        return index, _make_error_response(
+            provider=provider,
+            model=model,
+            code="provider_error",
+            message="This model could not complete the request.",
+            retryable=True,
         )
 
 
@@ -629,8 +646,7 @@ async def compare(
             for target, budget in zip(request.targets, generation_budgets, strict=False)
         ]
         kwargs["_per_client_generation"] = {
-            f"{item.provider}:{item.model}": item.provider_kwargs()
-            for item in generation_budgets
+            f"{item.provider}:{item.model}": item.provider_kwargs() for item in generation_budgets
         }
 
     provider_completed = False
@@ -649,9 +665,7 @@ async def compare(
         normalized_responses = [
             (
                 annotate_response(
-                    sanitize_provider_error_response(
-                        normalize_empty_success_response(item)
-                    ),
+                    sanitize_provider_error_response(normalize_empty_success_response(item)),
                     _budget_for_response(item, generation_budgets, index),
                 )
                 if item is not None
@@ -840,6 +854,12 @@ async def compare_stream(
     async def event_stream():
         stream_started_at = time.monotonic()
         heartbeat_interval_s = _stream_heartbeat_interval_s()
+        activity_stream = ActivityStream(
+            request_id=req_id,
+            conversation_id=requested_session_id,
+            mode="compare",
+            loop=asyncio.get_running_loop(),
+        )
         stream_log = StreamLogContext(
             stream_name="compare",
             request_id=req_id,
@@ -847,6 +867,57 @@ async def compare_stream(
             target_count=len(request.targets),
             request_group_id=request_group_id,
         )
+
+        def activity_line(
+            event_type: CortexActivityType,
+            *,
+            index: int | None = None,
+            provider: str = "",
+            model: str = "",
+            metadata: dict[str, Any] | None = None,
+        ) -> str | None:
+            signal = CortexActivitySignal(
+                event_type=event_type,
+                provider=provider or None,
+                model=model or None,
+                metadata=dict(metadata or {}),
+            )
+            payload = activity_stream.serialize(signal, index=index)
+            if payload is None:
+                return None
+            stream_log.mark_activity(event_type.value)
+            stream_log.log(
+                "activity",
+                activity_type=event_type.value,
+                sequence=payload["activity"]["sequence_number"],
+                target_index=index,
+            )
+            return _to_ndjson(payload)
+
+        def queued_activity_line(
+            item: tuple[int | None, CortexActivitySignal | ProviderTextDelta],
+        ) -> str | None:
+            index, signal = item
+            if isinstance(signal, ProviderTextDelta):
+                if not signal.text:
+                    return None
+                if index is not None:
+                    live_text_indices.add(index)
+                    billable_response_indices.add(index)
+                stream_log.mark_provider_event()
+                return _to_ndjson({"type": "line", "index": index, "text": signal.text})
+            payload = activity_stream.serialize(signal, index=index)
+            if payload is None:
+                return None
+            stream_log.mark_activity(signal.event_type.value)
+            stream_log.log(
+                "activity",
+                activity_type=signal.event_type.value,
+                sequence=payload["activity"]["sequence_number"],
+                target_index=index,
+            )
+            return _to_ndjson(payload)
+
         stream_log.log("opened")
         start_line = _to_ndjson(
             {
@@ -868,35 +939,84 @@ async def compare_stream(
             )
             raise
         stream_log.log("start_event_sent")
+        received_line = activity_line(CortexActivityType.REQUEST_RECEIVED)
+        if received_line is not None:
+            yield stream_log.record_event(received_line)
 
         ordered_responses: list[UnifiedResponse | None] = [None] * len(request.targets)
         billable_response_indices: set[int] = set()
+        live_text_indices: set[int] = set()
         tasks: list[asyncio.Task] = []
+        prepare_task: asyncio.Task | None = None
+        activity_task: asyncio.Task | None = None
         prepared_turn: dict[str, Any] | None = None
         billing_finalization_attempted = False
         try:
             prepare_messages = getattr(orchestrator, "prepare_messages_for_turn", None)
             if callable(prepare_messages):
-                try:
-                    try:
-                        prepared_turn = await asyncio.to_thread(
-                            prepare_messages,
-                            prompt=effective_prompt,
-                            context=context,
-                            research_mode=orchestrator_mode,
-                            use_shared_research=not native_web_search,
-                        )
-                    except TypeError as exc:
-                        if "use_shared_research" not in str(exc):
+                prepare_kwargs: dict[str, Any] = {
+                    "prompt": effective_prompt,
+                    "context": context,
+                    "research_mode": orchestrator_mode,
+                    "use_shared_research": not native_web_search,
+                    "activity_callback": activity_stream.callback(index=None),
+                }
+
+                async def prepare_shared_turn() -> dict[str, Any]:
+                    while True:
+                        try:
+                            return await asyncio.to_thread(
+                                prepare_messages,
+                                **prepare_kwargs,
+                            )
+                        except TypeError as exc:
+                            message = str(exc)
+                            if (
+                                "activity_callback" in message
+                                and "activity_callback" in prepare_kwargs
+                            ):
+                                prepare_kwargs.pop("activity_callback")
+                                continue
+                            if (
+                                "use_shared_research" in message
+                                and "use_shared_research" in prepare_kwargs
+                            ):
+                                prepare_kwargs.pop("use_shared_research")
+                                continue
                             raise
-                        prepared_turn = await asyncio.to_thread(
-                            prepare_messages,
-                            prompt=effective_prompt,
-                            context=context,
-                            research_mode=orchestrator_mode,
+
+                prepare_task = asyncio.create_task(prepare_shared_turn())
+                try:
+                    while not prepare_task.done():
+                        if activity_task is None:
+                            activity_task = asyncio.create_task(activity_stream.get())
+                        done, _ = await asyncio.wait(
+                            {prepare_task, activity_task},
+                            timeout=heartbeat_interval_s if heartbeat_interval_s > 0 else None,
+                            return_when=asyncio.FIRST_COMPLETED,
                         )
+                        if activity_task in done:
+                            queued_line = queued_activity_line(activity_task.result())
+                            activity_task = None
+                            if queued_line is not None:
+                                yield stream_log.record_event(queued_line)
+                        if not done:
+                            elapsed_ms = int((time.monotonic() - stream_started_at) * 1000)
+                            yield stream_log.record_event(
+                                _to_ndjson({"type": "heartbeat", "elapsed_ms": elapsed_ms})
+                            )
+                            stream_log.log("heartbeat_sent", elapsed_ms=elapsed_ms)
+                    prepared_turn = await prepare_task
                 except Exception:
                     logger.exception("Compare stream shared message preparation failed")
+                if activity_task is not None and not activity_task.done():
+                    activity_task.cancel()
+                    activity_task = None
+                await asyncio.sleep(0)
+                for queued_item in activity_stream.drain():
+                    queued_line = queued_activity_line(queued_item)
+                    if queued_line is not None:
+                        yield stream_log.record_event(queued_line)
 
             for i, target in enumerate(request.targets):
                 provider = (target.provider or "").strip().lower()
@@ -929,6 +1049,14 @@ async def compare_stream(
                             }
                         )
                     )
+                    failed_line = activity_line(
+                        CortexActivityType.REQUEST_FAILED,
+                        index=i,
+                        provider=bad_dto.provider,
+                        model=bad_dto.model,
+                    )
+                    if failed_line is not None:
+                        yield stream_log.record_event(failed_line)
                     stream_text = (
                         get_client_safe_error_display_text(bad_dto.error) if bad_dto.error else ""
                     )
@@ -936,7 +1064,6 @@ async def compare_stream(
                         yield stream_log.record_event(
                             _to_ndjson({"type": "line", "index": i, "text": line})
                         )
-                        await asyncio.sleep(STREAM_LINE_DELAY_S)
                     yield stream_log.record_event(
                         _to_ndjson(
                             {
@@ -960,6 +1087,40 @@ async def compare_stream(
                     provider=provider,
                     model=model,
                 )
+                stream_log.mark_provider_started()
+                yield stream_log.record_event(
+                    _to_ndjson(
+                        {
+                            "type": "response_start",
+                            "index": i,
+                            "provider": provider,
+                            "model": model,
+                        }
+                    )
+                )
+                progress_line = activity_line(
+                    CortexActivityType.REQUEST_IN_PROGRESS,
+                    index=i,
+                    provider=provider,
+                    model=model,
+                )
+                if progress_line is not None:
+                    yield stream_log.record_event(progress_line)
+                target_kwargs = {
+                    **kwargs,
+                    **generation_budgets[i].provider_kwargs(),
+                    "_activity_callback": activity_stream.callback(
+                        index=i,
+                        provider=provider,
+                        model=model,
+                    ),
+                }
+                if provider_live_streaming_enabled(provider):
+                    target_kwargs["_provider_stream_observer"] = activity_stream.observer(
+                        index=i,
+                        provider=provider,
+                        model=model,
+                    )
                 tasks.append(
                     asyncio.create_task(
                         _run_compare_target(
@@ -972,7 +1133,7 @@ async def compare_stream(
                             timeout_s=request.timeout_s,
                             research_mode=orchestrator_mode,
                             request_id=req_id,
-                            kwargs={**kwargs, **generation_budgets[i].provider_kwargs()},
+                            kwargs=target_kwargs,
                             prepared_turn=prepared_turn,
                         )
                     )
@@ -980,11 +1141,20 @@ async def compare_stream(
 
             pending_tasks = set(tasks)
             while pending_tasks:
-                done, pending_tasks = await asyncio.wait(
-                    pending_tasks,
+                if activity_task is None:
+                    activity_task = asyncio.create_task(activity_stream.get())
+                done, _ = await asyncio.wait(
+                    {*pending_tasks, activity_task},
                     timeout=heartbeat_interval_s if heartbeat_interval_s > 0 else None,
                     return_when=asyncio.FIRST_COMPLETED,
                 )
+                if activity_task in done:
+                    queued_line = queued_activity_line(activity_task.result())
+                    activity_task = None
+                    if queued_line is not None:
+                        yield stream_log.record_event(queued_line)
+                completed_tasks = {task for task in done if task in pending_tasks}
+                pending_tasks -= completed_tasks
                 if not done:
                     elapsed_ms = int((time.monotonic() - stream_started_at) * 1000)
                     yield stream_log.record_event(
@@ -993,13 +1163,24 @@ async def compare_stream(
                     stream_log.log("heartbeat_sent", elapsed_ms=elapsed_ms)
                     continue
 
-                for task in done:
+                if completed_tasks:
+                    # Provider callbacks use call_soon_threadsafe. Let those
+                    # scheduled publications land, then flush them before
+                    # deciding whether a completed target needs buffered replay.
+                    await asyncio.sleep(0)
+                    for queued_item in activity_stream.drain():
+                        queued_line = queued_activity_line(queued_item)
+                        if queued_line is not None:
+                            yield stream_log.record_event(queued_line)
+
+                for task in completed_tasks:
                     idx, response = await task
                     response = sanitize_provider_error_response(
                         normalize_empty_success_response(response)
                     )
                     response = annotate_response(response, generation_budgets[idx])
                     ordered_responses[idx] = response
+                    stream_log.mark_provider_event()
                     stream_log.log(
                         "provider_call_completed",
                         target_index=idx,
@@ -1013,27 +1194,57 @@ async def compare_stream(
                         include_research_charge=False,
                     )
 
-                    yield stream_log.record_event(
-                        _to_ndjson(
-                            {
-                                "type": "response_start",
-                                "index": idx,
-                                "provider": dto.provider,
-                                "model": dto.model,
-                            }
-                        )
-                    )
-
                     stream_text = dto.text or ""
                     if not stream_text and dto.error:
                         stream_text = get_client_safe_error_display_text(dto.error)
-                    for line in _iter_stream_lines(stream_text):
+                    if response.is_error:
+                        failed_line = activity_line(
+                            CortexActivityType.REQUEST_FAILED,
+                            index=idx,
+                            provider=dto.provider,
+                            model=dto.model,
+                        )
+                        if failed_line is not None:
+                            yield stream_log.record_event(failed_line)
+                    elif idx not in live_text_indices:
+                        answer_line = activity_line(
+                            CortexActivityType.ANSWER_STARTED,
+                            index=idx,
+                            provider=dto.provider,
+                            model=dto.model,
+                        )
+                        if answer_line is not None:
+                            yield stream_log.record_event(answer_line)
+                    first_answer_delta = True
+                    replay_lines = (
+                        () if idx in live_text_indices else _iter_stream_lines(stream_text)
+                    )
+                    for line in replay_lines:
                         if not response.is_error and line:
                             billable_response_indices.add(idx)
+                            if first_answer_delta:
+                                delta_line = activity_line(
+                                    CortexActivityType.ANSWER_DELTA,
+                                    index=idx,
+                                    provider=dto.provider,
+                                    model=dto.model,
+                                )
+                                if delta_line is not None:
+                                    yield stream_log.record_event(delta_line)
+                                first_answer_delta = False
                         yield stream_log.record_event(
                             _to_ndjson({"type": "line", "index": idx, "text": line})
                         )
-                        await asyncio.sleep(STREAM_LINE_DELAY_S)
+
+                    if not response.is_error:
+                        completed_answer_line = activity_line(
+                            CortexActivityType.ANSWER_COMPLETED,
+                            index=idx,
+                            provider=dto.provider,
+                            model=dto.model,
+                        )
+                        if completed_answer_line is not None:
+                            yield stream_log.record_event(completed_answer_line)
 
                     yield stream_log.record_event(
                         _to_ndjson(
@@ -1050,6 +1261,15 @@ async def compare_stream(
                         provider=dto.provider,
                         model=dto.model,
                     )
+
+            if activity_task is not None and not activity_task.done():
+                activity_task.cancel()
+                activity_task = None
+            await asyncio.sleep(0)
+            for queued_item in activity_stream.drain():
+                queued_line = queued_activity_line(queued_item)
+                if queued_line is not None:
+                    yield stream_log.record_event(queued_line)
 
             raw_responses = [r for r in ordered_responses if r is not None]
             research_usage = _max_research_usage(
@@ -1099,11 +1319,14 @@ async def compare_stream(
                 "total_tokens": sum(r.token_usage.total_tokens for r in dtos),
                 "total_cost": sum(r.estimated_cost for r in dtos),
                 "total_ai_credits": (
-                    sum(r.ai_credits for r in dtos)
-                    + research_usage.cortex_credits
+                    sum(r.ai_credits for r in dtos) + research_usage.cortex_credits
                 ),
                 "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             }
+
+            completed_request_line = activity_line(CortexActivityType.REQUEST_COMPLETED)
+            if completed_request_line is not None:
+                yield stream_log.record_event(completed_request_line)
 
             yield stream_log.record_event(
                 _to_ndjson(
@@ -1118,9 +1341,15 @@ async def compare_stream(
             stream_log.log("done_sent", terminal_reason="done")
 
         except asyncio.CancelledError:
+            activity_stream.cancel()
+            if prepare_task is not None and not prepare_task.done():
+                prepare_task.cancel()
             for task in tasks:
                 if not task.done():
                     task.cancel()
+            if activity_task is not None and not activity_task.done():
+                activity_task.cancel()
+            stream_log.mark_activity(CortexActivityType.REQUEST_CANCELLED.value)
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
             if not billing_finalization_attempted:
@@ -1160,7 +1389,13 @@ async def compare_stream(
             )
             raise
         except Exception as exc:
+            activity_stream.cancel()
             public_error = unexpected_public_error(request_id=req_id)
+            failed_line = activity_line(CortexActivityType.REQUEST_FAILED)
+            if failed_line is not None:
+                yield stream_log.record_event(failed_line)
+            if prepare_task is not None and not prepare_task.done():
+                prepare_task.cancel()
             for task in tasks:
                 if not task.done():
                     task.cancel()
@@ -1228,6 +1463,8 @@ async def compare_stream(
                 except Exception:
                     logger.exception("Compare stream error persistence failed in DB mode")
             yield stream_log.record_event(_to_ndjson({"type": "error", **public_error}))
+        finally:
+            activity_stream.cancel()
 
     return StreamingResponse(
         event_stream(),

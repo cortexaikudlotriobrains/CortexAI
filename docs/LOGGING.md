@@ -139,13 +139,17 @@ Provider orchestration and resilience:
 
 Streaming request bodies:
 
-- `chat.stream.opened|start_event_sent|provider_call_started|provider_call_completed|response_done_sent|done_sent|exception|client_disconnected`
-- `compare.stream.opened|start_event_sent|provider_call_started|provider_call_completed|response_done_sent|done_sent|exception|client_disconnected`
+- `chat.stream.opened|start_event_sent|activity|provider_call_started|provider_call_completed|response_done_sent|done_sent|exception|client_disconnected`
+- `compare.stream.opened|start_event_sent|activity|provider_call_started|provider_call_completed|response_done_sent|done_sent|exception|client_disconnected`
 
 Stream logs are emitted from inside the `StreamingResponse` body generator, after
 HTTP `200` headers may already have been returned. They include `request_id`,
 elapsed time, emitted event count, estimated bytes emitted, research mode, and
-provider/model fields when available.
+provider/model fields when available. Every visible normalized progress event is
+also logged as `*.stream.activity` with `activity_type`, `sequence`, and optional
+`target_index`. Terminal stream records include request/provider/first-event,
+first-reasoning/search/answer, answer-complete, and request-complete timestamps,
+plus time to first activity, time to first useful output, and total duration.
 
 Authentication diagnostics:
 
@@ -160,6 +164,9 @@ Authentication diagnostics:
 - Sensitive text is not logged in clear form for research/upload observability paths:
   - Tavily prompt/query fields are hashed (`prompt_hash`, `query_hash`)
   - filenames/object keys are hashed (`filename_hash`, `object_key_hash`, `storage_key_hash`)
+- Activity telemetry never includes hidden reasoning text, raw tool arguments,
+  provider exception bodies, or provider-only identifiers. Public activity
+  metadata is allowlisted by `models/cortex_activity.py`.
 - Client-facing attachment errors remain sanitized; detailed failures are available in server logs.
 - Upload route logs include CloudFront/proxy context fields when forwarded by infrastructure (`X-Amz-Cf-Id`, `X-Forwarded-*`, viewer hints) to speed edge-origin triage.
 - Direct upload control-plane logs distinguish `upload.intent.created`,
@@ -191,6 +198,9 @@ Streaming failure interpretation:
 
 - No `*.stream.opened`: the request likely died before the app began streaming.
 - `*.stream.start_event_sent` followed by `*.stream.client_disconnected`: browser, proxy, CDN, or load balancer closed the stream.
+- `*.stream.activity` stops before `answer_started`: inspect the last
+  `activity_type` and provider timing fields to separate research/provider delay
+  from output delivery delay.
 - Long gap between `*.stream.provider_call_started` and `*.stream.provider_call_completed`: provider latency or an idle timeout is likely.
 - `*.stream.done_sent` in app logs but browser reports a protocol error: inspect CDN/proxy HTTP/2 framing, buffering, compression, and timeout behavior.
 

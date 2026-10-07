@@ -258,6 +258,7 @@ NATIVE_WEB_SEARCH_MODE=enabled      # off|shadow|enabled
 NATIVE_WEB_SEARCH_PROVIDERS=openai,claude,gemini,grok,deepseek
 COMPARE_NATIVE_WEB_SEARCH_ENABLED=true
 DEEPSEEK_AGENTIC_SEARCH_ENABLED=true
+PROVIDER_LIVE_STREAMING_PROVIDERS=openai,claude,gemini,grok # empty/off disables rollout
 WEB_SEARCH_MAX_OPERATIONS=3         # hard-capped at 3 per model request
 WEB_SEARCH_MAX_DISPLAY_SOURCES=8    # hard-capped at 8 per response
 DEEPSEEK_WEB_SEARCH_MAX_RESULTS=5   # hard-capped at 5 per Tavily operation
@@ -493,7 +494,8 @@ Frontend runtime config (`/runtime-config.js`):
 - Mobile and desktop response cards show response-start duration and AI-credit usage directly in the header without a run-details chevron. Pending and failed cards keep their muted elapsed/status line visible on mobile and desktop. For live streams, the elapsed timer freezes as soon as the first renderable response content reaches the UI and the completed card keeps that time-to-first-visible-content value; restored rows fall back to their persisted completion timestamps or API `latency_ms`.
 - The latest completed Ask response can render deterministic suggested follow-up chips when the assistant ends with clear offered options, one concrete follow-up offer, or a quoted follow-up query. The row lives inside `ResponseCard` below the answer body and above the response action toolbar; tapping a chip sends that chip text as a new follow-up turn through the normal chat streaming path while skipping the Improve prompt-optimization flow and preserving any composer draft.
 - Ask and Compare response headers use the same shared provider-logo and model-presentation resolver as the model picker. Failed or unavailable logo assets retain a provider-initial fallback instead of leaving a blank header.
-- Empty streaming cards render an independent request-aware loading state with a compact thought orb and skeleton lines. The orb uses a real `searching` treatment only for source-enabled requests and a neutral `working` treatment otherwise; contextual status text remains authoritative, and the loading block disappears when that card receives its first renderable response content or an error. Orb and shimmer motion respect `prefers-reduced-motion`.
+- Empty streaming cards render one stable activity container driven by normalized backend `activity` events. The immediate acknowledgement is generic; semantic copy such as `Searching the web…` or `Reviewing sources…` appears only after a real Cortex/provider event. Manual Ask and every Compare target use provider-native live events and text deltas for OpenAI, Claude, Gemini, and Grok; Smart Ask, DeepSeek, non-stream endpoints, and Work retain their existing buffered behavior. Rapid semantic phases are smoothed without delaying answer text, and each Compare card advances independently. The loading block becomes secondary as soon as that card receives renderable answer text. Orb and shimmer motion respect `prefers-reduced-motion`.
+- Stream failure or cancellation stops activity immediately and preserves any answer text already visible in the card. A failed partial response renders its safe retry guidance below the retained Markdown; stopping a request shows an explicit stopped state rather than an empty-response placeholder.
 - Smart Ask pending cards remain model-neutral because the chat stream `start` event contains only a pre-runtime routing preview. They show `Smart routing` while waiting and adopt the authoritative provider/model from `response_done`.
 - Response card controls render as a minimal icon row for copy, regenerate, and feedback actions. Copy shows a brief visible success confirmation in the toolbar. Regenerate refills the clicked response card in place through the existing chat streaming path for that response model, including when the clicked card came from Compare mode. It preserves the original turn's source-enabled flag, so source-backed regenerations run a new backend research/search pass.
 - Response sources render inline as publisher-name citation pills derived from `web_source_items`; grouped markers such as `[1][2][3]` collapse into one pill with a preview card listing each linked source. On desktop, hovering the pill opens a viewport-contained preview directly beside the pill and leaving the hover area closes it; on mobile, tapping still opens the bottom sheet. The external-link icon opens the first cited source directly.
@@ -895,11 +897,12 @@ For Compare (`/v1/compare`, `/v1/compare/stream`) requests:
 
 - API contract: `routing.web_mode` accepts `off|auto|required` (`on` is an alias for `required`). The legacy `routing.research_mode` boolean remains accepted for older clients.
 - In `auto`, the server upgrades current-information and explicit search requests to `required`, downgrades explicit no-browse requests to `off`, and otherwise lets the provider decide whether to invoke search.
-- OpenAI uses Responses `web_search`, Claude uses `web_search_20250305`, Gemini uses Interactions `google_search`, and Grok uses Responses `web_search`. DeepSeek receives a local `web_search` function whose execution calls Tavily; the bounded model/tool loop is the only Tavily path in normal native mode.
+- OpenAI uses Responses `web_search`, Claude uses `web_search_20250305`, Gemini uses Interactions `google_search`, and Grok uses Responses `web_search`. DeepSeek receives a local `web_search` function whose execution calls Tavily; the bounded model/tool loop is the only Tavily path in normal native mode. Gemini Interactions requires `google-genai>=2.0.0`; Cortex sends `user_input`/`model_output` history steps, reads the v2 `steps` response schema, and does not send the legacy `allowed_tools` selector for the server-side search tool.
 - Ask uses the selected model's search. Compare gives every target its own search tool and preserves each response's sources independently; no common Tavily result pack is injected across models.
 - Search is capped at three billable operations per model request. OpenAI, Claude, Grok, and DeepSeek enforce the cap at the request/tool-loop boundary. Gemini's managed Google Search tool has no exact query-count request field, so Cortex sends the same three-query instruction, audits any provider-reported overrun, and never bills above the product cap. Responses expose at most eight deduplicated source items; each DeepSeek Tavily operation requests at most five results.
 - Cortex Analysis receives each Compare response's normalized source/search metadata but has search explicitly disabled, so synthesis adds no new web operation or charge.
 - `NATIVE_WEB_SEARCH_MODE=off|shadow` returns Ask/Compare to the legacy orchestrator research path. `NATIVE_WEB_SEARCH_PROVIDERS`, `COMPARE_NATIVE_WEB_SEARCH_ENABLED`, and `DEEPSEEK_AGENTIC_SEARCH_ENABLED` provide narrower rollout controls. Excluding a provider disables search for that adapter; it does not inject another provider's sources.
+- `PROVIDER_LIVE_STREAMING_PROVIDERS` controls native SDK streaming independently of search. Its default is `openai,claude,gemini,grok`; use a comma-separated subset for staged rollout or `off` for the buffered fallback. It applies to manual Ask and Compare only—Smart Ask, DeepSeek, non-stream routes, and Work are unchanged.
 - Provider-native citations are normalized into the existing `web_source_items` response contract and inline numbered references where provider annotations are available.
 - CortexAI does not use phrase, number, date, or citation heuristics to classify successful provider answers as fabricated or replace their text. With research off, non-empty answers are returned as generated by the selected models.
 - The legacy shared-research path still anchors underspecified follow-up searches and uses its existing prompt-injection rules when native mode is rolled back.
@@ -974,6 +977,7 @@ check before calling the analysis model.
 
 `/v1/chat/stream` events:
 - `start`
+- `activity`
 - `heartbeat`
 - `line`
 - `response_done`
@@ -981,6 +985,8 @@ check before calling the analysis model.
 - `error`
 
 Notes:
+- `activity` contains a normalized provider-neutral lifecycle object with `request_id`, optional `conversation_id`, `provider`, `model`, `mode`, `event_type`, `phase`, `display_message`, UTC `timestamp`, monotonic `sequence_number`, and allowlisted `metadata`. The supported event types cover request, thinking, search/file/tool/MCP/code, answer, waiting, completion, failure, and cancellation states. Raw reasoning, provider payloads, tool arguments, credentials, and provider-private IDs are never copied into this event.
+- Manual Ask uses native provider streams for OpenAI, Claude, Gemini, and Grok. Safe provider events are normalized into Cortex activity, and each real text fragment is forwarded immediately as `line`; the final `UnifiedResponse` remains authoritative for usage, billing, persistence, citations, and `response_done`. Gemini Interactions rebuilds that final response from streamed steps because its terminal lifecycle object may contain status and usage without the generated steps; an empty terminal text field therefore cannot discard answer text already delivered to Ask or Compare. OpenAI-compatible stream accumulation requires `openai>=2.14.0,<3.0.0`. Smart Ask, DeepSeek, and providers disabled through `PROVIDER_LIVE_STREAMING_PROVIDERS` retain the buffered completion-and-replay fallback. Provider terminal events never emit public request completion; the route owns `REQUEST_COMPLETED` after finalization.
 - `heartbeat` is emitted while provider work is still running so proxies and
   browsers do not see an idle response body. It carries only elapsed timing and
   does not consume provider tokens.
@@ -994,6 +1000,7 @@ Notes:
 
 `/v1/compare/stream` events:
 - `start`
+- `activity` (request-wide or scoped by `index`)
 - `heartbeat`
 - `response_start`
 - `line`
@@ -1002,6 +1009,7 @@ Notes:
 - `error`
 
 Notes:
+- Each valid target receives `response_start` and `REQUEST_IN_PROGRESS` as soon as its provider task starts. OpenAI, Claude, Gemini, and Grok targets then multiplex their native deltas independently without waiting for slower targets; DeepSeek and rollout-disabled targets use the existing buffered fallback. Request-wide activity (for example shared Cortex research) omits `index` and applies to every still-running card.
 - `heartbeat` may appear while Compare targets are still pending; React ignores it
   visually and waits for normal per-target events.
 - Compare responses now include `session_id`.

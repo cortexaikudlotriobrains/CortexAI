@@ -13,7 +13,13 @@ interface WorkRailProps {
 
 export function WorkRail({ run, events, connections, enabledConnectionIds }: WorkRailProps) {
   const complete = run.status === "completed";
-  const terminal = ["completed", "failed", "cancelled", "budget_exhausted", "output_limit_reached"].includes(run.status);
+  const terminal = [
+    "completed",
+    "failed",
+    "cancelled",
+    "budget_exhausted",
+    "output_limit_reached",
+  ].includes(run.status);
   const effectiveWebEnabled = Boolean(
     run.configuration_snapshot.effective_web_enabled ?? run.configuration_snapshot.web_enabled,
   );
@@ -100,15 +106,14 @@ export function WorkRail({ run, events, connections, enabledConnectionIds }: Wor
               <CortexIcon name="tools" size={14} /> {connection.display_name}
             </li>
           ))}
-          {!effectiveWebEnabled && activeConnections.length === 0 && (
-            <li>No connected tools</li>
-          )}
+          {!effectiveWebEnabled && activeConnections.length === 0 && <li>No connected tools</li>}
         </ul>
       </RailSection>
       <RailSection title="Credits" meta={`${formatAiCredits(run.actual_credits)} used`} defaultOpen>
         {run.provider_model_id && (
           <p className={styles.usageIdentity} title={run.provider_model_id}>
-            <CortexIcon name="sparkle" size={14} /> Provider model · {formatModel(run.provider_model_id)}
+            <CortexIcon name="sparkle" size={14} /> Provider model ·{" "}
+            {formatModel(run.provider_model_id)}
           </p>
         )}
         {run.billing_model_id && run.billing_model_id !== run.provider_model_id && (
@@ -126,9 +131,7 @@ export function WorkRail({ run, events, connections, enabledConnectionIds }: Wor
           aria-label="Work credit usage"
           aria-valuemin={0}
           aria-valuemax={toDisplayAiCredits(run.max_credit_budget)}
-          aria-valuenow={toDisplayAiCredits(
-            Math.min(run.actual_credits, run.max_credit_budget),
-          )}
+          aria-valuenow={toDisplayAiCredits(Math.min(run.actual_credits, run.max_credit_budget))}
           aria-valuetext={`${formatAiCredits(run.actual_credits)} of ${formatAiCredits(run.max_credit_budget)} AI credits used`}
         >
           <span
@@ -138,7 +141,11 @@ export function WorkRail({ run, events, connections, enabledConnectionIds }: Wor
           />
         </div>
       </RailSection>
-      <RailSection title="Output" meta={`${actualOutputTokens.toLocaleString()} tokens`} defaultOpen>
+      <RailSection
+        title="Output"
+        meta={`${actualOutputTokens.toLocaleString()} tokens`}
+        defaultOpen
+      >
         <div className={styles.budgetFigure}>
           <strong>{actualOutputTokens.toLocaleString()}</strong>
           <span>/ {maxOutputTokens.toLocaleString()} max</span>
@@ -151,7 +158,9 @@ export function WorkRail({ run, events, connections, enabledConnectionIds }: Wor
           aria-valuemax={maxOutputTokens}
           aria-valuenow={Math.min(actualOutputTokens, maxOutputTokens)}
         >
-          <span style={{ width: `${Math.min(100, (actualOutputTokens / maxOutputTokens) * 100)}%` }} />
+          <span
+            style={{ width: `${Math.min(100, (actualOutputTokens / maxOutputTokens) * 100)}%` }}
+          />
         </div>
       </RailSection>
     </aside>
@@ -194,7 +203,13 @@ function RailSection({
 }
 
 function isActiveEvent(type: string): boolean {
-  return ["planning", "progress", "tool_started"].includes(type);
+  return [
+    "planning",
+    "progress",
+    "tool_started",
+    "approval_required",
+    "output_finalizing",
+  ].includes(type);
 }
 
 function isUserFacingEvent(event: WorkEvent): boolean {

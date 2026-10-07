@@ -1,5 +1,7 @@
 import os
 import time
+from collections.abc import Mapping
+from types import SimpleNamespace
 from typing import Any
 
 from google import genai
@@ -142,6 +144,7 @@ class GeminiClient(BaseAIClient):
         """
         request_id = self._resolve_request_id_from_kwargs(kwargs)
         start_time = time.time()
+        stream_observer = kwargs.pop("_stream_observer", None)
 
         model_name = kwargs.get("model", self.model_name)
         self._resolve_cache_context(kwargs, provider="gemini", model=model_name)
@@ -202,18 +205,13 @@ class GeminiClient(BaseAIClient):
                     )
                     interaction_config: dict[str, Any] = {
                         "max_output_tokens": max_output_tokens,
-                        "tool_choice": {
-                            "allowed_tools": {
-                                "mode": (
-                                    "any"
-                                    if str(web_search_policy.get("mode") or "auto")
-                                    == "required"
-                                    else "auto"
-                                ),
-                                "tools": ["google_search"],
-                            }
-                        },
                     }
+                    # Google Search is a server-side tool in Interactions v2. Do
+                    # not send the legacy allowed_tools selector: SDK 2.x maps it
+                    # to allowed_function_names, which only accepts declared
+                    # client functions. The plain "any" selector is also unsafe
+                    # here because it forces another tool call instead of allowing
+                    # the model to produce its final answer after searching.
                     # Gemini 3.5 rejects legacy sampling controls on Interactions
                     # requests. Keep native-search payloads model-compatible instead
                     # of turning an otherwise valid Google Search request into a 400.
@@ -221,25 +219,34 @@ class GeminiClient(BaseAIClient):
                         interaction_config["temperature"] = temperature
                     if reasoning_effort and reasoning_effort != "none":
                         interaction_config["thinking_level"] = reasoning_effort
-                    response = self.client.interactions.create(
-                        model=model_name,
-                        input=self._build_interactions_input(
+                    interaction_payload = {
+                        "model": model_name,
+                        "input": self._build_interactions_input(
                             normalized_messages,
                             attachments=binary_attachments,
                         ),
-                        system_instruction="\n\n".join(
+                        "system_instruction": "\n\n".join(
                             part for part in (system_instruction, web_instruction) if part
                         ),
-                        tools=[{"type": "google_search"}],
-                        generation_config=interaction_config,
-                        store=False,
+                        "tools": [{"type": "google_search"}],
+                        "generation_config": interaction_config,
+                        "store": False,
+                    }
+                    response = self._create_interaction(
+                        interaction_payload,
+                        stream_observer,
                     )
                     endpoint = "interactions.create"
                 else:
-                    response = self.client.models.generate_content(
-                        model=model_name, contents=gemini_contents, config=config
+                    response = self._generate_content(
+                        model=model_name,
+                        contents=gemini_contents,
+                        config=config,
+                        stream_observer=stream_observer,
                     )
             except Exception as request_exc:
+                if stream_observer is not None and stream_observer.has_emitted:
+                    raise
                 if web_search_enabled:
                     raise
                 dropped_param, retry_config = self._build_retry_payload_without_unsupported_parameter(
@@ -259,8 +266,11 @@ class GeminiClient(BaseAIClient):
                             }
                         },
                     )
-                    response = self.client.models.generate_content(
-                        model=model_name, contents=gemini_contents, config=retry_config
+                    response = self._generate_content(
+                        model=model_name,
+                        contents=gemini_contents,
+                        config=retry_config,
+                        stream_observer=stream_observer,
                     )
                     adaptive_retry = {
                         "dropped_param": dropped_param,
@@ -291,7 +301,11 @@ class GeminiClient(BaseAIClient):
                 prompt_tokens = self._usage_int(field_value(usage, "total_input_tokens", 0))
                 output_tokens = self._usage_int(field_value(usage, "total_output_tokens", 0))
                 reasoning_tokens = self._usage_int(
-                    field_value(usage, "total_reasoning_tokens", 0)
+                    field_value(
+                        usage,
+                        "total_thought_tokens",
+                        field_value(usage, "total_reasoning_tokens", 0),
+                    )
                 )
                 cached_input_tokens = self._usage_int(
                     field_value(usage, "total_cached_tokens", 0)
@@ -468,6 +482,181 @@ class GeminiClient(BaseAIClient):
                 request_id=request_id, error=error, latency_ms=latency_ms, model=model_name
             )
 
+    def _create_interaction(
+        self,
+        payload: dict[str, Any],
+        stream_observer: Any,
+    ) -> Any:
+        if stream_observer is None:
+            return self.client.interactions.create(**payload)
+
+        final_interaction = None
+        streamed_steps: dict[int, dict[str, Any]] = {}
+        streamed_text: list[str] = []
+        stream = self.client.interactions.create(**payload, stream=True)
+        try:
+            for wrapped_event in stream:
+                event = field_value(wrapped_event, "data", wrapped_event)
+                stream_observer.emit_provider_event(event)
+                event_type = str(field_value(event, "event_type", "") or "").lower()
+                if event_type == "step.start":
+                    index = self._stream_step_index(event)
+                    step = self._stream_payload(field_value(event, "step"))
+                    current = streamed_steps.setdefault(index, {})
+                    private = {
+                        key: current[key]
+                        for key in ("_text_parts", "_annotations")
+                        if key in current
+                    }
+                    current.update(step)
+                    current.update(private)
+                elif event_type == "step.delta":
+                    index = self._stream_step_index(event)
+                    delta = field_value(event, "delta")
+                    delta_type = str(field_value(delta, "type", "") or "").lower()
+                    current = streamed_steps.setdefault(index, {})
+                    if not current.get("type"):
+                        current["type"] = (
+                            "model_output"
+                            if delta_type in {"text", "text_annotation_delta"}
+                            else delta_type
+                        )
+                    if delta_type == "text":
+                        text = str(field_value(delta, "text", "") or "")
+                        if text:
+                            streamed_text.append(text)
+                            current.setdefault("_text_parts", []).append(text)
+                            stream_observer.emit_text(text)
+                    elif delta_type == "text_annotation_delta":
+                        annotations = current.setdefault("_annotations", [])
+                        for annotation in sequence_value(
+                            field_value(delta, "annotations", [])
+                        ):
+                            annotations.append(
+                                self._stream_payload(annotation) or annotation
+                            )
+                    else:
+                        delta_payload = self._stream_payload(delta)
+                        for key, value in delta_payload.items():
+                            if key != "type" and value is not None:
+                                current[key] = value
+                if event_type == "interaction.completed":
+                    final_interaction = field_value(event, "interaction")
+        finally:
+            close = getattr(stream, "close", None)
+            if callable(close):
+                close()
+
+        stream_observer.raise_if_cancelled()
+        if final_interaction is None:
+            raise RuntimeError("Gemini interaction stream ended without a completed interaction")
+
+        # Interactions streaming completion events contain a partial interaction.
+        # In particular, successful events may include status and usage while
+        # omitting every step. Rebuild the response from the streamed lifecycle so
+        # final extraction, persistence, and billing see the same answer that the
+        # observer already delivered to the client.
+        interaction = self._stream_payload(final_interaction)
+        if not sequence_value(interaction.get("steps", [])):
+            interaction["steps"] = [
+                self._finalize_streamed_step(streamed_steps[index])
+                for index in sorted(streamed_steps)
+            ]
+        if streamed_text and not str(interaction.get("output_text") or ""):
+            interaction["output_text"] = "".join(streamed_text)
+        return interaction
+
+    @staticmethod
+    def _stream_step_index(event: Any) -> int:
+        try:
+            return int(field_value(event, "index", 0) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _stream_payload(value: Any) -> dict[str, Any]:
+        if isinstance(value, Mapping):
+            return dict(value)
+        model_dump = getattr(value, "model_dump", None)
+        if callable(model_dump):
+            dumped = model_dump(mode="python", by_alias=True, exclude_none=True)
+            if isinstance(dumped, Mapping):
+                return dict(dumped)
+        attributes = getattr(value, "__dict__", None)
+        if isinstance(attributes, Mapping):
+            return dict(attributes)
+        return {}
+
+    @staticmethod
+    def _finalize_streamed_step(step: dict[str, Any]) -> dict[str, Any]:
+        finalized = {
+            key: value for key, value in step.items() if key not in {"_text_parts", "_annotations"}
+        }
+        text = "".join(str(part) for part in step.get("_text_parts", []))
+        if text:
+            content = list(sequence_value(finalized.get("content", [])))
+            if not any(
+                str(field_value(item, "type", "") or "").lower() == "text"
+                and str(field_value(item, "text", "") or "")
+                for item in content
+            ):
+                text_content: dict[str, Any] = {"type": "text", "text": text}
+                annotations = list(step.get("_annotations", []))
+                if annotations:
+                    text_content["annotations"] = annotations
+                content.append(text_content)
+            finalized["content"] = content
+        return finalized
+
+    def _generate_content(
+        self,
+        *,
+        model: str,
+        contents: list[dict[str, Any]],
+        config: dict[str, Any],
+        stream_observer: Any,
+    ) -> Any:
+        if stream_observer is None:
+            return self.client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=config,
+            )
+
+        text_parts: list[str] = []
+        last_chunk = None
+        stream = self.client.models.generate_content_stream(
+            model=model,
+            contents=contents,
+            config=config,
+        )
+        try:
+            for chunk in stream:
+                stream_observer.emit_provider_event(chunk)
+                try:
+                    chunk_text = field_value(chunk, "text", "")
+                except (AttributeError, TypeError, ValueError):
+                    chunk_text = ""
+                if chunk_text:
+                    text_parts.append(str(chunk_text))
+                    stream_observer.emit_text(chunk_text)
+                last_chunk = chunk
+        finally:
+            close = getattr(stream, "close", None)
+            if callable(close):
+                close()
+
+        stream_observer.raise_if_cancelled()
+        if last_chunk is None:
+            raise RuntimeError("Gemini content stream ended without a response")
+        return SimpleNamespace(
+            text="".join(text_parts),
+            usage_metadata=field_value(last_chunk, "usage_metadata"),
+            model_version=field_value(last_chunk, "model_version", model),
+            candidates=field_value(last_chunk, "candidates", []),
+            prompt_feedback=field_value(last_chunk, "prompt_feedback"),
+        )
+
     @staticmethod
     def _extract_grounding(
         response: Any,
@@ -543,7 +732,7 @@ class GeminiClient(BaseAIClient):
                     )
             turns.append(
                 {
-                    "role": "model" if role == "assistant" else "user",
+                    "type": "model_output" if role == "assistant" else "user_input",
                     "content": content,
                 }
             )
@@ -615,6 +804,17 @@ class GeminiClient(BaseAIClient):
                 collect_content(field_value(item, "content", []))
             else:
                 collect_content([item])
+
+        # Interactions v2 reports authoritative grounding-tool counts in usage.
+        # Retain query-level step counting when present, but do not lose billing
+        # telemetry if a response omits the call arguments.
+        usage = field_value(response, "usage")
+        reported_operations = 0
+        for tool_count in sequence_value(field_value(usage, "grounding_tool_count", [])):
+            if str(field_value(tool_count, "type", "") or "").lower() != "google_search":
+                continue
+            reported_operations += cls._usage_int(field_value(tool_count, "count", 0))
+        operations = max(operations, reported_operations)
 
         sources = normalize_web_sources(raw_sources, limit=8)
         source_index = {

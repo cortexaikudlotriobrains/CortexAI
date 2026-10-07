@@ -14,17 +14,16 @@ import {
 import { makePlaceholderResponse, useChatStore } from "../store/chatStore";
 import { clearAttachmentUploads } from "../uploads/attachmentUploadQueue";
 import { StreamDeltaBuffer } from "../streaming/streamDeltaBuffer";
+import { terminalResponseText } from "../streaming/terminalResponse";
 import {
-  isSubscriptionDenial,
-  toSubscriptionError,
-} from "../subscription/subscriptionErrors";
+  activityRunStatus,
+  activityTargetIndexes,
+  isNewActivityEvent,
+} from "../streaming/activityPresentation";
+import { isSubscriptionDenial, toSubscriptionError } from "../subscription/subscriptionErrors";
 import { useAttachmentUploadStore } from "../store/attachmentUploadStore";
 import { parseModelKey } from "./useSmartRouting";
-import {
-  presentError,
-  userFacingMessage,
-  type UserFacingError,
-} from "../errors/userFacingError";
+import { presentError, userFacingMessage, type UserFacingError } from "../errors/userFacingError";
 import type {
   ApiError,
   AttachmentRequestItem,
@@ -32,6 +31,7 @@ import type {
   ChatResponse,
   ChatTurn,
   CompareTargetRequest,
+  CortexActivityEvent,
   CompareRequest,
   ConversationHistoryItem,
   FileUploadResponse,
@@ -67,11 +67,12 @@ export function useChat() {
     const clearComposer = options.clearComposer ?? !options.promptOverride;
     if (!rawPrompt && attachments.length === 0) return;
     if (state.mode === "compare" && state.compareModelKeys.filter(Boolean).length < 2) {
-      state.setError(userFacingMessage(
-        "Choose another model",
-        "Select at least two models to compare.",
-        { code: "compare_requires_two_models", context: "chat" },
-      ));
+      state.setError(
+        userFacingMessage("Choose another model", "Select at least two models to compare.", {
+          code: "compare_requires_two_models",
+          context: "chat",
+        }),
+      );
       return;
     }
 
@@ -110,11 +111,7 @@ export function useChat() {
           researchEnabled: false,
           optimizeEnabled: true,
           attachments,
-          responses: buildPlaceholdersForCurrentMode(
-            state,
-            requestStartedAt,
-            "optimizing",
-          ),
+          responses: buildPlaceholdersForCurrentMode(state, requestStartedAt, "optimizing"),
           status: "optimizing",
           optimization,
         });
@@ -216,94 +213,95 @@ export function useChat() {
     [submit],
   );
 
-  const regenerate = useCallback(async (
-    turnId: string,
-    responseIndex = 0,
-    generationProfileOverride?: GenerationProfile,
-  ) => {
-    const state = useChatStore.getState();
-    const sourceTurn = state.turns.find((turn) => turn.id === turnId);
-    const sourceResponse = sourceTurn?.responses[responseIndex];
-    const prompt = (sourceTurn?.submittedPrompt || sourceTurn?.prompt || "").trim();
+  const regenerate = useCallback(
+    async (turnId: string, responseIndex = 0, generationProfileOverride?: GenerationProfile) => {
+      const state = useChatStore.getState();
+      const sourceTurn = state.turns.find((turn) => turn.id === turnId);
+      const sourceResponse = sourceTurn?.responses[responseIndex];
+      const prompt = (sourceTurn?.submittedPrompt || sourceTurn?.prompt || "").trim();
 
-    if (!sourceTurn || !sourceResponse || !prompt) return;
+      if (!sourceTurn || !sourceResponse || !prompt) return;
 
-    const requestStartedAt = new Date().toISOString();
-    const attachmentItems = toAttachmentItems(sourceTurn.attachments);
-    const conversationHistory = buildRegenerationConversationHistory(state.turns, turnId);
-    const context = buildContext({
-      sessionId: state.sessionId,
-      pendingNewSession: state.pendingNewSession,
-      conversationHistory,
-    });
-    const target = responseToExplicitTarget(sourceResponse);
-    const controller = beginRequestController();
-
-    state.setError(null);
-    state.setSubscriptionError(null);
-    state.setStreamingText("");
-    state.setStreaming(true);
-
-    try {
-      await runRegenerateResponse({
-        turnId,
-        responseIndex,
-        submittedPrompt: prompt,
-        context,
-        attachmentItems,
-        signal: controller.signal,
-        startedAt: requestStartedAt,
-        targetOverride: target,
-        researchEnabledOverride: !!sourceTurn.researchEnabled,
-        regenerationSourceRequestId:
-          sourceTurn.mode === "compare" ? sourceResponse.request_id : undefined,
-        generationProfileOverride,
-        reasoningLevelOverride: reasoningLevelFromResponse(
-          sourceResponse.generation_budget?.requested_reasoning_effort,
-        ),
+      const requestStartedAt = new Date().toISOString();
+      const attachmentItems = toAttachmentItems(sourceTurn.attachments);
+      const conversationHistory = buildRegenerationConversationHistory(state.turns, turnId);
+      const context = buildContext({
+        sessionId: state.sessionId,
+        pendingNewSession: state.pendingNewSession,
+        conversationHistory,
       });
-    } catch (err: unknown) {
-      if (controller.signal.aborted) return;
-      const latest = useChatStore.getState();
-      if (generationProfileOverride) {
-        latest.updateTurnResponse(turnId, responseIndex, sourceResponse);
-        latest.setTurnStatus(turnId, "complete");
-      }
-      if (isSubscriptionDenial(err)) {
-        latest.setSubscriptionError(toSubscriptionError(err));
-        latest.setError(null);
+      const target = responseToExplicitTarget(sourceResponse);
+      const controller = beginRequestController();
+
+      state.setError(null);
+      state.setSubscriptionError(null);
+      state.setStreamingText("");
+      state.setStreaming(true);
+
+      try {
+        await runRegenerateResponse({
+          turnId,
+          responseIndex,
+          submittedPrompt: prompt,
+          context,
+          attachmentItems,
+          signal: controller.signal,
+          startedAt: requestStartedAt,
+          targetOverride: target,
+          researchEnabledOverride: !!sourceTurn.researchEnabled,
+          regenerationSourceRequestId:
+            sourceTurn.mode === "compare" ? sourceResponse.request_id : undefined,
+          generationProfileOverride,
+          reasoningLevelOverride: reasoningLevelFromResponse(
+            sourceResponse.generation_budget?.requested_reasoning_effort,
+          ),
+        });
+      } catch (err: unknown) {
+        if (controller.signal.aborted) return;
+        const latest = useChatStore.getState();
+        if (generationProfileOverride) {
+          latest.updateTurnResponse(turnId, responseIndex, sourceResponse);
+          latest.setTurnStatus(turnId, "complete");
+        }
+        if (isSubscriptionDenial(err)) {
+          latest.setSubscriptionError(toSubscriptionError(err));
+          latest.setError(null);
+          latest.setStreaming(false);
+          return;
+        }
+        const visibleError = presentError(err, "chat");
+        if (generationProfileOverride) {
+          latest.setError(
+            userFacingMessage(
+              "Retry couldn't finish",
+              `The partial answer was kept. ${visibleError.message}`,
+              {
+                code: visibleError.code,
+                retryable: visibleError.retryable,
+                action: visibleError.retryable ? "retry" : "dismiss",
+                actionLabel: visibleError.retryable ? "Try again" : undefined,
+                requestId: visibleError.requestId,
+                context: "chat",
+              },
+            ),
+          );
+          latest.setStreaming(false);
+          return;
+        }
+        if (latest.activeTurnId) {
+          markTurnResponsesFailed(latest.activeTurnId, visibleError);
+          latest.setTurnStatus(latest.activeTurnId, "error");
+          latest.setError(null);
+        } else {
+          latest.setError(visibleError);
+        }
         latest.setStreaming(false);
-        return;
+      } finally {
+        clearRequestController(controller);
       }
-      const visibleError = presentError(err, "chat");
-      if (generationProfileOverride) {
-        latest.setError(userFacingMessage(
-          "Retry couldn't finish",
-          `The partial answer was kept. ${visibleError.message}`,
-          {
-            code: visibleError.code,
-            retryable: visibleError.retryable,
-            action: visibleError.retryable ? "retry" : "dismiss",
-            actionLabel: visibleError.retryable ? "Try again" : undefined,
-            requestId: visibleError.requestId,
-            context: "chat",
-          },
-        ));
-        latest.setStreaming(false);
-        return;
-      }
-      if (latest.activeTurnId) {
-        markTurnResponsesFailed(latest.activeTurnId, visibleError);
-        latest.setTurnStatus(latest.activeTurnId, "error");
-        latest.setError(null);
-      } else {
-        latest.setError(visibleError);
-      }
-      latest.setStreaming(false);
-    } finally {
-      clearRequestController(controller);
-    }
-  }, []);
+    },
+    [],
+  );
 
   const retryWithMoreRoom = useCallback(
     async (turnId: string, responseIndex = 0) => {
@@ -328,6 +326,34 @@ export function useChat() {
           cancelledOptimization(activeTurn.optimization.originalPrompt),
         );
       }
+      const cancelledAt = new Date().toISOString();
+      activeTurn?.responses.forEach((response, index) => {
+        if (
+          response.ui_status === "complete" ||
+          response.ui_status === "failed" ||
+          response.ui_status === "cancelled"
+        ) {
+          return;
+        }
+        state.updateTurnResponse(state.activeTurnId!, index, {
+          ...response,
+          ui_status: "cancelled",
+          cancelled_at: cancelledAt,
+          activity: {
+            request_id: response.activity?.request_id ?? response.request_id,
+            conversation_id: response.activity?.conversation_id ?? response.session_id,
+            provider: response.provider,
+            model: response.model,
+            mode: activeTurn.mode === "compare" ? "compare" : "chat",
+            event_type: "REQUEST_CANCELLED",
+            phase: "cancelled",
+            display_message: "Generation stopped",
+            timestamp: cancelledAt,
+            sequence_number: (response.activity?.sequence_number ?? 0) + 1,
+            metadata: {},
+          },
+        });
+      });
       state.setTurnStatus(state.activeTurnId, "cancelled");
     }
     state.setStreaming(false);
@@ -379,10 +405,7 @@ async function runAskTurn({
     provider: smartMode ? undefined : provider || undefined,
     model: smartMode ? undefined : model || undefined,
     routing: { smart_mode: smartMode, web_mode: "auto" },
-    generation: generationForReasoningLevel(
-      state.askReasoningLevel,
-      MANAGED_GENERATION_PROFILE,
-    ),
+    generation: generationForReasoningLevel(state.askReasoningLevel, MANAGED_GENERATION_PROFILE),
     attachments: attachmentItems.length > 0 ? attachmentItems : undefined,
     context,
   };
@@ -428,7 +451,9 @@ async function runAskTurn({
       }
       deltaBuffer.flush();
       const latest = useChatStore.getState();
-      if (!smartMode && chunk.type === "start" && (chunk.provider || chunk.model)) {
+      if (chunk.type === "activity" && chunk.activity) {
+        applyActivityToResponse(latest, activeTurnId, 0, chunk.activity, placeholder);
+      } else if (!smartMode && chunk.type === "start" && (chunk.provider || chunk.model)) {
         const current =
           latest.turns.find((turn) => turn.id === activeTurnId)?.responses[0] ??
           latest.responses[0] ??
@@ -457,7 +482,7 @@ async function runAskTurn({
         latest.updateTurnResponse(activeTurnId, 0, {
           ...current,
           ...finalResponse,
-          text: chunk.metadata.text ?? latest.responses[0]?.text ?? "",
+          text: terminalResponseText(chunk.metadata.text, current.text),
           started_at: current.started_at ?? startedAt,
           ui_status: finalResponse.error ? "failed" : "finalizing",
           failed_at: finalResponse.error ? new Date().toISOString() : current.failed_at,
@@ -485,11 +510,11 @@ async function runAskTurn({
     const completedResponse = {
       ...current,
       ...finalResponse,
-      text: finalResponse.text ?? current.text,
+      text: terminalResponseText(finalResponse.text, current.text),
       session_id: finalResponse.session_id ?? latest.sessionId ?? current.session_id,
       started_at: current.started_at ?? startedAt,
       completed_at: finalResponse.error ? current.completed_at : completedAt,
-      failed_at: finalResponse.error ? current.failed_at ?? completedAt : current.failed_at,
+      failed_at: finalResponse.error ? (current.failed_at ?? completedAt) : current.failed_at,
       ui_status: finalResponse.error
         ? "failed"
         : finalResponse.completion_status === "incomplete"
@@ -535,11 +560,12 @@ async function runCompareTurn({
   const state = useChatStore.getState();
   const activeKeys = state.compareModelKeys.filter(Boolean);
   if (activeKeys.length < 2) {
-    state.setError(userFacingMessage(
-      "Choose another model",
-      "Select at least two models to compare.",
-      { code: "compare_requires_two_models", context: "chat" },
-    ));
+    state.setError(
+      userFacingMessage("Choose another model", "Select at least two models to compare.", {
+        code: "compare_requires_two_models",
+        context: "chat",
+      }),
+    );
     state.setStreaming(false);
     return;
   }
@@ -600,11 +626,26 @@ async function runCompareTurn({
       }
       deltaBuffer.flush();
       const latest = useChatStore.getState();
-      if (chunk.type === "response_start") {
+      if (chunk.type === "activity" && chunk.activity) {
+        const responseCount =
+          latest.turns.find((turn) => turn.id === activeTurnId)?.responses.length ??
+          placeholders.length;
+        const activityIndexes = activityTargetIndexes(chunk.index, responseCount);
+        for (const activityIndex of activityIndexes) {
+          applyActivityToResponse(
+            latest,
+            activeTurnId,
+            activityIndex,
+            chunk.activity,
+            placeholders[activityIndex],
+          );
+        }
+      } else if (chunk.type === "response_start") {
         const current = getTurnResponse(latest, activeTurnId, index, placeholders[index]);
         latest.updateTurnResponse(activeTurnId, index, {
           ...current,
-          provider: chunk.provider ?? latest.responses[index]?.provider ?? targets[index]?.provider ?? "",
+          provider:
+            chunk.provider ?? latest.responses[index]?.provider ?? targets[index]?.provider ?? "",
           model: chunk.model ?? latest.responses[index]?.model ?? targets[index]?.model ?? "",
           ui_status: "requesting",
         });
@@ -615,9 +656,10 @@ async function runCompareTurn({
         latest.updateTurnResponse(activeTurnId, index, {
           ...current,
           ...chunk.response,
+          text: terminalResponseText(chunk.response.text, current.text),
           started_at: current.started_at ?? startedAt,
           completed_at: failed ? current.completed_at : completedAt,
-          failed_at: failed ? current.failed_at ?? completedAt : current.failed_at,
+          failed_at: failed ? (current.failed_at ?? completedAt) : current.failed_at,
           ui_status: failed
             ? "failed"
             : chunk.response.completion_status === "incomplete"
@@ -716,11 +758,7 @@ async function runRegenerateResponse({
     for await (const chunk of streamChat(request, signal)) {
       if (signal.aborted) break;
       if (!prepared) {
-        useChatStore.getState().prepareTurnResponseForStreaming(
-          turnId,
-          responseIndex,
-          placeholder,
-        );
+        useChatStore.getState().prepareTurnResponseForStreaming(turnId, responseIndex, placeholder);
         prepared = true;
       }
       if (chunk.type === "delta" && chunk.text) {
@@ -729,7 +767,9 @@ async function runRegenerateResponse({
       }
       deltaBuffer.flush();
       const latest = useChatStore.getState();
-      if (!smartMode && chunk.type === "start" && (chunk.provider || chunk.model)) {
+      if (chunk.type === "activity" && chunk.activity) {
+        applyActivityToResponse(latest, turnId, responseIndex, chunk.activity, placeholder);
+      } else if (!smartMode && chunk.type === "start" && (chunk.provider || chunk.model)) {
         const current = getTurnResponse(latest, turnId, responseIndex, placeholder);
         latest.updateTurnResponse(turnId, responseIndex, {
           ...current,
@@ -780,7 +820,7 @@ async function runRegenerateResponse({
       session_id: finalResponse.session_id ?? latest.sessionId ?? current.session_id,
       started_at: current.started_at ?? startedAt,
       completed_at: finalResponse.error ? current.completed_at : completedAt,
-      failed_at: finalResponse.error ? current.failed_at ?? completedAt : current.failed_at,
+      failed_at: finalResponse.error ? (current.failed_at ?? completedAt) : current.failed_at,
       ui_status: finalResponse.error
         ? "failed"
         : finalResponse.completion_status === "incomplete"
@@ -806,13 +846,38 @@ function buildContext({
   conversationHistory: ConversationHistoryItem[];
 }): UserContextRequest {
   return {
-    session_id: pendingNewSession ? undefined : sessionId ?? undefined,
+    session_id: pendingNewSession ? undefined : (sessionId ?? undefined),
     conversation_history: conversationHistory.length > 0 ? conversationHistory : undefined,
     new_session: pendingNewSession || !sessionId,
   };
 }
 
 type ChatStateSnapshot = ReturnType<typeof useChatStore.getState>;
+
+function applyActivityToResponse(
+  state: ChatStateSnapshot,
+  turnId: string,
+  index: number,
+  activity: CortexActivityEvent,
+  fallback?: ChatResponse,
+) {
+  const current = getTurnResponse(state, turnId, index, fallback);
+  if (!isNewActivityEvent(current.activity, activity)) return;
+  if (
+    current.ui_status === "complete" ||
+    current.ui_status === "failed" ||
+    current.ui_status === "cancelled"
+  ) {
+    return;
+  }
+  state.updateTurnResponse(turnId, index, {
+    ...current,
+    provider: activity.provider || current.provider,
+    model: activity.model || current.model,
+    activity,
+    ui_status: activityRunStatus(activity),
+  });
+}
 
 function buildPlaceholdersForCurrentMode(
   state: ChatStateSnapshot,
@@ -867,10 +932,15 @@ function markTurnResponsesFailed(turnId: string, visibleError: UserFacingError) 
       : [makePlaceholderResponse(0, "auto", "Working", state.sessionId)];
 
   responses.forEach((response, index) => {
-    if (response.ui_status === "complete" || response.ui_status === "failed") return;
+    if (
+      response.ui_status === "complete" ||
+      response.ui_status === "failed" ||
+      response.ui_status === "cancelled"
+    ) {
+      return;
+    }
     state.updateTurnResponse(turnId, index, {
       ...response,
-      text: "",
       error: response.error ?? makeUiError(response, visibleError),
       ui_status: "failed",
       failed_at: failedAt,
@@ -972,12 +1042,10 @@ async function refreshHistory() {
 }
 
 function streamError(rawMessage?: string): ApiClientError {
-  return new ApiClientError(
-    0,
-    rawMessage ?? "Stream error",
-    undefined,
-    { code: "stream_error", retryable: true },
-  );
+  return new ApiClientError(0, rawMessage ?? "Stream error", undefined, {
+    code: "stream_error",
+    retryable: true,
+  });
 }
 
 function createCreditActivityId(): string {

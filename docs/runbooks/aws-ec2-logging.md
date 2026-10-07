@@ -113,8 +113,15 @@ Use this when browsers report errors such as `ERR_HTTP2_PROTOCOL_ERROR 200 (OK)`
    - no `*.stream.opened`: failure happened before the app began streaming.
    - `*.stream.start_event_sent` then `*.stream.client_disconnected`: browser, CDN, load balancer, or proxy closed the stream.
    - repeated `*.stream.heartbeat_sent` before completion: provider work was still running and the backend kept the response body active.
+   - inspect ordered `*.stream.activity` records by `sequence`, `activity_type`, and optional `target_index`; a Compare target may fail while later indexed targets continue normally.
+   - if activity stops before `answer_started`, compare `provider_started_at`, `first_provider_event_at`, `first_search_event_at`, and `first_answer_event_at`; if answer activity began but the browser has no useful text, inspect line delivery and `time_to_first_useful_output_ms`.
    - long gap between `*.stream.provider_call_started` and `*.stream.provider_call_completed` with no heartbeat events: provider latency or idle timeout is likely.
    - `*.stream.done_sent` exists but browser failed: inspect CloudFront/Nginx/ALB HTTP/2 framing, buffering, compression, and read/send timeouts.
+
+Activity logs and public stream envelopes intentionally omit hidden reasoning,
+raw tool arguments, provider exception bodies, and provider-only identifiers.
+Use correlated provider/research logs for diagnostics; do not expand public
+activity metadata while investigating an incident.
 
 ## Browser Refresh / Blink Workflow
 

@@ -270,7 +270,7 @@ def test_claude_native_search_caps_uses_and_preserves_sources(monkeypatch):
 def test_gemini_interactions_search_extracts_result_items(monkeypatch):
     fake_client = Mock()
     fake_client.interactions.create.return_value = SimpleNamespace(
-        outputs=[
+        steps=[
             SimpleNamespace(
                 type="google_search_call",
                 arguments=SimpleNamespace(queries=["latest rate"]),
@@ -280,9 +280,18 @@ def test_gemini_interactions_search_extracts_result_items(monkeypatch):
                 result=[SimpleNamespace(url="https://example.com/c", title="C")],
             ),
             SimpleNamespace(
-                type="text",
-                text="Gemini result",
-                annotations=[SimpleNamespace(source="https://example.com/c", end_index=13)],
+                type="model_output",
+                content=[
+                    SimpleNamespace(
+                        type="text",
+                        text="Gemini result",
+                        annotations=[
+                            SimpleNamespace(
+                                source="https://example.com/c", end_index=13
+                            )
+                        ],
+                    )
+                ],
             ),
         ],
         usage=SimpleNamespace(
@@ -290,7 +299,8 @@ def test_gemini_interactions_search_extracts_result_items(monkeypatch):
             total_output_tokens=6,
             total_tokens=14,
             total_cached_tokens=0,
-            total_reasoning_tokens=0,
+            total_thought_tokens=2,
+            grounding_tool_count=[SimpleNamespace(type="google_search", count=1)],
         ),
         model="gemini-2.5-flash",
         status="completed",
@@ -306,13 +316,44 @@ def test_gemini_interactions_search_extracts_result_items(monkeypatch):
     assert response.is_success
     assert response.text == "Gemini result[1]"
     assert response.metadata["web_search"]["operations"] == 1
+    assert response.token_usage.reasoning_tokens == 2
     payload = fake_client.interactions.create.call_args.kwargs
     assert payload["tools"] == [{"type": "google_search"}]
+    assert payload["input"] == [
+        {
+            "type": "user_input",
+            "content": [{"type": "text", "text": "What is the latest rate?"}],
+        }
+    ]
     assert payload["generation_config"]["temperature"] == 0.7
-    assert payload["generation_config"]["tool_choice"]["allowed_tools"] == {
-        "mode": "any",
-        "tools": ["google_search"],
-    }
+    assert "tool_choice" not in payload["generation_config"]
+
+
+def test_gemini_interactions_history_uses_v2_step_roles():
+    payload = GeminiClient._build_interactions_input(
+        [
+            {"role": "system", "content": "Be concise."},
+            {"role": "user", "content": "First question"},
+            {"role": "assistant", "content": "First answer"},
+            {"role": "user", "content": "Follow-up"},
+        ],
+        attachments=[],
+    )
+
+    assert payload == [
+        {
+            "type": "user_input",
+            "content": [{"type": "text", "text": "First question"}],
+        },
+        {
+            "type": "model_output",
+            "content": [{"type": "text", "text": "First answer"}],
+        },
+        {
+            "type": "user_input",
+            "content": [{"type": "text", "text": "Follow-up"}],
+        },
+    ]
 
 
 def test_gemini_3_5_native_search_omits_unsupported_temperature(monkeypatch):
@@ -321,7 +362,14 @@ def test_gemini_3_5_native_search_omits_unsupported_temperature(monkeypatch):
     def create_interaction(**kwargs):
         assert "temperature" not in kwargs["generation_config"]
         return SimpleNamespace(
-            outputs=[SimpleNamespace(type="text", text="Gemini result", annotations=[])],
+            steps=[
+                SimpleNamespace(
+                    type="model_output",
+                    content=[
+                        SimpleNamespace(type="text", text="Gemini result", annotations=[])
+                    ],
+                )
+            ],
             usage=SimpleNamespace(
                 total_input_tokens=8,
                 total_output_tokens=6,
@@ -352,10 +400,7 @@ def test_gemini_3_5_native_search_omits_unsupported_temperature(monkeypatch):
     assert payload["tools"] == [{"type": "google_search"}]
     assert payload["generation_config"]["max_output_tokens"] == 2048
     assert payload["generation_config"]["thinking_level"] == "medium"
-    assert payload["generation_config"]["tool_choice"]["allowed_tools"] == {
-        "mode": "any",
-        "tools": ["google_search"],
-    }
+    assert "tool_choice" not in payload["generation_config"]
 
 
 def test_grok_native_search_uses_usage_and_normalizes_inline_citations(monkeypatch):

@@ -347,7 +347,9 @@ describe("ResponseCard", () => {
   });
 
   it("does not render legacy source controls when sources have no inline markers", () => {
-    render(<ResponseCard response={response(true, "A sourced answer without inline refs.")} compact />);
+    render(
+      <ResponseCard response={response(true, "A sourced answer without inline refs.")} compact />,
+    );
 
     expect(screen.queryByRole("button", { name: "Resources" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /source:/i })).not.toBeInTheDocument();
@@ -360,12 +362,11 @@ describe("ResponseCard", () => {
       <ResponseCard response={pending} isStreaming loadingMode="ask" />,
     );
 
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Thinking through your request\u2026",
+    expect(screen.getByRole("status")).toHaveTextContent("Starting\u2026");
+    expect(container.querySelector('canvas[data-loading-state="working"]')).toHaveAttribute(
+      "aria-hidden",
+      "true",
     );
-    expect(
-      container.querySelector('canvas[data-loading-state="working"]'),
-    ).toHaveAttribute("aria-hidden", "true");
     expect(screen.queryByText("Waiting for response...")).not.toBeInTheDocument();
 
     rerender(
@@ -381,21 +382,14 @@ describe("ResponseCard", () => {
     expect(screen.getByText("The first streamed token")).toBeInTheDocument();
   });
 
-  it("uses request-aware loading copy for sources and prompt improvement", () => {
+  it("does not infer search or optimization before an activity event arrives", () => {
     const pending = response(false, "");
     const { container, rerender } = render(
-      <ResponseCard
-        response={pending}
-        isStreaming
-        loadingMode="compare"
-        researchEnabled
-      />,
+      <ResponseCard response={pending} isStreaming loadingMode="compare" researchEnabled />,
     );
 
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Checking sources and preparing an answer\u2026",
-    );
-    expect(container.querySelector('canvas[data-loading-state="searching"]')).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Preparing this response\u2026");
+    expect(container.querySelector('canvas[data-loading-state="working"]')).toBeInTheDocument();
 
     rerender(
       <ResponseCard
@@ -407,22 +401,16 @@ describe("ResponseCard", () => {
       />,
     );
 
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Refining prompt and preparing response\u2026",
-    );
-    expect(container.querySelector('canvas[data-loading-state="searching"]')).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Preparing this response\u2026");
+    expect(container.querySelector('canvas[data-loading-state="working"]')).toBeInTheDocument();
   });
 
   it("groups consecutive numeric citations into one publisher pill", () => {
-    render(
-      <ResponseCard
-        response={responseWithSources("The claim is supported. [1][2] [3]")}
-      />,
-    );
+    render(<ResponseCard response={responseWithSources("The claim is supported. [1][2] [3]")} />);
 
-    expect(
-      screen.getByRole("button", { name: "Sources: NPR and 2 more" }),
-    ).toHaveTextContent("NPR + 2");
+    expect(screen.getByRole("button", { name: "Sources: NPR and 2 more" })).toHaveTextContent(
+      "NPR + 2",
+    );
   });
 
   it("does not convert citation-looking text inside links or code", () => {
@@ -468,12 +456,14 @@ describe("ResponseCard", () => {
     const dialog = screen.getByRole("dialog", { name: "Citation sources" });
     expect(root.className).toContain("citationRootOpen");
     expect(dialog).toBeInTheDocument();
-    expect(
-      within(dialog).getByRole("link", { name: /Morning Edition NPR/ }),
-    ).toHaveAttribute("href", "https://www.npr.org/sections/news/");
-    expect(
-      within(dialog).getByRole("link", { name: /World report BBC/ }),
-    ).toHaveAttribute("href", "https://www.bbc.co.uk/news/world");
+    expect(within(dialog).getByRole("link", { name: /Morning Edition NPR/ })).toHaveAttribute(
+      "href",
+      "https://www.npr.org/sections/news/",
+    );
+    expect(within(dialog).getByRole("link", { name: /World report BBC/ })).toHaveAttribute(
+      "href",
+      "https://www.bbc.co.uk/news/world",
+    );
 
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "Citation sources" })).not.toBeInTheDocument();
@@ -481,10 +471,9 @@ describe("ResponseCard", () => {
     fireEvent.mouseEnter(root);
     expect(screen.getByRole("dialog", { name: "Citation sources" })).toBeInTheDocument();
     fireEvent.pointerDown(
-      within(screen.getByRole("dialog", { name: "Citation sources" })).getByRole(
-        "link",
-        { name: /Morning Edition NPR/ },
-      ),
+      within(screen.getByRole("dialog", { name: "Citation sources" })).getByRole("link", {
+        name: /Morning Edition NPR/,
+      }),
     );
     expect(screen.getByRole("dialog", { name: "Citation sources" })).toBeInTheDocument();
 
@@ -563,9 +552,10 @@ describe("ResponseCard", () => {
   it("opens the citation external icon as a direct source link", () => {
     render(<ResponseCard response={responseWithSources("Supported by reporting. [1]")} />);
 
-    expect(
-      screen.getByRole("link", { name: "Open NPR source in a new tab" }),
-    ).toHaveAttribute("href", "https://www.npr.org/sections/news/");
+    expect(screen.getByRole("link", { name: "Open NPR source in a new tab" })).toHaveAttribute(
+      "href",
+      "https://www.npr.org/sections/news/",
+    );
   });
 
   it("normalizes source links that arrive without a URL scheme", () => {
@@ -573,23 +563,21 @@ describe("ResponseCard", () => {
       <ResponseCard
         response={{
           ...response(false, "Supported by reporting. [1]"),
-          web_source_items: [
-            { title: "Bare source", url: "example.com/report" },
-          ],
+          web_source_items: [{ title: "Bare source", url: "example.com/report" }],
         }}
       />,
     );
 
-    expect(
-      screen.getByRole("link", { name: "Open Example source in a new tab" }),
-    ).toHaveAttribute("href", "https://example.com/report");
+    expect(screen.getByRole("link", { name: "Open Example source in a new tab" })).toHaveAttribute(
+      "href",
+      "https://example.com/report",
+    );
 
     fireEvent.mouseEnter(citationRootFor(screen.getByRole("button", { name: "Source: Example" })));
     expect(
-      within(screen.getByRole("dialog", { name: "Citation sources" })).getByRole(
-        "link",
-        { name: /Bare source/ },
-      ),
+      within(screen.getByRole("dialog", { name: "Citation sources" })).getByRole("link", {
+        name: /Bare source/,
+      }),
     ).toHaveAttribute("href", "https://example.com/report");
   });
 
@@ -649,14 +637,8 @@ describe("ResponseCard", () => {
     expect(screen.getByRole("columnheader", { name: "Risk" })).toHaveStyle({
       textAlign: "center",
     });
-    expect(screen.getByRole("cell", { name: "Platform" })).toHaveAttribute(
-      "data-label",
-      "Owner",
-    );
-    expect(screen.getByRole("region", { name: "Response table" })).toHaveAttribute(
-      "tabindex",
-      "0",
-    );
+    expect(screen.getByRole("cell", { name: "Platform" })).toHaveAttribute("data-label", "Owner");
+    expect(screen.getByRole("region", { name: "Response table" })).toHaveAttribute("tabindex", "0");
   });
 });
 
@@ -688,7 +670,10 @@ function responseWithSources(text: string): ChatResponse {
     web_source_items: [
       { title: "Morning Edition", url: "https://www.npr.org/sections/news/" },
       { title: "World report", url: "https://www.bbc.co.uk/news/world" },
-      { title: "Large language model - Wikipedia", url: "https://en.wikipedia.org/wiki/Large_language_model" },
+      {
+        title: "Large language model - Wikipedia",
+        url: "https://en.wikipedia.org/wiki/Large_language_model",
+      },
     ],
   };
 }
