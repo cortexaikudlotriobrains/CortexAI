@@ -340,13 +340,13 @@ COGNITO_SSL_VERIFY=true            # set false to skip TLS verification for Cogn
 
 ## Model catalogue, lifecycle, and pricing
 
-- `config/model_registry.yaml` is the canonical, effective-dated source for selectable models, compatibility aliases, lifecycle state, context limits, official provider evidence, token-price rules, smart-routing metadata, and consumer credit metadata. A normal catalogue or pricing refresh is one data edit in this file.
-- Runtime token-cost estimation in `config/pricing.py` and smart routing in `orchestrator/model_registry.py` both load that canonical registry; do not maintain a second price table in Python.
+- `config/model_registry.yaml` owns selectable models, compatibility aliases, lifecycle state, context limits, official provider evidence, smart-routing metadata, and consumer credit metadata. Its token-price rules are the legacy bootstrap/rollback source.
+- With `MODEL_PRICING_MODE=database`, `config/pricing.py` and smart-routing registry construction select locally persisted versioned provider rate cards. Routine price updates use the pricing sync/operator commands; inference never fetches external pricing. The default `legacy` mode supports staged migration. See [pricing operations](docs/runbooks/model-pricing.md).
 - Consumer plan definitions use `config/subscription_plans.yaml` and are validated at API startup by `server/billing/plan_catalog.py`.
 - Provider metadata/defaults/allowlists use `config/providers.yaml` via `config/provider_catalog.py`.
 - Provider defaults in `config/providers.yaml` must reference selectable registry IDs. Before changing a price or lifecycle date, verify it against the provider's official pages and update `source_verified_at`; the current evidence links are [OpenAI pricing/deprecations](https://developers.openai.com/api/docs/pricing), [Google Gemini pricing/deprecations](https://ai.google.dev/gemini-api/docs/pricing), [DeepSeek pricing/news](https://api-docs.deepseek.com/quick_start/pricing/), [xAI pricing/models](https://docs.x.ai/developers/pricing), [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing), and [Anthropic lifecycle](https://platform.claude.com/docs/en/about-claude/model-deprecations).
 - Pricing rules may be effective-dated, processing-mode-specific, and long-context-specific. Cached input and cache writes are charged separately when a provider reports them. Reasoning tokens are retained for audit but are not double-billed when the provider already includes them in output tokens.
-- Every response preserves `requested_model`, provider-reported `served_model`, and `pricing_model`, together with alias/lifecycle status and the exact pricing rule/version. Unknown exact model pricing uses a marked conservative provider fallback; it is never silently recorded as zero.
+- Every response preserves `requested_model`, provider-reported `served_model`, and `pricing_model`, together with alias/lifecycle status and the exact pricing rule/version. Legacy mode retains the marked conservative provider fallback for an unknown exact price. Database mode requires an applicable approved model-specific card and fails explicitly when missing; neither mode silently records unknown pricing as zero.
 - Smart-routing tiers (`T0`-`T3`) and consumer model access categories (`economical`, `standard`, `advanced`, `premium`) are separate controls. Every configured model must declare an access category, input/output credit multipliers, a customer-facing credit-usage label, and a pricing version; missing or unknown values fail registry loading.
 - The current plan catalogue defines server-owned Free, Plus, and Pro prices, entitlements, allowances, and safety limits. `server/billing/subscription_service.py` resolves a database-backed effective plan, applies the lifecycle/grace policy, and creates the matching usage period. `server/billing/entitlement_service.py` exposes feature/model/file decisions and exact reservation quantities without mutating counters.
 - `server/billing/metering_service.py` atomically reserves, supplements, partially settles, releases, and expires allowance reservations inside a caller-owned transaction. Idempotency keys are scoped to a billing account, counter rows are locked in deterministic order, terminal transitions are repeat-safe, and the API runs concurrency-safe stale cleanup at startup and every five minutes by default while heartbeat activity protects live requests.
@@ -871,6 +871,33 @@ Prompt optimization (`/v1/optimize`):
 
 See `docs/GENERATION_BUDGETS.md` for the full contract and `docs/runbooks/generation-budget-rollout.md` for deployment checks.
 
+## Versioned provider pricing
+
+Provider prices can be maintained in PostgreSQL independently of application
+releases with `MODEL_PRICING_MODE=database`. The default `legacy` mode keeps the
+existing registry rates available for staged migration/rollback. Apply
+`20261007_add_versioned_model_rate_cards.sql`, seed existing prices using
+`python scripts/sync_model_pricing.py --seed-legacy`, verify parity, then enable
+database mode and restart API/workers. External LiteLLM synchronization is an
+operator/scheduled command. Manual overrides, effective-dated history,
+suspicious-change review and exact Decimal calculation evidence are retained.
+Model enablement/lifecycle and subscription credit policy remain separate.
+See [architecture](docs/MODEL_PRICING_ARCHITECTURE.md) and
+[pricing operations](docs/runbooks/model-pricing.md) for configuration,
+approval/dry-run commands, failure behavior and limitations.
+
+Pricing repairs recognize the official GPT-5.4 Mini snapshot alias and include
+Gemini Interactions thinking tokens in billable output once. DeepSeek's verified
+20261008 price versions select peak/off-peak rates at provider-call start using
+an explicit 2026 Chinese holiday calendar; snapshots retain the selected tier.
+Refresh seeded cards after upgrading and verify a new calendar version before
+2027. External search/Maps charges remain observation evidence for separate
+service-card review; matching image token rates use aggregate input once.
+Incomplete scheduled prices and unsupported token partitions remain rejected.
+DeepSeek V4 Flash credit multipliers are 0.5/1.5 (input/output), and V4 Pro
+uses 1.5/4.0, version `2026-10-08`, to cover peak expense under the existing
+credit calibration policy; historical charges are retained.
+
 ## Cache-aware credits and reuse
 
 - `server/billing/credit_calculator.py` is the shared authority for settlement, response cards, history, and cache-savings information. Provider-reported prompt tokens are partitioned into normal input, cache reads, and cache writes; effective provider-price ratios scale the existing model input-credit multiplier. Missing pricing evidence receives no discount, quantities are clamped to the prompt total, and every component rounds up independently.
@@ -1285,6 +1312,7 @@ psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260820_add_
 psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260829_add_work_web_output_and_model_identity.sql
 psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260905_add_subscription_grants.sql
 psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260927_add_tool_credit_transaction_item.sql
+psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20261007_add_versioned_model_rate_cards.sql
 ```
 
 - `20260718` creates the billing foundation; `20260727` adds Compare revisions and append-only Cortex runs; `20260729` creates the immutable `credit_transactions` ledger and unified `ai_credits` contract; `20260730` adds reservation heartbeats; `20260731` adds model/pricing audit evidence; `20260802` adds Cortex disagreement attribution; `20260804` adds generation-budget/reasoning audit fields plus normalized completion status; `20260807` adds cache-aware ledger columns, reusable optimizer/research/Cortex/context-summary persistence, and the `cache_reuse_events` telemetry table; `20260811` permits checksum-free upload intents and adds `uploading`/`deleting` attachment states; `20260820` adds durable Work sessions/runs/events, files, tool connections/calls, approvals, OAuth state, and reconciliation leases; `20260829` adds Work Web/output/model-identity audit fields plus the output-limit terminal status; `20260905` adds Cortex-issued subscription grants; and `20260927` permits provider web-search `tool` items in the immutable credit ledger. The scripts are additive/idempotent. Alteration scripts require ownership of the affected tables. Restart the API after apply. PostgreSQL startup validates the required billing, pricing-audit, Cortex, generation-budget, and cache-accounting columns before provider traffic; when direct upload or Work is enabled it also validates the corresponding additive schema.

@@ -68,6 +68,11 @@ The authoritative state is split deliberately:
    external communication, financial, and deployment actions always ask.
 8. Completion settles independent cumulative deltas for normal input, cache
    reads, cache writes, output, Managed Agent active time, and web searches.
+   In database pricing mode, the shared Decimal engine selects approved model
+   and service rate cards at run submission time. Run and ledger snapshots retain
+   usage, card references, components and exact aggregate provider totals;
+   lifecycle/enablement and customer credit policy remain separate. See
+   [rate-card operations](../runbooks/model-pricing.md) for migration and rollback.
    The provider's USD `list_cost` delta is an additional settlement floor, so a
    provider pricing change or reconstruction gap cannot silently underbill.
    Malformed/non-USD provider cost data leaves the reservation open for

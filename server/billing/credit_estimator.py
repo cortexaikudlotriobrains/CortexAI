@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from config.pricing import ModelPricing
+from config.model_pricing import database_pricing_enabled
+from pricing.models import PricingUnavailableError
 from orchestrator.routing_types import ModelCandidate
 from server.billing.credit_calculator import (
     ADVANCED_WEB_SEARCH_CREDITS,
@@ -49,6 +51,10 @@ def estimate_model_credits(
         candidate.model_name,
         prompt_tokens=input_tokens,
     )
+    if pricing_snapshot is None and database_pricing_enabled():
+        raise PricingUnavailableError(
+            f"PRICING_UNKNOWN before reservation for {candidate.provider}:{candidate.model_name}"
+        )
     _cached_multiplier, cache_write_multiplier = resolve_cache_credit_multipliers(
         input_credit_multiplier=candidate.input_credit_multiplier,
         pricing_snapshot=pricing_snapshot,

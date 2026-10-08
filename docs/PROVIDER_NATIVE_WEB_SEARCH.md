@@ -82,7 +82,7 @@ provider or each explicit Compare target. Settlement releases unused capacity
 and charges only operations reported by the adapter, in addition to normal
 model-token credits.
 
-| Search backend | Cortex credits per operation | Provider-cost audit value |
+| Search backend | Cortex credits per operation | Legacy/seed provider-cost value |
 | --- | ---: | ---: |
 | OpenAI | 10,000 | $0.010 |
 | Claude | 10,000 | $0.010 |
@@ -97,6 +97,14 @@ estimated. Apply
 `db/migrations/20260927_add_tool_credit_transaction_item.sql` before deploying
 the writer. A search that reports no successful operation adds no tool charge;
 DeepSeek preserves completed tool usage even if a later model turn fails.
+
+With `MODEL_PRICING_MODE=database`, provider search expense uses approved local
+`__web_search__` service cards at provider-call start time. It counts every
+provider-reported operation, including overruns; customer credits remain capped
+at three operations. The tool ledger retains the exact Decimal cost audit and
+service-card reference. Apply and seed the additive pricing migration before
+switching modes; see [provider rate-card operations](runbooks/model-pricing.md).
+Search service-rate changes currently use audited manual overrides.
 
 ## Rollout and Rollback
 
@@ -148,3 +156,13 @@ Validate both non-streaming and streaming Ask/Compare responses, provider-local
 sources, zero-operation settlement, failure-after-search settlement, history
 rehydration, source rendering, and absence of the Ask/Compare Web control on
 desktop, tablet, and mobile.
+
+## Provider pricing normalization
+
+Gemini Interactions reports answer and thought tokens separately; both streaming
+and nonstreaming finalization include thoughts in completion tokens once. DeepSeek
+search loops price each model call at its own UTC start time, preserving per-call
+rate-card and tier evidence across peak boundaries while aggregating normalized
+usage for the existing credit policy. Imported search/Maps fees are observations
+for separate service-card review and never a second model-token unit charge.
+See [pricing operations](runbooks/model-pricing.md).

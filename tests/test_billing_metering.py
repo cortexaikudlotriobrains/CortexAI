@@ -912,8 +912,8 @@ def test_smart_routing_reserves_allowed_worst_case_and_settles_actual(metering_d
         research_provider_credits_used=0,
     )
     persisted = repository.get_usage_reservation_by_id(db, reservation.reservation_id)
-    assert persisted["settled_quantities"]["ai_credits"] == 50
-    assert reserved > 50
+    assert persisted["settled_quantities"]["ai_credits"] == 70
+    assert reserved > 70
 
 
 def test_smart_routing_skips_unaffordable_expensive_candidate(

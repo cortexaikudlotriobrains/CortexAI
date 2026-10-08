@@ -1,4 +1,5 @@
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 import openai
@@ -254,8 +255,9 @@ class GrokClient(BaseAIClient):
                 else CostCalculator("grok", served_model)
             )
             cost = calculator.calculate_cost(
-                token_usage.prompt_tokens,
-                token_usage.completion_tokens,
+                request_at=datetime.fromtimestamp(start_time, timezone.utc),
+                prompt_tokens=token_usage.prompt_tokens,
+                completion_tokens=token_usage.completion_tokens,
                 cached_input_tokens=token_usage.cached_input_tokens,
                 cache_write_tokens=token_usage.cache_write_tokens,
                 reasoning_tokens=token_usage.reasoning_tokens,
@@ -325,6 +327,7 @@ class GrokClient(BaseAIClient):
                 "endpoint": endpoint,
                 "pricing_unknown": bool(cost.get("pricing_unknown", False)),
                 **build_web_search_metadata(
+                    request_at=datetime.fromtimestamp(start_time, timezone.utc),
                     provider="grok",
                     backend="web_search",
                     requested_mode=str(web_search_policy.get("requested_mode") or "off"),

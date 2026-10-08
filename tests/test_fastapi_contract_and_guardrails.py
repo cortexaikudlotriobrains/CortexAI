@@ -1734,9 +1734,9 @@ def test_compare_dto_uses_requested_model_for_versioned_served_model_credits():
 
     dto = CompareResponseDTO.from_multi_unified_response(mur)
 
-    assert [item.ai_credits for item in dto.responses] == [916, 868]
+    assert [item.ai_credits for item in dto.responses] == [916, 1247]
     assert [item.credit_usage_estimated for item in dto.responses] == [False, False]
-    assert dto.total_ai_credits == 1784
+    assert dto.total_ai_credits == 2163
 
 
 def test_chat_dto_adds_formula_based_research_credits():

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from decimal import Decimal
 from collections.abc import Iterable, Mapping
 from typing import Any
 
@@ -174,6 +175,7 @@ def build_web_search_metadata(
     status: str | None = None,
     usage_estimated: bool = False,
     error: str | None = None,
+    request_at: Any = None,
 ) -> dict[str, Any]:
     normalized_provider = str(provider or backend or "").strip().lower()
     provider_reported_operations = max(0, int(operations or 0))
@@ -183,7 +185,26 @@ def build_web_search_metadata(
     )
     normalized_sources = normalize_web_sources(sources, limit=8)
     rate = SEARCH_CREDITS_PER_OPERATION.get(normalized_provider, 0)
-    cost_rate = SEARCH_COST_USD_PER_OPERATION.get(normalized_provider, 0.0)
+    from config.model_pricing import database_pricing_enabled
+    from pricing.engine import calculate
+    from pricing.models import NormalizedLLMUsage, PricingUnavailableError
+
+    cost_audit: dict[str, Any] = {}
+    if database_pricing_enabled() and normalized_provider in SEARCH_COST_USD_PER_OPERATION and normalized_provider != "tavily":
+        from pricing.service import get_snapshot
+
+        card = get_snapshot(normalized_provider, "__web_search__", at=request_at)
+        if card is None:
+            raise PricingUnavailableError(f"PRICING_UNKNOWN for {normalized_provider} web search")
+        result = calculate(NormalizedLLMUsage(units={"web_search_count": provider_reported_operations}), card)
+        cost_audit = {**result.audit(), "rate_card_id": card["rate_card_id"],
+                      "pricing_source": card["pricing_source"], "pricing_version": card["pricing_version"]}
+        provider_cost = float(result.total)
+    else:
+        cost_rate = SEARCH_COST_USD_PER_OPERATION.get(normalized_provider)
+        if cost_rate is None and provider_reported_operations:
+            raise PricingUnavailableError(f"PRICING_UNKNOWN for {normalized_provider} web search")
+        provider_cost = float(Decimal(provider_reported_operations) * Decimal(str(cost_rate or 0)))
     resolved_status = status or ("executed" if normalized_operations else "not_used")
     usage = {
         "provider": normalized_provider,
@@ -195,7 +216,8 @@ def build_web_search_metadata(
         "provider_reported_operations": provider_reported_operations,
         "operation_limit_exceeded": provider_reported_operations > normalized_operations,
         "fixed_credits": normalized_operations * rate,
-        "provider_cost_usd": provider_reported_operations * cost_rate,
+        "provider_cost_usd": provider_cost,
+        "cost_audit": cost_audit,
         "usage_estimated": bool(usage_estimated),
         "error": str(error).strip() if error else None,
         "sources": normalized_sources,

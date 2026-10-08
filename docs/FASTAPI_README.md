@@ -369,7 +369,7 @@ diagnostics, cleanup verification, smoke tests, rollout, and rollback.
 - Completed rows include `prompt_tokens`, `completion_tokens`, `ai_credits`, `credit_usage_estimated`, `research_ai_credits`, and `research_credit_usage_estimated`. The persisted `ai_credits` snapshot includes that response's provider-native search tool charge; the separate research fields remain for legacy shared Tavily rows and are counted once when rebuilding an old Compare aggregate. Legacy rows without a snapshot derive model credits from persisted token counts.
 - Completed rows also expose `cached_input_tokens`, `cache_write_tokens`, `reasoning_tokens`, `cache_hit`, `cache_hit_ratio`, `cache_savings_ai_credits`, and `uncached_equivalent_ai_credits`. Savings remain informational; `ai_credits` is authoritative.
 - Completed model responses retain `requested_model`, provider-reported `served_model`, `pricing_model`, lifecycle/alias resolution, reasoning mode, effective reasoning effort, `routing_mode`, cached-input/cache-write/reasoning token detail, and the exact pricing rule/version. History returns the identity, Smart-versus-explicit routing mode, and pricing-evidence fields needed to reconstruct response-card metadata and explain old charges after the live catalogue changes.
-- If an exact served-model price is absent, the calculator uses the provider's highest current configured rate, marks `pricing_unknown=true`, and persists the full price snapshot; it never turns an unknown model into a zero-dollar response.
+- In legacy pricing mode, an absent exact served-model price uses the provider's highest current configured rate, marks `pricing_unknown=true`, and persists the full price snapshot. Database mode requires applicable approved model-specific pricing and fails explicitly when missing; it does not consult a generic provider fallback or silently record zero cost.
 - The React client groups sidebar items by `session_id`, reconstructs Compare turns by `request_group_id` when a thread is selected, and persists the active thread id as `cortex_active_session_id` so startup can restore the same transcript after a browser refresh/remount.
 - `PATCH /v1/history/session/{session_id}` accepts `{"title":"..."}` to rename one user-owned session. The title is trimmed, limited to 120 characters, and persisted without changing latest-activity ordering.
 - `DELETE /v1/history?session_id=<id>` clears only that session's persisted request rows for the authenticated identity; omitting `session_id` clears all history. React per-thread delete uses `DELETE /v1/history/{entry_id}` for each row in the selected thread.
@@ -870,6 +870,7 @@ psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260820_add_
 psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260829_add_work_web_output_and_model_identity.sql
 psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260905_add_subscription_grants.sql
 psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260927_add_tool_credit_transaction_item.sql
+psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20261007_add_versioned_model_rate_cards.sql
 ```
 
 The first Cortex Analysis migration adds Compare response revision metadata and
@@ -984,3 +985,19 @@ The suites start isolated Vite servers and mock frontend API contracts. Mobile t
 ---
 
 Last updated: 2026-07-29
+
+## Provider rate-card runtime
+
+Runtime snapshot identity includes the official GPT-5.4 Mini served alias.
+Gemini Interactions `completion_tokens` includes output plus thought tokens;
+`reasoning_tokens` retains that subset, so expense and customer credits count it
+once. Scheduled DeepSeek cards use UTC call-start time, weekends and an explicit
+verified holiday calendar, exposing `pricing_tier` and `schedule_calendar_year`
+inside pricing snapshots. Calendar coverage failures are explicit pricing errors.
+Refresh legacy seeds after upgrading scheduled registry versions. Search/Maps
+source charges remain separate review evidence, and unknown media partitions
+are rejected. These repairs add no endpoint or request field; see the runbook.
+Enabled DeepSeek credit multipliers are calibrated for peak expense: Flash
+0.5/1.5 and Pro 1.5/4.0 (input/output), credit version `2026-10-08`.
+
+`MODEL_PRICING_MODE=database` selects approved PostgreSQL rates after the additive 20261007 migration and `scripts/sync_model_pricing.py --seed-legacy`. Default `legacy` is the staged rollout/rollback path. Inference never fetches external prices. Existing response `estimated_cost` remains numeric for compatibility; `pricing_snapshot` now retains `rate_card_id`, `pricing_source`, `normalized_usage`, decimal-string `cost_components_usd` and `usage_calculated_provider_cost_usd`, `selection_reason`, effective interval and `calculation_version`. Ledger metadata records provider snapshots and independent credit policy/version/multipliers. Missing database pricing fails explicitly; stale approved rates continue with audit warnings. The operator CLI supplies sync/dry-run/inspection/override/approval actions; there is no pricing HTTP route. See [pricing operations](runbooks/model-pricing.md).

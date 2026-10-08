@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from functools import lru_cache
 from math import floor
 from typing import Protocol, TypedDict
@@ -134,6 +135,7 @@ class BillableWebSearchUsage:
     fixed_credits: int
     provider_cost_usd: float = 0.0
     usage_estimated: bool = False
+    pricing_snapshot: Mapping[str, object] | None = None
 
 
 class _CreditTransactionItem(TypedDict):
@@ -155,7 +157,7 @@ class _CreditTransactionItem(TypedDict):
     total_credits: int
     uncached_equivalent_credits: int
     cache_savings_credits: int
-    provider_cost_usd: float
+    provider_cost_usd: float | Decimal
     usage_estimated: bool
     pricing_version: str
     metadata: dict[str, object]
@@ -672,13 +674,23 @@ def finalize_reserved_usage(
                 "total_credits": charge.total_credits,
                 "uncached_equivalent_credits": cache_aware_charge.uncached_equivalent_credits,
                 "cache_savings_credits": cache_aware_charge.cache_savings_credits,
-                "provider_cost_usd": max(0.0, float(usage.provider_cost_usd)),
+                "provider_cost_usd": Decimal(
+                    str(
+                        pricing_snapshot.get(
+                            "usage_calculated_provider_cost_usd",
+                            max(0.0, float(usage.provider_cost_usd)),
+                        )
+                    )
+                ),
                 "usage_estimated": charge.estimated,
                 "pricing_version": usage.pricing_version or candidate.credit_pricing_version,
                 "metadata": {
                     "file_context": bool(file_analysis_performed),
                     "prompt_optimization": bool(optimization_performed),
                     "credit_policy_version": CACHE_AWARE_CREDIT_POLICY_VERSION,
+                    "credit_pricing_version": candidate.credit_pricing_version,
+                    "input_credit_multiplier": candidate.input_credit_multiplier,
+                    "output_credit_multiplier": candidate.output_credit_multiplier,
                     "provider_pricing_version": (
                         usage.pricing_version
                         or pricing_snapshot.get("pricing_version")
@@ -759,11 +771,23 @@ def finalize_reserved_usage(
                 "total_credits": fixed_credits,
                 "uncached_equivalent_credits": fixed_credits,
                 "cache_savings_credits": 0,
-                "provider_cost_usd": max(0.0, float(web_usage.provider_cost_usd or 0.0)),
+                "provider_cost_usd": Decimal(
+                    str(
+                        (web_usage.pricing_snapshot or {}).get(
+                            "usage_calculated_provider_cost_usd",
+                            max(0.0, float(web_usage.provider_cost_usd or 0.0)),
+                        )
+                    )
+                ),
                 "usage_estimated": bool(web_usage.usage_estimated),
                 "pricing_version": "web-search-2026-09-27",
                 "metadata": {
                     "tool_kind": "web_search",
+                    **(
+                        {"pricing_snapshot": dict(web_usage.pricing_snapshot)}
+                        if web_usage.pricing_snapshot
+                        else {}
+                    ),
                     "backend": str(web_usage.backend or "").strip().lower(),
                     "operations": operations,
                 },
@@ -851,7 +875,7 @@ def _reconcile_transaction_items(
 
     remaining = max(0, billed_credits)
     reconciled: list[_CreditTransactionItem] = []
-    unbilled_provider_cost = 0.0
+    unbilled_provider_cost = Decimal(0)
     # Fixed search/tool charges are prioritized because they are included in preflight.
     ordered = sorted(
         items,
@@ -862,10 +886,10 @@ def _reconcile_transaction_items(
         item_actual = max(0, int(item.get("total_credits") or 0))
         item_billed = min(item_actual, remaining)
         remaining -= item_billed
-        original_cost = max(0.0, float(item.get("provider_cost_usd") or 0.0))
-        billed_ratio = (item_billed / item_actual) if item_actual else 0.0
+        original_cost = max(Decimal(0), Decimal(str(item.get("provider_cost_usd") or 0)))
+        billed_ratio = (Decimal(item_billed) / Decimal(item_actual)) if item_actual else Decimal(0)
         billed_cost = original_cost * billed_ratio
-        unbilled_provider_cost += max(0.0, original_cost - billed_cost)
+        unbilled_provider_cost += max(Decimal(0), original_cost - billed_cost)
 
         metadata = dict(item.get("metadata") or {})
         metadata.update(
@@ -921,7 +945,8 @@ def _reconcile_transaction_items(
                 "calculated_credits": actual_credits,
                 "billed_credits": billed_credits,
                 "unbilled_credits": max(0, actual_credits - billed_credits),
-                "unbilled_provider_cost_usd": unbilled_provider_cost,
+                "unbilled_provider_cost_usd": float(unbilled_provider_cost),
+                "unbilled_provider_cost_usd_exact": str(unbilled_provider_cost),
             },
         }
     )
