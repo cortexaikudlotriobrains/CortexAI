@@ -1,3 +1,5 @@
+from decimal import Decimal
+from itertools import pairwise
 from types import SimpleNamespace
 from unittest.mock import Mock
 from datetime import datetime, timezone
@@ -16,11 +18,20 @@ from tools.web.native_policy import (
     orchestrator_research_mode,
     resolve_web_search_policy,
 )
+from server.billing.credit_calculator import (
+    CORTEX_CREDITS_PER_TAVILY_CREDIT,
+    DEFAULT_MAX_PROVIDER_USD_PER_MILLION_CREDITS,
+)
 from tools.web.provider_metadata import (
+    SEARCH_COST_SEED_HISTORY,
+    SEARCH_COST_USD_PER_OPERATION,
+    SEARCH_CREDITS_PER_OPERATION,
     build_web_search_metadata,
     normalize_web_sources,
     web_search_fixed_credits,
+    web_search_seed_versions,
 )
+from tools.web.tavily_resolver import TAVILY_CREDITS_PER_ADVANCED_SEARCH
 
 
 def test_new_web_mode_takes_precedence_over_legacy_boolean():
@@ -137,6 +148,44 @@ def test_provider_search_metadata_never_bills_above_product_operation_cap():
     assert usage["operation_limit_exceeded"] is True
     assert usage["fixed_credits"] == 42_000
     assert usage["provider_cost_usd"] == 0.07
+
+
+def test_deepseek_search_prices_two_advanced_tavily_credits():
+    metadata = build_web_search_metadata(
+        provider="deepseek",
+        backend="tavily",
+        requested_mode="auto",
+        effective_mode="auto",
+        operations=2,
+    )
+    usage = metadata["web_search"]
+    assert TAVILY_CREDITS_PER_ADVANCED_SEARCH == 2
+    assert SEARCH_CREDITS_PER_OPERATION["deepseek"] == (
+        TAVILY_CREDITS_PER_ADVANCED_SEARCH * CORTEX_CREDITS_PER_TAVILY_CREDIT
+    )
+    assert usage["fixed_credits"] == 32_000
+    assert usage["provider_cost_usd"] == pytest.approx(0.032)
+
+
+def test_search_credits_match_the_credit_calibration_ceiling():
+    for provider, credits in SEARCH_CREDITS_PER_OPERATION.items():
+        expected = (
+            Decimal(str(SEARCH_COST_USD_PER_OPERATION[provider]))
+            * 1_000_000
+            / DEFAULT_MAX_PROVIDER_USD_PER_MILLION_CREDITS
+        )
+        assert credits == expected, provider
+
+
+def test_web_search_seed_history_is_contiguous_and_ends_at_current_cost():
+    rows = web_search_seed_versions()
+    for provider in SEARCH_COST_SEED_HISTORY:
+        history = [row for row in rows if row["provider"] == provider]
+        for earlier, later in pairwise(history):
+            assert earlier["until"] == later["at"]
+        assert history[-1]["until"] is None
+        assert Decimal(history[-1]["rate"]) == Decimal(str(SEARCH_COST_USD_PER_OPERATION[provider]))
+    assert {row["provider"] for row in rows} == {"openai", "claude", "gemini", "grok", "deepseek"}
 
 
 def test_config_enforces_product_caps(monkeypatch):

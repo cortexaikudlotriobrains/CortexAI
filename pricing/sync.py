@@ -240,7 +240,7 @@ def run_sync(
 
 
 def seed_legacy(db: Session, *, dry_run: bool = False) -> dict[str, int]:
-    from tools.web.provider_metadata import SEARCH_COST_USD_PER_OPERATION
+    from tools.web.provider_metadata import web_search_seed_versions
     from server.work.billing import MANAGED_RUNTIME_USD_PER_HOUR
 
     identities = ModelIdentityMap()
@@ -309,22 +309,21 @@ def seed_legacy(db: Session, *, dry_run: bool = False) -> dict[str, int]:
                         or defaults.get("source_verified_at"),
                     }
                 )
-    for provider, rate in SEARCH_COST_USD_PER_OPERATION.items():
-        if provider not in {"openai", "claude", "gemini", "grok", "deepseek"}:
-            continue
+    for search in web_search_seed_versions():
         rows.append(
             {
-                "provider": provider,
+                "provider": search["provider"],
                 "model": "__web_search__",
                 "rates": validate_rates(
                     {
                         "tokens": {"input": "0", "output": "0"},
-                        "units": {"web_search_count": str(rate)},
+                        "units": {"web_search_count": search["rate"]},
                     }
                 ),
-                "at": "1970-01-01T00:00:00Z",
+                "at": search["at"],
+                "until": search["until"],
                 "reference": "legacy-native-web-search",
-                "version": "2026-09-27",
+                "version": search["version"],
             }
         )
     rows.append(

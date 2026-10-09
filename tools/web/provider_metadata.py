@@ -8,13 +8,17 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 
+# Customer credits per billable operation: provider USD per operation at the
+# credit-calibration ceiling of USD 1 per million raw credits. DeepSeek search
+# is a Tavily advanced search (two Tavily credits at the USD 0.008
+# pay-as-you-go rate), so it costs USD 0.016 and charges 16,000 raw credits.
 SEARCH_CREDITS_PER_OPERATION = {
     "openai": 10_000,
     "claude": 10_000,
     "gemini": 14_000,
     "grok": 5_000,
-    "deepseek": 10_000,
-    "tavily": 10_000,
+    "deepseek": 16_000,
+    "tavily": 16_000,
 }
 
 SEARCH_COST_USD_PER_OPERATION = {
@@ -22,11 +26,51 @@ SEARCH_COST_USD_PER_OPERATION = {
     "claude": 0.010,
     "gemini": 0.014,
     "grok": 0.005,
-    "deepseek": 0.010,
-    "tavily": 0.010,
+    "deepseek": 0.016,
+    "tavily": 0.016,
+}
+
+# Effective-dated history for seeded native-search service cards. Approved
+# rate-card intervals are immutable, so a changed expense closes the earlier
+# seed interval and adds a version instead of rewriting it. Entries are
+# (effective_from, USD per operation, seed version); the last entry must equal
+# SEARCH_COST_USD_PER_OPERATION. Providers without history have one open seed.
+NATIVE_WEB_SEARCH_SEED_PROVIDERS = ("openai", "claude", "gemini", "grok", "deepseek")
+LEGACY_WEB_SEARCH_SEED_FROM = "1970-01-01T00:00:00Z"
+LEGACY_WEB_SEARCH_SEED_VERSION = "2026-09-27"
+SEARCH_COST_SEED_HISTORY: dict[str, tuple[tuple[str, str, str], ...]] = {
+    "deepseek": (
+        (LEGACY_WEB_SEARCH_SEED_FROM, "0.010", LEGACY_WEB_SEARCH_SEED_VERSION),
+        ("2026-10-09T00:00:00Z", "0.016", "2026-10-09"),
+    ),
 }
 
 MAX_BILLABLE_SEARCH_OPERATIONS = 3
+
+
+def web_search_seed_versions() -> list[dict[str, Any]]:
+    """Return effective-dated native-search seed intervals for every provider."""
+
+    rows: list[dict[str, Any]] = []
+    for provider in NATIVE_WEB_SEARCH_SEED_PROVIDERS:
+        history = SEARCH_COST_SEED_HISTORY.get(provider) or (
+            (
+                LEGACY_WEB_SEARCH_SEED_FROM,
+                str(SEARCH_COST_USD_PER_OPERATION[provider]),
+                LEGACY_WEB_SEARCH_SEED_VERSION,
+            ),
+        )
+        for index, (effective_from, rate, version) in enumerate(history):
+            rows.append(
+                {
+                    "provider": provider,
+                    "at": effective_from,
+                    "until": history[index + 1][0] if index + 1 < len(history) else None,
+                    "rate": rate,
+                    "version": version,
+                }
+            )
+    return rows
 
 
 def normalize_web_sources(

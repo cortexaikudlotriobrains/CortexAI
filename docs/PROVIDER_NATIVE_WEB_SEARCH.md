@@ -88,9 +88,13 @@ model-token credits.
 | Claude | 10,000 | $0.010 |
 | Gemini | 14,000 | $0.014 |
 | Grok | 5,000 | $0.005 |
-| DeepSeek via Tavily | 10,000 | $0.010 |
+| DeepSeek via Tavily | 16,000 | $0.016 |
 
-The DeepSeek amount is two Tavily credits at $0.005 each. Search charges are
+The DeepSeek amount is one Tavily Advanced Search: two Tavily credits at the
+$0.008 pay-as-you-go rate. Every row converts provider cost per operation at
+the credit-calibration ceiling of USD 1 per million raw credits. Database seeds
+keep DeepSeek's earlier $0.010 service card for history and add the $0.016
+version from `2026-10-09T00:00:00Z`. Search charges are
 stored as immutable `credit_transactions.item_type='tool'` rows with provider,
 backend, operation count, fixed credits, provider cost, and whether usage was
 estimated. Apply

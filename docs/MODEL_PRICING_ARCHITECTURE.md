@@ -8,7 +8,10 @@ floats. OpenAI, Claude, Gemini, Grok and DeepSeek adapters normalized usage into
 Response snapshots and the immutable credit ledger already retained price evidence.
 
 Customer AI credits use model input/output multipliers and independent fixed tool
-charges, rather than a universal provider-dollar conversion. Existing reservation,
+charges, rather than a universal provider-dollar conversion. A runtime floor keeps
+each multiplier at or above the applied provider rate divided by the credit
+calibration ceiling (USD 1 per million raw credits by default), so long-context
+bands and newly approved higher rates cannot drop below the calibration policy. Existing reservation,
 supplementation, partial Compare settlement and release belong to billing services.
 Cache ratios are the intentional seam between provider rates and input-credit
 policy. Managed Agents have a separate cumulative usage/reported-cost floor.
@@ -127,3 +130,23 @@ The local `.env` already selects database pricing. Restart API/workers to load
 the adapter, identity and credit-configuration repairs. Production deployment
 and scheduler installation remain separate operations; no historical charge
 was rewritten or external candidate approved during these repairs.
+
+## Credit floor and DeepSeek search repricing (2026-10-09 UTC)
+
+- `server/billing/credit_calculator.py` floors input/output credit multipliers at
+  the provider rates selected by each request's pricing snapshot, divided by
+  `CREDIT_MAX_PROVIDER_USD_PER_MILLION_CREDITS` (default `1`, valid `(0, 1]`).
+  Settlement (cache-aware and legacy totals), reservations, DTO credits and Work
+  share the calculator; ledger metadata records the effective multipliers.
+  Example: a 250K-token Gemini 3.1 Pro Preview prompt previously charged its 3/14
+  registry multipliers against the USD 4/18 long-context band (about 1.25x at a
+  USD 14.99 / 9,000-credit plan); it now charges 4/18 (about 1.67x). A 300K-token
+  GPT-5.6 Sol prompt moves from 6/30 against USD 10/45 (about 1.0x) to 10/45.
+- DeepSeek's Tavily-backed search remains Advanced Search and is priced at its
+  real pay-as-you-go cost: two Tavily credits at USD 0.008 (USD 0.016), charged at
+  16,000 raw credits per operation. The legacy research conversion is 8,000 raw
+  credits per Tavily credit. Seed history closes the earlier USD 0.010 DeepSeek
+  search card at `2026-10-09T00:00:00Z` and adds the new version.
+- Validation: Ruff and changed-file MyPy pass; the backend suite passes
+  (1,047 passed, 18 skipped) apart from the pre-existing frontend port assertion in
+  `test_run_app.py` (5173 expected versus the runner's 5174 default).
