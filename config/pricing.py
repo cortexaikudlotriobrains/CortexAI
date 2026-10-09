@@ -1,8 +1,7 @@
-"""Effective-dated provider pricing backed by the canonical model registry.
+"""Effective-dated provider pricing with a staged local rate-card facade.
 
-All monetary rates are USD per one million tokens.  The registry stores the
-official source URL and verification date alongside every provider catalogue;
-this module only selects and applies those immutable rules.
+All token rates are USD per million. The registry supplies product identities
+and legacy bootstrap/rollback rates; database mode uses approved local versions.
 """
 
 from __future__ import annotations
@@ -13,7 +12,6 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-
 
 _DEFAULT_CATALOG_PATH = Path(__file__).resolve().parent / "model_registry.yaml"
 _RUNTIME_MIGRATION_STATES = {"RETIRED", "ALIAS_REDIRECTED"}
@@ -83,9 +81,7 @@ def _find_model_record(
             continue
         canonical = str(raw_model.get("name") or "").strip()
         aliases = {
-            str(alias).strip()
-            for alias in (raw_model.get("aliases") or [])
-            if str(alias).strip()
+            str(alias).strip() for alias in (raw_model.get("aliases") or []) if str(alias).strip()
         }
         if requested == canonical:
             return raw_model, provider_data, False
@@ -135,7 +131,7 @@ def _number(value: Any, *, default: float = 0.0) -> float:
     return float(value)
 
 
-class ModelPricing:
+class RegistryPricing:
     """Read current and historical pricing from ``model_registry.yaml``."""
 
     @classmethod
@@ -177,9 +173,7 @@ class ModelPricing:
             and request_at >= retirement_at
         )
         target = str(
-            lifecycle.get("alias_target")
-            or lifecycle.get("replacement_model")
-            or canonical_model
+            lifecycle.get("alias_target") or lifecycle.get("replacement_model") or canonical_model
         ).strip()
         runtime_model = target if should_migrate else canonical_model
         pricing_model = str(record.get("pricing_model") or runtime_model).strip()
@@ -205,9 +199,7 @@ class ModelPricing:
             )
             or None,
             "lifecycle_source_url": str(
-                record.get("lifecycle_source_url")
-                or defaults.get("lifecycle_source_url")
-                or ""
+                record.get("lifecycle_source_url") or defaults.get("lifecycle_source_url") or ""
             )
             or None,
         }
@@ -247,6 +239,30 @@ class ModelPricing:
             return None
 
         rates: dict[str, Any] = dict(rule)
+        tier = "standard"
+        schedule = rule.get("schedule")
+        if schedule is not None:
+            from pricing.models import validate_rates
+            from pricing.schedules import scheduled_tokens
+
+            schedule_rates = validate_rates(
+                {
+                    "tokens": {
+                        key: rule[key]
+                        for key in (
+                            "input",
+                            "output",
+                            "cached_input",
+                            "cache_write",
+                            "cache_write_1h",
+                        )
+                        if key in rule
+                    },
+                    "schedule": schedule,
+                }
+            )
+            selected, tier = scheduled_tokens(schedule_rates["schedule"], request_at)
+            rates.update(selected)
         long_context = rule.get("long_context")
         long_context_applied = False
         if isinstance(long_context, dict):
@@ -281,6 +297,8 @@ class ModelPricing:
                 f"{catalog.get('catalog_version') or 'unknown'}:{rule.get('id') or 'unknown'}"
             ),
             "processing_mode": mode,
+            "pricing_tier": tier,
+            "schedule_calendar_year": schedule["holiday_calendar"]["year"] if schedule else None,
             "effective_from": str(rule.get("effective_from") or "") or None,
             "effective_until": str(rule.get("effective_until") or "") or None,
             "long_context_applied": long_context_applied,
@@ -340,7 +358,9 @@ class ModelPricing:
 
         providers = _catalog(catalog_path).get("providers", {})
         requested_provider = str(model_type or "").strip().lower()
-        provider_names = [requested_provider] if requested_provider in providers else list(providers)
+        provider_names = (
+            [requested_provider] if requested_provider in providers else list(providers)
+        )
         snapshots: list[dict[str, Any]] = []
         for provider in provider_names:
             block = providers.get(provider)
@@ -422,3 +442,66 @@ class ModelPricing:
                 if pricing is not None:
                     result[provider][name] = pricing
         return result
+
+
+class ModelPricing(RegistryPricing):
+    """Compatibility facade: local DB rate cards after the staged rollout switch.
+
+    The registry retains identities/lifecycle and supplies the explicit legacy
+    mode. A database outage or missing rate never falls through to registry
+    pricing in database mode.
+    """
+
+    @classmethod
+    def get_pricing_snapshot(
+        cls,
+        model_type: str,
+        model_name: str,
+        *,
+        at: datetime | str | None = None,
+        prompt_tokens: int = 0,
+        processing_mode: str = "standard",
+        cache_write_ttl: str = "5m",
+        catalog_path: str | Path | None = None,
+    ) -> dict[str, Any] | None:
+        from config.model_pricing import database_pricing_enabled
+
+        custom_catalog = (
+            catalog_path is not None
+            and Path(catalog_path).resolve() != _DEFAULT_CATALOG_PATH.resolve()
+        )
+        if custom_catalog or not database_pricing_enabled():
+            return RegistryPricing.get_pricing_snapshot(
+                model_type,
+                model_name,
+                at=at,
+                prompt_tokens=prompt_tokens,
+                processing_mode=processing_mode,
+                cache_write_ttl=cache_write_ttl,
+                catalog_path=catalog_path,
+            )
+        from pricing.service import get_snapshot
+
+        identity = cls.resolve_model_identity(model_type, model_name, at=at)
+        canonical = str(identity["pricing_model"]) if identity else model_name
+        return get_snapshot(
+            model_type.lower(),
+            canonical,
+            at=at,
+            prompt_tokens=prompt_tokens,
+            mode=processing_mode,
+            cache_write_ttl=cache_write_ttl,
+        )
+
+    @classmethod
+    def conservative_fallback(cls, model_type: str, **kwargs: Any) -> dict[str, Any] | None:
+        from config.model_pricing import database_pricing_enabled
+
+        catalog_path = kwargs.get("catalog_path")
+        custom_catalog = (
+            catalog_path is not None
+            and Path(catalog_path).resolve() != _DEFAULT_CATALOG_PATH.resolve()
+        )
+        if not custom_catalog and database_pricing_enabled():
+            return None  # Only a model-specific approved persisted fallback is allowed.
+        return RegistryPricing.conservative_fallback(model_type, **kwargs)

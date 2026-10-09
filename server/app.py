@@ -172,6 +172,16 @@ async def lifespan(app: FastAPI):
         from server.billing.schema_preflight import validate_billing_schema
 
         validate_billing_schema()
+        from server.billing.credit_calculator import max_provider_usd_per_million_credits
+
+        # Fail fast on an invalid credit-calibration ceiling instead of at settlement.
+        max_provider_usd_per_million_credits()
+        from config.model_pricing import database_pricing_enabled
+
+        if database_pricing_enabled():
+            from pricing.service import validate_readiness
+
+            validate_readiness()
         logger.info(
             "Billing database schema preflight passed",
             extra={"extra_fields": {"event": "billing.schema_preflight.passed"}},

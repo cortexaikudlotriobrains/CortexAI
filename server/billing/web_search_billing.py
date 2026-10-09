@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from collections.abc import Mapping
 
 from config.web_search import load_native_web_search_config
 from server.billing.credit_calculator import web_search_credit_usage_from_metadata
@@ -64,6 +65,11 @@ def billable_web_search_usages(
                 fixed_credits=usage.cortex_credits,
                 provider_cost_usd=usage.provider_cost_usd,
                 usage_estimated=usage.estimated,
+                pricing_snapshot=(
+                    metadata.get("web_search", {}).get("cost_audit", {})
+                    if isinstance(metadata, Mapping)
+                    else None
+                ),
             )
         )
     return tuple(usages)

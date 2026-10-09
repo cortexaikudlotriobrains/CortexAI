@@ -1,5 +1,10 @@
+from decimal import Decimal
+from itertools import pairwise
 from types import SimpleNamespace
 from unittest.mock import Mock
+from datetime import datetime, timezone
+
+import pytest
 
 from api.claude_client import ClaudeClient
 from api.deepseek_client import DeepSeekClient
@@ -13,11 +18,20 @@ from tools.web.native_policy import (
     orchestrator_research_mode,
     resolve_web_search_policy,
 )
+from server.billing.credit_calculator import (
+    CORTEX_CREDITS_PER_TAVILY_CREDIT,
+    DEFAULT_MAX_PROVIDER_USD_PER_MILLION_CREDITS,
+)
 from tools.web.provider_metadata import (
+    SEARCH_COST_SEED_HISTORY,
+    SEARCH_COST_USD_PER_OPERATION,
+    SEARCH_CREDITS_PER_OPERATION,
     build_web_search_metadata,
     normalize_web_sources,
     web_search_fixed_credits,
+    web_search_seed_versions,
 )
+from tools.web.tavily_resolver import TAVILY_CREDITS_PER_ADVANCED_SEARCH
 
 
 def test_new_web_mode_takes_precedence_over_legacy_boolean():
@@ -136,6 +150,44 @@ def test_provider_search_metadata_never_bills_above_product_operation_cap():
     assert usage["provider_cost_usd"] == 0.07
 
 
+def test_deepseek_search_prices_two_advanced_tavily_credits():
+    metadata = build_web_search_metadata(
+        provider="deepseek",
+        backend="tavily",
+        requested_mode="auto",
+        effective_mode="auto",
+        operations=2,
+    )
+    usage = metadata["web_search"]
+    assert TAVILY_CREDITS_PER_ADVANCED_SEARCH == 2
+    assert SEARCH_CREDITS_PER_OPERATION["deepseek"] == (
+        TAVILY_CREDITS_PER_ADVANCED_SEARCH * CORTEX_CREDITS_PER_TAVILY_CREDIT
+    )
+    assert usage["fixed_credits"] == 32_000
+    assert usage["provider_cost_usd"] == pytest.approx(0.032)
+
+
+def test_search_credits_match_the_credit_calibration_ceiling():
+    for provider, credits in SEARCH_CREDITS_PER_OPERATION.items():
+        expected = (
+            Decimal(str(SEARCH_COST_USD_PER_OPERATION[provider]))
+            * 1_000_000
+            / DEFAULT_MAX_PROVIDER_USD_PER_MILLION_CREDITS
+        )
+        assert credits == expected, provider
+
+
+def test_web_search_seed_history_is_contiguous_and_ends_at_current_cost():
+    rows = web_search_seed_versions()
+    for provider in SEARCH_COST_SEED_HISTORY:
+        history = [row for row in rows if row["provider"] == provider]
+        for earlier, later in pairwise(history):
+            assert earlier["until"] == later["at"]
+        assert history[-1]["until"] is None
+        assert Decimal(history[-1]["rate"]) == Decimal(str(SEARCH_COST_USD_PER_OPERATION[provider]))
+    assert {row["provider"] for row in rows} == {"openai", "claude", "gemini", "grok", "deepseek"}
+
+
 def test_config_enforces_product_caps(monkeypatch):
     monkeypatch.setenv("WEB_SEARCH_MAX_OPERATIONS", "99")
     monkeypatch.setenv("WEB_SEARCH_MAX_DISPLAY_SOURCES", "99")
@@ -147,12 +199,15 @@ def test_config_enforces_product_caps(monkeypatch):
 
 
 def test_legacy_rollout_keeps_default_tavily_reservation():
-    assert web_search_reservation_override(
-        ("openai",),
-        native_enabled=False,
-        search_enabled=True,
-        per_target=False,
-    ) is None
+    assert (
+        web_search_reservation_override(
+            ("openai",),
+            native_enabled=False,
+            search_enabled=True,
+            per_target=False,
+        )
+        is None
+    )
 
 
 def test_native_rollout_can_explicitly_reserve_zero_when_search_is_off():
@@ -285,11 +340,7 @@ def test_gemini_interactions_search_extracts_result_items(monkeypatch):
                     SimpleNamespace(
                         type="text",
                         text="Gemini result",
-                        annotations=[
-                            SimpleNamespace(
-                                source="https://example.com/c", end_index=13
-                            )
-                        ],
+                        annotations=[SimpleNamespace(source="https://example.com/c", end_index=13)],
                     )
                 ],
             ),
@@ -297,7 +348,7 @@ def test_gemini_interactions_search_extracts_result_items(monkeypatch):
         usage=SimpleNamespace(
             total_input_tokens=8,
             total_output_tokens=6,
-            total_tokens=14,
+            total_tokens=16,
             total_cached_tokens=0,
             total_thought_tokens=2,
             grounding_tool_count=[SimpleNamespace(type="google_search", count=1)],
@@ -317,6 +368,8 @@ def test_gemini_interactions_search_extracts_result_items(monkeypatch):
     assert response.text == "Gemini result[1]"
     assert response.metadata["web_search"]["operations"] == 1
     assert response.token_usage.reasoning_tokens == 2
+    assert response.token_usage.completion_tokens == 8
+    assert response.token_usage.total_tokens == 16
     payload = fake_client.interactions.create.call_args.kwargs
     assert payload["tools"] == [{"type": "google_search"}]
     assert payload["input"] == [
@@ -327,6 +380,41 @@ def test_gemini_interactions_search_extracts_result_items(monkeypatch):
     ]
     assert payload["generation_config"]["temperature"] == 0.7
     assert "tool_choice" not in payload["generation_config"]
+
+
+@pytest.mark.parametrize("streamed", [False, True])
+@pytest.mark.parametrize("reported_total", [0, 2675])
+def test_gemini_interactions_bills_answer_and_thought_tokens(monkeypatch, streamed, reported_total):
+    final = SimpleNamespace(
+        steps=[],
+        output_text="Answer",
+        status="completed",
+        model="gemini-3.1-pro-preview",
+        usage=SimpleNamespace(
+            total_input_tokens=255,
+            total_output_tokens=1519,
+            total_thought_tokens=901,
+            total_tokens=reported_total,
+        ),
+    )
+    fake_client = Mock()
+    fake_client.interactions.create.return_value = (
+        iter([SimpleNamespace(event_type="interaction.completed", interaction=final)])
+        if streamed
+        else final
+    )
+    monkeypatch.setattr("api.google_gemini_client.genai.Client", lambda **_: fake_client)
+    observer = Mock(has_emitted=False) if streamed else None
+    response = GeminiClient(api_key="test", model_name="gemini-3.1-pro-preview").get_completion(
+        "Answer this",
+        web_search_policy=_policy("required"),
+        _stream_observer=observer,
+    )
+    assert response.is_success
+    assert response.token_usage.completion_tokens == 2420
+    assert response.token_usage.reasoning_tokens == 901
+    assert response.token_usage.total_tokens == 2675
+    assert response.estimated_cost == pytest.approx(0.02955)
 
 
 def test_gemini_interactions_history_uses_v2_step_roles():
@@ -365,9 +453,7 @@ def test_gemini_3_5_native_search_omits_unsupported_temperature(monkeypatch):
             steps=[
                 SimpleNamespace(
                     type="model_output",
-                    content=[
-                        SimpleNamespace(type="text", text="Gemini result", annotations=[])
-                    ],
+                    content=[SimpleNamespace(type="text", text="Gemini result", annotations=[])],
                 )
             ],
             usage=SimpleNamespace(
@@ -437,6 +523,19 @@ def test_grok_native_search_uses_usage_and_normalizes_inline_citations(monkeypat
 
 
 def test_deepseek_search_loop_requires_only_first_call(monkeypatch):
+    call_times = iter(
+        [
+            datetime(2026, 10, 8, 3, 59, 59, tzinfo=timezone.utc),
+            datetime(2026, 10, 8, 4, 0, 0, tzinfo=timezone.utc),
+        ]
+    )
+
+    class ProviderClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return next(call_times)
+
+    monkeypatch.setattr("api.deepseek_client.datetime", ProviderClock)
     fake_client = Mock()
     tool_call = SimpleNamespace(
         id="call-1",
@@ -482,6 +581,11 @@ def test_deepseek_search_loop_requires_only_first_call(monkeypatch):
     assert response.is_success
     assert response.token_usage.total_tokens == 19
     assert response.metadata["web_search"]["operations"] == 1
+    assert response.estimated_cost == pytest.approx(0.0000075)
+    audit = response.pricing_snapshot
+    assert audit["pricing_tier"] == "mixed"
+    assert [item["pricing_tier"] for item in audit["provider_calls"]] == ["peak", "off_peak"]
+    assert audit["normalized_usage"]["input_tokens"] == 13
     calls = fake_client.chat.completions.create.call_args_list
     assert calls[0].kwargs["tool_choice"] == "required"
     assert calls[1].kwargs["tool_choice"] == "auto"
@@ -525,6 +629,4 @@ def test_deepseek_preserves_search_usage_when_later_model_turn_fails(monkeypatch
     assert response.token_usage.total_tokens == 7
     assert response.metadata["web_search"]["status"] == "error"
     assert response.metadata["web_search"]["operations"] == 1
-    assert response.metadata["web_source_items"] == [
-        {"title": "D", "url": "https://example.com/e"}
-    ]
+    assert response.metadata["web_source_items"] == [{"title": "D", "url": "https://example.com/e"}]

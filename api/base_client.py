@@ -424,6 +424,7 @@ class BaseAIClient(ABC):
             "pricing_rule_applied": str(cost.get("pricing_rule_applied") or "") or None,
             "pricing_unknown": bool(cost.get("pricing_unknown", False)),
             "pricing_snapshot": {
+                **dict(cost.get("cost_audit") or {}),
                 "rule_id": cost.get("pricing_rule_applied"),
                 "pricing_version": cost.get("pricing_version"),
                 "processing_mode": cost.get("processing_mode"),

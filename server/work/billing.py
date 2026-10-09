@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from decimal import Decimal, ROUND_CEILING
+from dataclasses import dataclass, field
+from decimal import Decimal, ROUND_CEILING, localcontext
 from typing import Mapping
+from typing import Any
 
 from orchestrator.model_registry import ModelRegistry
 from server.billing.credit_calculator import calculate_model_credit_charge
+from config.pricing import ModelPricing
+from config.model_pricing import database_pricing_enabled
+from pricing.engine import calculate
+from pricing.models import NormalizedLLMUsage, PricingUnavailableError
 
 WORK_PRICING_VERSION = "managed-agents-2026-08-20"
 MANAGED_RUNTIME_USD_PER_HOUR = Decimal("0.08")
@@ -79,6 +84,7 @@ class WorkCreditUsage:
     component_credits: int
     model: str
     pricing_version: str = WORK_PRICING_VERSION
+    pricing_snapshot: dict[str, Any] = field(default_factory=dict)
 
 
 def calculate_work_credit_usage(
@@ -86,6 +92,7 @@ def calculate_work_credit_usage(
     baseline: Mapping[str, object],
     *,
     model: str,
+    request_at: Any = None,
 ) -> WorkCreditUsage:
     candidate = ModelRegistry.from_yaml().find_model("claude", model)
     if candidate is None or not candidate.enabled:
@@ -109,6 +116,10 @@ def calculate_work_credit_usage(
         + _int(cache_baseline, "ephemeral_1h_input_tokens"),
     )
     active_seconds = _delta(_int(current, "active_seconds"), _int(baseline, "active_seconds"))
+    cache_write_1h = _delta(
+        _int(cache_current, "ephemeral_1h_input_tokens"),
+        _int(cache_baseline, "ephemeral_1h_input_tokens"),
+    )
     tool_current = _nested(current, "server_tool_use")
     tool_baseline = _nested(baseline, "server_tool_use")
     web_searches = _delta(
@@ -116,6 +127,11 @@ def calculate_work_credit_usage(
         _int(tool_baseline, "web_search_requests"),
     )
     prompt_tokens = normal_input + cached + cache_write
+    model_snapshot = ModelPricing.get_pricing_snapshot(
+        "claude", canonical_model, prompt_tokens=prompt_tokens, at=request_at
+    )
+    if model_snapshot is None:
+        raise PricingUnavailableError(f"PRICING_UNKNOWN for Work model {canonical_model}")
 
     charge = calculate_model_credit_charge(
         prompt_tokens=prompt_tokens,
@@ -124,28 +140,65 @@ def calculate_work_credit_usage(
         output_tokens=output_tokens,
         input_credit_multiplier=candidate.input_credit_multiplier,
         output_credit_multiplier=candidate.output_credit_multiplier,
-        pricing_snapshot={
-            "input": candidate.input_cost_per_1m,
-            "cached_input": candidate.cached_input_cost_per_1m,
-            "cache_write": candidate.cache_write_cost_per_1m,
-            "pricing_version": candidate.credit_pricing_version,
-        },
+        pricing_snapshot=model_snapshot,
     )
-    runtime_usd = (Decimal(active_seconds) / Decimal(3600)) * MANAGED_RUNTIME_USD_PER_HOUR
-    web_usd = Decimal(web_searches) * ANTHROPIC_WEB_SEARCH_USD
-    cached_rate = candidate.cached_input_cost_per_1m or candidate.input_cost_per_1m
-    cache_write_rate = candidate.cache_write_cost_per_1m or candidate.input_cost_per_1m
-    model_usd = (
-        Decimal(normal_input) * Decimal(str(candidate.input_cost_per_1m))
-        + Decimal(cached) * Decimal(str(cached_rate))
-        + Decimal(cache_write) * Decimal(str(cache_write_rate))
-        + Decimal(output_tokens) * Decimal(str(candidate.output_cost_per_1m))
-    ) / Decimal(1_000_000)
+    if cache_write_1h and "cache_write_1h" not in model_snapshot:
+        hour_snapshot = ModelPricing.get_pricing_snapshot(
+            "claude",
+            canonical_model,
+            prompt_tokens=prompt_tokens,
+            at=request_at,
+            cache_write_ttl="1h",
+        )
+        if hour_snapshot is None:
+            raise PricingUnavailableError("PRICING_UNKNOWN for Work one-hour cache writes")
+        model_snapshot["cache_write_1h"] = hour_snapshot["cache_write"]
+    token_result = calculate(
+        NormalizedLLMUsage(
+            prompt_tokens, output_tokens, cached, cache_write, cache_write_1h_tokens=cache_write_1h
+        ),
+        model_snapshot,
+    )
+    unit_snapshots: dict[str, dict[str, Any]] = {}
+    if database_pricing_enabled():
+        from pricing.service import get_snapshot
+
+        for key, name in (
+            ("active_seconds", "__managed_runtime__"),
+            ("web_search_count", "__web_search__"),
+        ):
+            card = get_snapshot("claude", name, at=request_at)
+            if card is None:
+                raise PricingUnavailableError(f"PRICING_UNKNOWN for Work {name}")
+            unit_snapshots[key] = card
+    else:
+        for key, rate in (
+            ("active_seconds", MANAGED_RUNTIME_USD_PER_HOUR / Decimal(3600)),
+            ("web_search_count", ANTHROPIC_WEB_SEARCH_USD),
+        ):
+            unit_snapshots[key] = {
+                "input": 0,
+                "output": 0,
+                "cached_input": 0,
+                "cache_write": 0,
+                "unit_rates": {key: str(rate)},
+            }
+    runtime_result = calculate(
+        NormalizedLLMUsage(units={"active_seconds": active_seconds}),
+        unit_snapshots["active_seconds"],
+    )
+    web_result = calculate(
+        NormalizedLLMUsage(units={"web_search_count": web_searches}),
+        unit_snapshots["web_search_count"],
+    )
+    runtime_usd, web_usd, model_usd = runtime_result.total, web_result.total, token_result.total
     runtime_credits = int(
         (runtime_usd * CORTEX_CREDITS_PER_USD).to_integral_value(rounding=ROUND_CEILING)
     )
     web_credits = int((web_usd * CORTEX_CREDITS_PER_USD).to_integral_value(rounding=ROUND_CEILING))
-    reconstructed_provider_cost_usd = model_usd + runtime_usd + web_usd
+    with localcontext() as context:
+        context.prec = 40
+        reconstructed_provider_cost_usd = model_usd + runtime_usd + web_usd
     reported_cost_cents = _delta(_list_cost_cents(current), _list_cost_cents(baseline))
     reported_provider_cost_usd = Decimal(reported_cost_cents) / USD_CENTS_PER_DOLLAR
     provider_floor_credits = int(
@@ -173,6 +226,32 @@ def calculate_work_credit_usage(
         provider_floor_credits=provider_floor_credits,
         component_credits=component_credits,
         model=canonical_model,
+        pricing_snapshot={
+            **model_snapshot,
+            **token_result.audit(),
+            "work_provider_cost_usd": str(
+                max(reconstructed_provider_cost_usd, reported_provider_cost_usd)
+            ),
+            "work_reconstructed_provider_cost_usd": str(reconstructed_provider_cost_usd),
+            "work_reported_provider_cost_usd": str(reported_provider_cost_usd),
+            "rate_card_id": model_snapshot.get("rate_card_id"),
+            "pricing_source": model_snapshot.get("pricing_source"),
+            "rates_per_1m": {
+                key: str(model_snapshot[key])
+                for key in ("input", "output", "cached_input", "cache_write")
+            },
+            "unit_costs": {
+                key: {
+                    **unit_snapshots[key],
+                    **result.audit(),
+                    "rate_card_id": unit_snapshots[key].get("rate_card_id"),
+                }
+                for key, result in (
+                    ("active_seconds", runtime_result),
+                    ("web_search_count", web_result),
+                )
+            },
+        },
     )
 
 
