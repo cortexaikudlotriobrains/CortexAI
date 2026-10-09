@@ -1764,7 +1764,7 @@ def test_chat_dto_adds_formula_based_research_credits():
     base_dto = ChatResponseDTO.from_unified_response(base)
     fresh_dto = ChatResponseDTO.from_unified_response(fresh)
 
-    assert fresh_dto.ai_credits - base_dto.ai_credits == 15_000
+    assert fresh_dto.ai_credits - base_dto.ai_credits == 24_000
 
 
 def test_compare_dto_adds_shared_research_charge_once():
@@ -1802,7 +1802,7 @@ def test_compare_dto_adds_shared_research_charge_once():
 
     dto = CompareResponseDTO.from_multi_unified_response(mur)
 
-    assert dto.total_ai_credits - sum(item.ai_credits for item in dto.responses) == 15_000
+    assert dto.total_ai_credits - sum(item.ai_credits for item in dto.responses) == 24_000
 
 
 def test_compare_never_returns_500(client):

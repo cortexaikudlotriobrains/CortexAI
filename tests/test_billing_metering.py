@@ -727,7 +727,7 @@ def test_provider_reported_research_usage_is_charged_when_model_fails(metering_d
     assert item["total_credits"] == calculate_research_credit_charge(3)
     assert item["metadata"] == {
         "provider_credits_used": 3,
-        "cortex_credits_per_provider_credit": 5_000,
+        "cortex_credits_per_provider_credit": 8_000,
     }
 
 
@@ -820,7 +820,7 @@ def test_research_fallback_usage_is_marked_estimated_in_ledger(metering_db):
     )
 
     item = db.execute(select(tables["credit_transactions"])).mappings().one()
-    assert item["total_credits"] == 10_000
+    assert item["total_credits"] == 16_000
     assert item["usage_estimated"] is True
 
 

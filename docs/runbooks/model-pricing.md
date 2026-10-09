@@ -81,6 +81,7 @@ observations with no user enablement. A missing external record changes only
 | `MODEL_PRICING_MAX_DECREASE_RATIO` | `0.5` | Below 0.5x requires review |
 | `MODEL_PRICING_STALE_HOURS` | `48` | Emit stale evidence while retaining the approved rate |
 | `MODEL_PRICING_CACHE_SECONDS` | `60` | Bounded 0–300 second process cache; database remains authoritative |
+| `CREDIT_MAX_PROVIDER_USD_PER_MILLION_CREDITS` | `1` | Credit-calibration ceiling in `(0, 1]`; multipliers are floored at applied provider rate / ceiling |
 
 New prices without a known baseline, zero transitions, and changes to long-context
 thresholds or charge dimensions require review even with automatic activation.
@@ -226,6 +227,42 @@ version `2026-10-08`, to cover verified peak prices under the existing maximum
 USD 1 per million credits policy. This affects future charges only. Search credit
 caps, reservation/supplement/release behavior and plan entitlements are preserved.
 Cache-aware credit ratios use the effective local provider snapshot, as before.
+
+The credit calculator enforces the same policy at runtime. Each input/output
+multiplier is floored at `applied provider rate / ceiling`, using the rates the
+request's pricing snapshot actually selected; an explicit reasoning rate counts
+toward the output floor. Registry multipliers already meet the ceiling at
+standard rates, so the floor raises charges only for requests priced above
+them: whole-request long-context bands, or an approved card version with a
+higher price. Cache ratios scale from the floored input multiplier. The floor
+applies to settlement (both cache-aware and legacy totals), preflight
+reservations, response DTO credits and Work. Ledger model metadata records
+`effective_input_credit_multiplier`, `effective_output_credit_multiplier`,
+`credit_rate_floor_applied` and `credit_max_provider_usd_per_million_credits`.
+Set `CREDIT_MAX_PROVIDER_USD_PER_MILLION_CREDITS` below `1` to raise the minimum
+margin for every model (for example `0.8333` for roughly 2x at a USD 14.99 /
+9,000-credit plan); values outside `(0, 1]` fail API startup.
+
+## Native search service cards
+
+Search credits per operation equal provider USD per operation at the ceiling:
+OpenAI/Claude 10,000, Gemini 14,000, Grok 5,000 and DeepSeek 16,000. DeepSeek
+search is a Tavily Advanced Search (two Tavily credits at the USD 0.008
+pay-as-you-go rate, USD 0.016). Seeded history in
+`tools/web/provider_metadata.py` keeps DeepSeek's earlier USD 0.010 card and
+adds the USD 0.016 version from `2026-10-09T00:00:00Z`. After upgrading, rerun
+`--seed-legacy --dry-run`, `--seed-legacy` and `--inspect`; seeding closes the
+old interval without rewriting it. A database that should switch at a different
+time can use a manual override instead:
+
+```json
+{
+  "provider": "deepseek",
+  "model": "__web_search__",
+  "processing_mode": "standard",
+  "rates": {"tokens": {"input": "0", "output": "0"}, "units": {"web_search_count": "0.016"}, "bands": []}
+}
+```
 
 ## Failure behavior and visibility
 

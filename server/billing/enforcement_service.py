@@ -29,6 +29,8 @@ from server.billing.credit_calculator import (
     calculate_credit_charge,
     calculate_model_credit_charge,
     calculate_research_credit_charge,
+    floor_credit_multipliers,
+    max_provider_usd_per_million_credits,
 )
 from server.billing.credit_estimator import estimate_model_credits, fallback_actual_tokens
 from server.billing.entitlement_service import (
@@ -552,6 +554,7 @@ def _usage_charge(
         input_multiplier=candidate.input_credit_multiplier,
         output_multiplier=candidate.output_credit_multiplier,
         estimated=estimated,
+        pricing_snapshot=usage.pricing_snapshot,
     )
     cache_aware_charge = calculate_model_credit_charge(
         prompt_tokens=input_tokens,
@@ -644,7 +647,13 @@ def finalize_reserved_usage(
             input_multiplier=candidate.input_credit_multiplier,
             output_multiplier=candidate.output_credit_multiplier,
             estimated=cache_aware_charge.estimated,
+            pricing_snapshot=pricing_snapshot,
         ).total_credits
+        effective_input_multiplier, effective_output_multiplier = floor_credit_multipliers(
+            input_credit_multiplier=candidate.input_credit_multiplier,
+            output_credit_multiplier=candidate.output_credit_multiplier,
+            pricing_snapshot=pricing_snapshot,
+        )
         reservation_estimate = next(
             (
                 item
@@ -691,6 +700,17 @@ def finalize_reserved_usage(
                     "credit_pricing_version": candidate.credit_pricing_version,
                     "input_credit_multiplier": candidate.input_credit_multiplier,
                     "output_credit_multiplier": candidate.output_credit_multiplier,
+                    "effective_input_credit_multiplier": str(effective_input_multiplier),
+                    "effective_output_credit_multiplier": str(effective_output_multiplier),
+                    "credit_rate_floor_applied": (
+                        effective_input_multiplier
+                        > Decimal(str(candidate.input_credit_multiplier))
+                        or effective_output_multiplier
+                        > Decimal(str(candidate.output_credit_multiplier))
+                    ),
+                    "credit_max_provider_usd_per_million_credits": str(
+                        max_provider_usd_per_million_credits()
+                    ),
                     "provider_pricing_version": (
                         usage.pricing_version
                         or pricing_snapshot.get("pricing_version")

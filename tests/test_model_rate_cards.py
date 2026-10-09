@@ -611,6 +611,34 @@ def test_seed_upgrade_closes_old_interval_and_rejects_peak_only_candidate(pricin
         approve_candidate(db, candidate["id"], actor="test", reason="test")
 
 
+def test_seed_versions_deepseek_web_search_without_rewriting_history(pricing_db):
+    db, repo = pricing_db
+    old = repo.add(
+        provider="deepseek",
+        model="__web_search__",
+        source="LEGACY_CORTEX",
+        rates=validate_rates(
+            {"tokens": {"input": "0", "output": "0"}, "units": {"web_search_count": "0.01"}}
+        ),
+        at="1970-01-01T00:00:00Z",
+        reference="legacy-native-web-search",
+        version="2026-09-27",
+    )
+    seed_legacy(db)
+    cards = repo.list_cards("deepseek", "__web_search__")
+    retained = next(card for card in cards if str(card["id"]) == str(old["id"]))
+    assert retained["effective_to"] == utc("2026-10-09T00:00:00Z").replace(tzinfo=None)
+    assert retained["fingerprint"] == old["fingerprint"]
+
+    def search_cost(at: str) -> Decimal:
+        card = select_card(repo.list_cards("deepseek", "__web_search__"), utc(at))
+        return calculate(NormalizedLLMUsage(units={"web_search_count": 1}), snapshot(card)).total
+
+    assert search_cost("2026-10-08T12:00:00Z") == Decimal("0.01")
+    assert search_cost("2026-10-09T00:00:00Z") == Decimal("0.016")
+    assert seed_legacy(db)["added"] == 0
+
+
 @pytest.mark.parametrize("payload", [b"[]", b"{}", b'{"x":NaN}', b'{"x":{},"x":{}}', b"malformed"])
 def test_malformed_source_fails_safely(payload):
     with pytest.raises((ValueError, TypeError)):
