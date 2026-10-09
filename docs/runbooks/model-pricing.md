@@ -27,6 +27,13 @@ LiteLLM is a synchronization source, never an inference gateway or request depen
    rates as explicit service cards. Repeat seeding does not create duplicates.
    These are known legacy values, not newly verified provider prices.
 4. Run `tests/test_model_rate_cards.py` and the pricing/credit/provider/Work tests.
+   Include the typed pricing service in the local MyPy check; checking only the
+   test with skipped imports does not validate the imported selector/snapshot signatures:
+
+   ```powershell
+   venv\Scripts\python.exe -m mypy --explicit-package-bases --follow-imports=skip pricing/service.py tests/test_model_rate_cards.py
+   ```
+
 5. Set `MODEL_PRICING_MODE=database` and restart every API/worker. Startup verifies
    the schema and approved pricing for enabled models and required service cards.
    Runtime needs SELECT on pricing tables and normal response/ledger privileges;

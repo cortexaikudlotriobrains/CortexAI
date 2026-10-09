@@ -1347,7 +1347,7 @@ It runs:
 
 - `.github/workflows/ci.yml`:
   - path-aware frontend/backend quality checks
-  - changed-file Python Ruff/MyPy gates with pinned dev tool versions
+  - changed-file Python Ruff/MyPy gates, including changed test modules, with pinned dev tool versions
   - Black format check is advisory until the repository has a formatting baseline
   - frontend artifact build
   - API image build metadata export

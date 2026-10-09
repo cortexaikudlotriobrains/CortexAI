@@ -632,6 +632,7 @@ def test_seed_versions_deepseek_web_search_without_rewriting_history(pricing_db)
 
     def search_cost(at: str) -> Decimal:
         card = select_card(repo.list_cards("deepseek", "__web_search__"), utc(at))
+        assert card is not None
         return calculate(NormalizedLLMUsage(units={"web_search_count": 1}), snapshot(card)).total
 
     assert search_cost("2026-10-08T12:00:00Z") == Decimal("0.01")
