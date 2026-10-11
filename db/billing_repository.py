@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_EVEN, localcontext
 from typing import Any, TypeAlias
 from uuid import UUID, uuid4
 
@@ -1251,7 +1251,7 @@ def create_credit_transaction(
     cache_write_credits: int = 0,
     output_credits: int = 0,
     fixed_credits: int = 0,
-    provider_cost_usd: float = 0.0,
+    provider_cost_usd: float | Decimal = 0.0,
     uncached_equivalent_credits: int = 0,
     cache_savings_credits: int = 0,
     usage_estimated: bool = False,
@@ -1281,10 +1281,18 @@ def create_credit_transaction(
     for label, value in numeric_values.items():
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             raise ValueError(f"{label} must be a nonnegative integer")
-    if provider_cost_usd < 0:
+    provider_decimal = Decimal(str(provider_cost_usd))
+    if not provider_decimal.is_finite() or provider_decimal < 0:
         raise ValueError("provider_cost_usd must be nonnegative")
 
     transactions = _table("credit_transactions")
+    scale = getattr(transactions.c.provider_cost_usd.type, "scale", None)
+    if scale is not None:
+        with localcontext() as context:
+            context.prec = 40
+            provider_decimal = provider_decimal.quantize(
+                Decimal(1).scaleb(-scale), rounding=ROUND_HALF_EVEN
+            )
     values = {
         "id": _new_id_for(transactions),
         "billing_account_id": billing_account_id,
@@ -1311,7 +1319,7 @@ def create_credit_transaction(
         "total_credits": total_credits,
         "uncached_equivalent_credits": uncached_equivalent_credits,
         "cache_savings_credits": cache_savings_credits,
-        "provider_cost_usd": provider_cost_usd,
+        "provider_cost_usd": provider_decimal,
         "usage_estimated": bool(usage_estimated),
         "pricing_version": _required_text(pricing_version, "pricing_version"),
         "metadata": dict(metadata or {}),

@@ -7,6 +7,15 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+@pytest.fixture(autouse=True)
+def isolated_pricing_mode(monkeypatch):
+    """Unit tests must not inherit an operator's database-pricing rollout flag.
+
+    Tests exercising persisted rates explicitly opt into database mode.
+    """
+    monkeypatch.setenv("MODEL_PRICING_MODE", "legacy")
+
+
 @pytest.fixture(scope="session")
 def api_key():
     """Fixture to provide the API key from environment variables."""

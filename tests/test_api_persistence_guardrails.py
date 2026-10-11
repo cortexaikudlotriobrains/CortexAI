@@ -1821,7 +1821,7 @@ def test_stream_chat_and_compare_share_one_session_id_in_done_events(db_mode_fas
     restored_chat = history_by_request_id[chat_card["request_id"]]
     assert restored_chat["ai_credits"] == chat_card["ai_credits"]
     assert restored_chat["credit_usage_estimated"] == chat_card["credit_usage_estimated"]
-    assert restored_chat["research_ai_credits"] == 10_000
+    assert restored_chat["research_ai_credits"] == 16_000
     assert restored_chat["prompt_tokens"] == 2
     assert restored_chat["completion_tokens"] == 3
 

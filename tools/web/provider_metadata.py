@@ -3,17 +3,22 @@
 from __future__ import annotations
 
 import re
+from decimal import Decimal
 from collections.abc import Iterable, Mapping
 from typing import Any
 
 
+# Customer credits per billable operation: provider USD per operation at the
+# credit-calibration ceiling of USD 1 per million raw credits. DeepSeek search
+# is a Tavily advanced search (two Tavily credits at the USD 0.008
+# pay-as-you-go rate), so it costs USD 0.016 and charges 16,000 raw credits.
 SEARCH_CREDITS_PER_OPERATION = {
     "openai": 10_000,
     "claude": 10_000,
     "gemini": 14_000,
     "grok": 5_000,
-    "deepseek": 10_000,
-    "tavily": 10_000,
+    "deepseek": 16_000,
+    "tavily": 16_000,
 }
 
 SEARCH_COST_USD_PER_OPERATION = {
@@ -21,11 +26,51 @@ SEARCH_COST_USD_PER_OPERATION = {
     "claude": 0.010,
     "gemini": 0.014,
     "grok": 0.005,
-    "deepseek": 0.010,
-    "tavily": 0.010,
+    "deepseek": 0.016,
+    "tavily": 0.016,
+}
+
+# Effective-dated history for seeded native-search service cards. Approved
+# rate-card intervals are immutable, so a changed expense closes the earlier
+# seed interval and adds a version instead of rewriting it. Entries are
+# (effective_from, USD per operation, seed version); the last entry must equal
+# SEARCH_COST_USD_PER_OPERATION. Providers without history have one open seed.
+NATIVE_WEB_SEARCH_SEED_PROVIDERS = ("openai", "claude", "gemini", "grok", "deepseek")
+LEGACY_WEB_SEARCH_SEED_FROM = "1970-01-01T00:00:00Z"
+LEGACY_WEB_SEARCH_SEED_VERSION = "2026-09-27"
+SEARCH_COST_SEED_HISTORY: dict[str, tuple[tuple[str, str, str], ...]] = {
+    "deepseek": (
+        (LEGACY_WEB_SEARCH_SEED_FROM, "0.010", LEGACY_WEB_SEARCH_SEED_VERSION),
+        ("2026-10-09T00:00:00Z", "0.016", "2026-10-09"),
+    ),
 }
 
 MAX_BILLABLE_SEARCH_OPERATIONS = 3
+
+
+def web_search_seed_versions() -> list[dict[str, Any]]:
+    """Return effective-dated native-search seed intervals for every provider."""
+
+    rows: list[dict[str, Any]] = []
+    for provider in NATIVE_WEB_SEARCH_SEED_PROVIDERS:
+        history = SEARCH_COST_SEED_HISTORY.get(provider) or (
+            (
+                LEGACY_WEB_SEARCH_SEED_FROM,
+                str(SEARCH_COST_USD_PER_OPERATION[provider]),
+                LEGACY_WEB_SEARCH_SEED_VERSION,
+            ),
+        )
+        for index, (effective_from, rate, version) in enumerate(history):
+            rows.append(
+                {
+                    "provider": provider,
+                    "at": effective_from,
+                    "until": history[index + 1][0] if index + 1 < len(history) else None,
+                    "rate": rate,
+                    "version": version,
+                }
+            )
+    return rows
 
 
 def normalize_web_sources(
@@ -174,6 +219,7 @@ def build_web_search_metadata(
     status: str | None = None,
     usage_estimated: bool = False,
     error: str | None = None,
+    request_at: Any = None,
 ) -> dict[str, Any]:
     normalized_provider = str(provider or backend or "").strip().lower()
     provider_reported_operations = max(0, int(operations or 0))
@@ -183,7 +229,26 @@ def build_web_search_metadata(
     )
     normalized_sources = normalize_web_sources(sources, limit=8)
     rate = SEARCH_CREDITS_PER_OPERATION.get(normalized_provider, 0)
-    cost_rate = SEARCH_COST_USD_PER_OPERATION.get(normalized_provider, 0.0)
+    from config.model_pricing import database_pricing_enabled
+    from pricing.engine import calculate
+    from pricing.models import NormalizedLLMUsage, PricingUnavailableError
+
+    cost_audit: dict[str, Any] = {}
+    if database_pricing_enabled() and normalized_provider in SEARCH_COST_USD_PER_OPERATION and normalized_provider != "tavily":
+        from pricing.service import get_snapshot
+
+        card = get_snapshot(normalized_provider, "__web_search__", at=request_at)
+        if card is None:
+            raise PricingUnavailableError(f"PRICING_UNKNOWN for {normalized_provider} web search")
+        result = calculate(NormalizedLLMUsage(units={"web_search_count": provider_reported_operations}), card)
+        cost_audit = {**result.audit(), "rate_card_id": card["rate_card_id"],
+                      "pricing_source": card["pricing_source"], "pricing_version": card["pricing_version"]}
+        provider_cost = float(result.total)
+    else:
+        cost_rate = SEARCH_COST_USD_PER_OPERATION.get(normalized_provider)
+        if cost_rate is None and provider_reported_operations:
+            raise PricingUnavailableError(f"PRICING_UNKNOWN for {normalized_provider} web search")
+        provider_cost = float(Decimal(provider_reported_operations) * Decimal(str(cost_rate or 0)))
     resolved_status = status or ("executed" if normalized_operations else "not_used")
     usage = {
         "provider": normalized_provider,
@@ -195,7 +260,8 @@ def build_web_search_metadata(
         "provider_reported_operations": provider_reported_operations,
         "operation_limit_exceeded": provider_reported_operations > normalized_operations,
         "fixed_credits": normalized_operations * rate,
-        "provider_cost_usd": provider_reported_operations * cost_rate,
+        "provider_cost_usd": provider_cost,
+        "cost_audit": cost_audit,
         "usage_estimated": bool(usage_estimated),
         "error": str(error).strip() if error else None,
         "sources": normalized_sources,

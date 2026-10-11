@@ -83,6 +83,7 @@ def calculate_response_credit_usage(
                 input_multiplier=candidate.input_credit_multiplier,
                 output_multiplier=candidate.output_credit_multiplier,
                 estimated=model_usage_estimated,
+                pricing_snapshot=pricing_snapshot,
             )
             cache_charge = calculate_model_credit_charge(
                 prompt_tokens=resolved_input_tokens,

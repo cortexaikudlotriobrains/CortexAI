@@ -110,6 +110,7 @@ providers:
             output: 0.60
 
       - name: "gpt-5.4-mini"
+        aliases: ["gpt-5.4-mini-2026-03-17"]
         display_name: "GPT-5.4 Mini"
         description: "Balanced GPT-5.4 model for everyday reasoning and coding."
         tier: "T2"
@@ -583,14 +584,15 @@ providers:
       max_attachments_per_request: 0
     models:
       - name: "deepseek-v4-flash"
+        aliases: ["deepseek-flash"]
         display_name: "DeepSeek V4 Flash"
         description: "Fast DeepSeek V4 model with thinking controlled as a request mode."
         tier: "T1"
         billing_class: "economical"
         input_credit_multiplier: 0.5
-        output_credit_multiplier: 1.0
+        output_credit_multiplier: 1.5
         credit_usage_label: "Very low"
-        credit_pricing_version: "2026-07-31"
+        credit_pricing_version: "2026-10-08"
         context_limit: 1000000
         max_output_tokens: 384000
         tags: ["fast", "reasoning", "coding", "cheap", "long_context"]
@@ -607,19 +609,50 @@ providers:
           - id: "deepseek-v4-flash-standard-20260731"
             processing_mode: "standard"
             effective_from: "2026-04-24T00:00:00Z"
+            effective_until: "2026-10-08T00:00:00Z"
             input: 0.14
             cached_input: 0.0028
             output: 0.28
+          - id: "deepseek-v4-flash-standard-20261008"
+            processing_mode: "standard"
+            effective_from: "2026-10-08T00:00:00Z"
+            source_verified_at: "2026-10-08"
+            input: 0.30
+            cached_input: 0.006
+            cache_write: 0
+            cache_write_1h: 0
+            output: 1.20
+            schedule:
+              timezone: "UTC"
+              peak_weekdays: [0, 1, 2, 3, 4]
+              peak_windows: [["01:00", "04:00"], ["06:00", "10:00"]]
+              holiday_calendar: &deepseek_holidays_2026
+                year: 2026
+                source_url: "https://www.gov.cn/zhengce/content/202511/content_7047090.htm"
+                ranges:
+                  - ["2026-01-01", "2026-01-03"]
+                  - ["2026-02-15", "2026-02-23"]
+                  - ["2026-04-04", "2026-04-06"]
+                  - ["2026-05-01", "2026-05-05"]
+                  - ["2026-06-19", "2026-06-21"]
+                  - ["2026-09-25", "2026-09-27"]
+                  - ["2026-10-01", "2026-10-07"]
+              off_peak_tokens:
+                input: 0.15
+                cached_input: 0.003
+                cache_write: 0
+                cache_write_1h: 0
+                output: 0.60
 
       - name: "deepseek-v4-pro"
         display_name: "DeepSeek V4 Pro"
         description: "Higher-capability DeepSeek V4 model with thinking controlled as a request mode."
         tier: "T3"
         billing_class: "standard"
-        input_credit_multiplier: 1.0
-        output_credit_multiplier: 2.0
+        input_credit_multiplier: 1.5
+        output_credit_multiplier: 4.0
         credit_usage_label: "Low"
-        credit_pricing_version: "2026-07-31"
+        credit_pricing_version: "2026-10-08"
         context_limit: 1000000
         max_output_tokens: 384000
         tags: ["strong", "reasoning", "coding", "cheap", "long_context"]
@@ -636,9 +669,30 @@ providers:
           - id: "deepseek-v4-pro-standard-20260731"
             processing_mode: "standard"
             effective_from: "2026-04-24T00:00:00Z"
+            effective_until: "2026-10-08T00:00:00Z"
             input: 0.435
             cached_input: 0.003625
             output: 0.87
+          - id: "deepseek-v4-pro-standard-20261008"
+            processing_mode: "standard"
+            effective_from: "2026-10-08T00:00:00Z"
+            source_verified_at: "2026-10-08"
+            input: 1.32
+            cached_input: 0.044
+            cache_write: 0
+            cache_write_1h: 0
+            output: 3.96
+            schedule:
+              timezone: "UTC"
+              peak_weekdays: [0, 1, 2, 3, 4]
+              peak_windows: [["01:00", "04:00"], ["06:00", "10:00"]]
+              holiday_calendar: *deepseek_holidays_2026
+              off_peak_tokens:
+                input: 0.66
+                cached_input: 0.022
+                cache_write: 0
+                cache_write_1h: 0
+                output: 1.98
 
       - name: "deepseek-chat"
         display_name: "DeepSeek Chat"
@@ -646,9 +700,9 @@ providers:
         tier: "T1"
         billing_class: "economical"
         input_credit_multiplier: 0.5
-        output_credit_multiplier: 1.0
+        output_credit_multiplier: 1.5
         credit_usage_label: "Very low"
-        credit_pricing_version: "2026-07-31"
+        credit_pricing_version: "2026-10-08"
         context_limit: 128000
         max_output_tokens: 8192
         tags: ["retired", "compatibility"]
@@ -668,9 +722,9 @@ providers:
         tier: "T3"
         billing_class: "economical"
         input_credit_multiplier: 0.5
-        output_credit_multiplier: 1.0
+        output_credit_multiplier: 1.5
         credit_usage_label: "Very low"
-        credit_pricing_version: "2026-07-31"
+        credit_pricing_version: "2026-10-08"
         context_limit: 128000
         max_output_tokens: 65536
         tags: ["retired", "compatibility", "reasoning"]

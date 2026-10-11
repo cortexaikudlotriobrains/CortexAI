@@ -4,6 +4,14 @@ This map is the quick "where do I change X?" reference for the current API-first
 
 ## Runtime Entrypoints
 
+- Provider rate-card subsystem: `pricing/models.py`, `pricing/engine.py`,
+  `pricing/identity.py`, `pricing/service.py`, `pricing/schedules.py`,
+  `pricing/sources.py`, `pricing/sync.py`;
+  configuration: `config/model_pricing.py`; persistence: `db/pricing_repository.py`,
+  `db/migrations/20261007_add_versioned_model_rate_cards.sql`; operator CLI:
+  `scripts/sync_model_pricing.py`. Architecture and staged rollout:
+  `docs/MODEL_PRICING_ARCHITECTURE.md`, `docs/runbooks/model-pricing.md`.
+
 - Full local app runner and guarded Free/Plus/Pro/unrestricted IntelliJ profiles: `run_app.py`; effective local profile construction: `server/billing/subscription_service.py`
 - API server: `run_server.py`
 - Main FastAPI app wiring: `server/app.py`
@@ -40,7 +48,7 @@ This map is the quick "where do I change X?" reference for the current API-first
 ## Config Sources of Truth
 
 - Provider catalog and defaults: `config/providers.yaml`
-- Canonical model catalogue, lifecycle, official source evidence, effective-dated provider pricing, smart-router metadata, and consumer credit metadata: `config/model_registry.yaml`; loaders/resolution: `config/pricing.py`, `orchestrator/model_registry.py`
+- Product model catalogue, lifecycle, official evidence, legacy bootstrap rates, smart-router metadata, and consumer credit metadata: `config/model_registry.yaml`; `config/pricing.py` selects approved PostgreSQL provider rates in database mode; registry construction: `orchestrator/model_registry.py`
 - Canonical generation v3 Auto policy, explicit profiles, and operational ceiling: `config/generation_profiles.yaml`; provider/model/prompt/context resolver: `orchestrator/generation_policy.py`; reservation-affordability clamp: `server/generation_service.py`; normalized terminal status: `orchestrator/completion_status.py`
 - Subscription placement is data-driven through each registry row's `billing_class` and the plan catalogue's allowed classes. Claude Sonnet 4.6 is `advanced` (Plus/Pro), while Claude Opus 4.5 and 4.6 are `premium` (Pro); do not duplicate per-model plan lists elsewhere.
 - Consumer subscription plans: `config/subscription_plans.yaml`
@@ -157,7 +165,7 @@ This map is the quick "where do I change X?" reference for the current API-first
   3. Update `README.md`, `docs/PROVIDER_NATIVE_WEB_SEARCH.md`, `docs/TAVILY_INTEGRATION.md`, Postman, and logging/runbook docs when contracts, pricing, caps, or telemetry change
 
 - Change token/cost behavior:
-  1. Verify current pricing/lifecycle against official provider pages, then update the effective-dated record and `source_verified_at` in `config/model_registry.yaml`
+  1. Use `scripts/sync_model_pricing.py --dry-run` and candidate review/manual override for provider-rate changes in database mode; verify against official provider evidence. Product identity/lifecycle changes and legacy bootstrap/rollback rates remain registry-owned. See `docs/runbooks/model-pricing.md`.
   2. Update provider usage extraction only when the provider SDK response shape changes; `config/pricing.py` must stay a loader/resolver, not a second price table
   3. Preserve requested/served/pricing identity and pricing snapshot fields through `UnifiedResponse`, persistence, history, and reporting
   4. Update contract docs and tests

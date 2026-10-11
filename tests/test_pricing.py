@@ -22,7 +22,7 @@ from utils.cost_calculator import CostCalculator
     ],
 )
 def test_key_model_pricing_values(provider, model, expected_input, expected_output):
-    pricing = ModelPricing.get_model_pricing(provider, model)
+    pricing = ModelPricing.get_model_pricing(provider, model, at="2026-10-07T00:00:00Z")
     assert pricing is not None
     assert pricing["input"] == pytest.approx(expected_input)
     assert pricing["output"] == pytest.approx(expected_output)
@@ -64,9 +64,7 @@ def test_active_claude_4_models_use_official_cache_rates(
     assert five_minute["cache_write"] == expected_write_5m
     assert five_minute["output"] == expected_output
     assert one_hour["cache_write"] == expected_write_1h
-    assert five_minute["source_url"] == (
-        "https://platform.claude.com/docs/en/about-claude/pricing"
-    )
+    assert five_minute["source_url"] == ("https://platform.claude.com/docs/en/about-claude/pricing")
 
 
 def test_get_model_pricing_provider_case_insensitive():

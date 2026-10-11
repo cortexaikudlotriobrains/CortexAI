@@ -8,14 +8,25 @@ module.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_CEILING
+from decimal import Decimal, InvalidOperation, ROUND_CEILING
 from typing import Any
 
 from tools.web.provider_metadata import SEARCH_CREDITS_PER_OPERATION
 
-CORTEX_CREDITS_PER_TAVILY_CREDIT = 5_000
+# Credit calibration ceiling: provider USD per one million raw credit units.
+# One raw unit is 1/1,000 of a displayed AI credit, so this is also the provider
+# USD covered by 1,000 displayed credits. Registry multipliers are calibrated to
+# it for standard-context prices; the runtime floor below applies the same
+# ceiling to whatever rate a request actually used.
+DEFAULT_MAX_PROVIDER_USD_PER_MILLION_CREDITS = Decimal("1")
+MAX_PROVIDER_USD_PER_MILLION_CREDITS_ENV = "CREDIT_MAX_PROVIDER_USD_PER_MILLION_CREDITS"
+
+# One Tavily API credit at the USD 0.008 pay-as-you-go rate, converted at the
+# calibration ceiling. Advanced search consumes two Tavily credits.
+CORTEX_CREDITS_PER_TAVILY_CREDIT = 8_000
 TAVILY_ADVANCED_SEARCH_CREDIT_ESTIMATE = 2
 # Research preflight reserves the normal Advanced Search cost. Settlement uses
 # the provider-reported usage instead of treating this as a flat fee.
@@ -140,8 +151,13 @@ def calculate_credit_charge(
     output_multiplier: float | Decimal,
     fixed_credits: int = 0,
     estimated: bool = False,
+    pricing_snapshot: Mapping[str, Any] | None = None,
 ) -> CreditCharge:
-    """Return the legacy uncached charge through the shared calculator."""
+    """Return the legacy uncached charge through the shared calculator.
+
+    A supplied pricing snapshot only applies the provider-rate floor; every
+    prompt token is still charged at the (floored) normal input multiplier.
+    """
 
     if isinstance(input_tokens, bool) or not isinstance(input_tokens, int) or input_tokens < 0:
         raise ValueError("input_tokens must be a nonnegative integer")
@@ -153,6 +169,7 @@ def calculate_credit_charge(
         output_tokens=output_tokens,
         input_credit_multiplier=input_multiplier,
         output_credit_multiplier=output_multiplier,
+        pricing_snapshot=pricing_snapshot,
         fixed_credits=fixed_credits,
         estimated=estimated,
     )
@@ -174,7 +191,9 @@ def calculate_model_credit_charge(
 
     Provider cache quantities are clamped into a disjoint partition of prompt
     tokens. Missing or invalid pricing evidence falls back to the full input
-    multiplier and can never create an unsupported discount.
+    multiplier and can never create an unsupported discount. Multipliers are
+    floored at the provider rates the snapshot applied (see
+    ``floor_credit_multipliers``) before cache ratios are derived.
     """
 
     for label, value in (
@@ -187,8 +206,11 @@ def calculate_model_credit_charge(
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             raise ValueError(f"{label} must be a nonnegative integer")
 
-    input_rate = _positive_decimal(input_credit_multiplier, "input_credit_multiplier")
-    output_rate = _positive_decimal(output_credit_multiplier, "output_credit_multiplier")
+    input_rate, output_rate = floor_credit_multipliers(
+        input_credit_multiplier=input_credit_multiplier,
+        output_credit_multiplier=output_credit_multiplier,
+        pricing_snapshot=pricing_snapshot,
+    )
     cached_tokens = min(prompt_tokens, cached_input_tokens)
     cache_write = min(max(0, prompt_tokens - cached_tokens), cache_write_tokens)
     normal_tokens = prompt_tokens - cached_tokens - cache_write
@@ -230,6 +252,75 @@ def calculate_model_credit_charge(
     )
 
 
+def max_provider_usd_per_million_credits() -> Decimal:
+    """Return the configured credit-calibration ceiling (default USD 1).
+
+    Lower values raise the minimum credit charge for every request whose
+    applied provider rate exceeds the ceiling; values above the default would
+    weaken the registry calibration and are rejected.
+    """
+
+    raw = str(os.getenv(MAX_PROVIDER_USD_PER_MILLION_CREDITS_ENV, "") or "").strip()
+    if not raw:
+        return DEFAULT_MAX_PROVIDER_USD_PER_MILLION_CREDITS
+    try:
+        value = Decimal(raw)
+    except InvalidOperation as exc:
+        raise ValueError(
+            f"{MAX_PROVIDER_USD_PER_MILLION_CREDITS_ENV} must be a decimal in (0, 1]"
+        ) from exc
+    if (
+        not value.is_finite()
+        or value <= 0
+        or value > DEFAULT_MAX_PROVIDER_USD_PER_MILLION_CREDITS
+    ):
+        raise ValueError(
+            f"{MAX_PROVIDER_USD_PER_MILLION_CREDITS_ENV} must be a decimal in (0, 1]"
+        )
+    return value
+
+
+def floor_credit_multipliers(
+    *,
+    input_credit_multiplier: float | Decimal,
+    output_credit_multiplier: float | Decimal,
+    pricing_snapshot: Mapping[str, Any] | None,
+) -> tuple[Decimal, Decimal]:
+    """Raise registry multipliers to cover the provider rates a request used.
+
+    Registry multipliers are calibrated against standard-context prices. A
+    request can apply a higher rate, such as a whole-request long-context band
+    or a newly approved rate-card version, so each multiplier is floored at
+    ``applied rate / calibration ceiling``. An explicit reasoning rate counts
+    toward the output floor. Missing or invalid evidence leaves the registry
+    multiplier unchanged, and the floor never lowers a multiplier.
+    """
+
+    input_rate = _positive_decimal(input_credit_multiplier, "input_credit_multiplier")
+    output_rate = _positive_decimal(output_credit_multiplier, "output_credit_multiplier")
+    rates = _snapshot_rates(pricing_snapshot)
+    applied_input = _nonnegative_decimal(rates.get("input"))
+    applied_output = max(
+        (
+            rate
+            for rate in (
+                _nonnegative_decimal(rates.get("output")),
+                _nonnegative_decimal(rates.get("reasoning")),
+            )
+            if rate is not None
+        ),
+        default=None,
+    )
+    if not applied_input and not applied_output:
+        return input_rate, output_rate
+    ceiling = max_provider_usd_per_million_credits()
+    if applied_input:
+        input_rate = max(input_rate, applied_input / ceiling)
+    if applied_output:
+        output_rate = max(output_rate, applied_output / ceiling)
+    return input_rate, output_rate
+
+
 def resolve_cache_credit_multipliers(
     *,
     input_credit_multiplier: float | Decimal,
@@ -240,10 +331,7 @@ def resolve_cache_credit_multipliers(
     normal_multiplier = _positive_decimal(
         input_credit_multiplier, "input_credit_multiplier"
     )
-    rates: Mapping[str, Any] = {}
-    if isinstance(pricing_snapshot, Mapping):
-        nested = pricing_snapshot.get("rates_per_1m")
-        rates = nested if isinstance(nested, Mapping) else pricing_snapshot
+    rates = _snapshot_rates(pricing_snapshot)
 
     normal_price = _nonnegative_decimal(rates.get("input"))
     cached_price = _nonnegative_decimal(rates.get("cached_input"))
@@ -262,6 +350,15 @@ def resolve_cache_credit_multipliers(
         else normal_multiplier
     )
     return cached_multiplier, cache_write_multiplier
+
+
+def _snapshot_rates(pricing_snapshot: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    """Return applied per-million rates from either snapshot shape."""
+
+    if not isinstance(pricing_snapshot, Mapping):
+        return {}
+    nested = pricing_snapshot.get("rates_per_1m")
+    return nested if isinstance(nested, Mapping) else pricing_snapshot
 
 
 def _positive_decimal(value: float | Decimal, label: str) -> Decimal:

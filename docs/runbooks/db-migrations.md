@@ -84,6 +84,7 @@ psql "$env:MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260820_
 psql "$env:MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260829_add_work_web_output_and_model_identity.sql
 psql "$env:MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260905_add_subscription_grants.sql
 psql "$env:MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260927_add_tool_credit_transaction_item.sql
+psql "$env:MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20261007_add_versioned_model_rate_cards.sql
 ```
 
 The `20260727` script alters `llm_requests`, so the migration connection must
@@ -103,6 +104,19 @@ billing/approval audit and provider-session recovery.
 output ceiling and one-time enforcement markers, actual provider/Agent/billing
 identity, and the `output_limit_reached` status. Apply it after the base Work
 migration and before deploying an API that enables Work schema preflight.
+
+### Provider rate-card migration
+
+`20261007_add_versioned_model_rate_cards.sql` creates immutable versioned provider
+rates, catalog observations and synchronization audits. It adds nullable
+`llm_responses.rate_card_id` and a precise numeric usage-calculated provider total,
+without assigning rates to old rows or recalculating billing. Apply with the
+table owner, seed the existing catalog, verify parity, then restart with
+`MODEL_PRICING_MODE=database`; the default `legacy` mode remains the staged
+rollout/rollback switch. Runtime pricing never fetches external catalogs.
+See [pricing operations](model-pricing.md) for privileges, seed/review commands,
+activation constraints, scheduling and failure behavior. Retain additive tables
+and historical cards on rollback.
 
 ### Cortex-issued subscription grant migration
 

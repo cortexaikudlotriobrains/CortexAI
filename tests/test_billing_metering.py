@@ -727,7 +727,7 @@ def test_provider_reported_research_usage_is_charged_when_model_fails(metering_d
     assert item["total_credits"] == calculate_research_credit_charge(3)
     assert item["metadata"] == {
         "provider_credits_used": 3,
-        "cortex_credits_per_provider_credit": 5_000,
+        "cortex_credits_per_provider_credit": 8_000,
     }
 
 
@@ -820,7 +820,7 @@ def test_research_fallback_usage_is_marked_estimated_in_ledger(metering_db):
     )
 
     item = db.execute(select(tables["credit_transactions"])).mappings().one()
-    assert item["total_credits"] == 10_000
+    assert item["total_credits"] == 16_000
     assert item["usage_estimated"] is True
 
 
@@ -912,8 +912,8 @@ def test_smart_routing_reserves_allowed_worst_case_and_settles_actual(metering_d
         research_provider_credits_used=0,
     )
     persisted = repository.get_usage_reservation_by_id(db, reservation.reservation_id)
-    assert persisted["settled_quantities"]["ai_credits"] == 50
-    assert reserved > 50
+    assert persisted["settled_quantities"]["ai_credits"] == 70
+    assert reserved > 70
 
 
 def test_smart_routing_skips_unaffordable_expensive_candidate(

@@ -1,6 +1,7 @@
 import importlib
 import sys
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 from config.cache_optimization import (
@@ -50,7 +51,7 @@ def _resolve_anthropic_module():
         raise ValueError(
             "anthropic package is not available in the active interpreter "
             f"({sys.executable}). Install dependencies into this interpreter with "
-            f"\"{sys.executable}\" -m pip install -r requirements.txt. "
+            f'"{sys.executable}" -m pip install -r requirements.txt. '
             f"Import error: {exc}"
         ) from exc
 
@@ -164,9 +165,10 @@ class ClaudeClient(BaseAIClient):
         operations = 0
         for part in parts:
             part_type = str(field_value(part, "type", "") or "").lower()
-            if part_type == "server_tool_use" and str(
-                field_value(part, "name", "") or ""
-            ).lower() == "web_search":
+            if (
+                part_type == "server_tool_use"
+                and str(field_value(part, "name", "") or "").lower() == "web_search"
+            ):
                 operations += 1
             if part_type == "web_search_tool_result":
                 for result in sequence_value(field_value(part, "content", [])):
@@ -327,15 +329,17 @@ class ClaudeClient(BaseAIClient):
             except Exception as request_exc:
                 if stream_observer is not None and stream_observer.has_emitted:
                     raise
-                dropped_param, retry_payload = self._build_retry_payload_without_unsupported_parameter(
-                    request_payload,
-                    request_exc,
-                    safe_parameters={
-                        "temperature",
-                        "top_p",
-                        "max_tokens",
-                        "cache_control",
-                    },
+                dropped_param, retry_payload = (
+                    self._build_retry_payload_without_unsupported_parameter(
+                        request_payload,
+                        request_exc,
+                        safe_parameters={
+                            "temperature",
+                            "top_p",
+                            "max_tokens",
+                            "cache_control",
+                        },
+                    )
                 )
                 if retry_payload is not None and dropped_param is not None:
                     logger.warning(
@@ -386,10 +390,18 @@ class ClaudeClient(BaseAIClient):
                 else CostCalculator("claude", served_model)
             )
             cost = calculator.calculate_cost(
-                token_usage.prompt_tokens,
-                token_usage.completion_tokens,
+                request_at=datetime.fromtimestamp(start_time, timezone.utc),
+                prompt_tokens=token_usage.prompt_tokens,
+                completion_tokens=token_usage.completion_tokens,
                 cached_input_tokens=token_usage.cached_input_tokens,
                 cache_write_tokens=token_usage.cache_write_tokens,
+                cache_write_1h_tokens=self._usage_int(
+                    self._usage_field(
+                        self._usage_field(usage, "cache_creation", {}),
+                        "ephemeral_1h_input_tokens",
+                        0,
+                    )
+                ),
             )
             estimated_cost = cost["total_cost"]
 
@@ -428,6 +440,7 @@ class ClaudeClient(BaseAIClient):
                 "endpoint": "messages.stream" if stream_observer is not None else "messages.create",
                 "pricing_unknown": bool(cost.get("pricing_unknown", False)),
                 **build_web_search_metadata(
+                    request_at=datetime.fromtimestamp(start_time, timezone.utc),
                     provider="claude",
                     backend="web_search",
                     requested_mode=str(web_search_policy.get("requested_mode") or "off"),

@@ -7,10 +7,13 @@ from config.pricing import ModelPricing
 from server.billing.credit_calculator import (
     ADVANCED_WEB_SEARCH_CREDITS,
     CORTEX_CREDITS_PER_TAVILY_CREDIT,
+    MAX_PROVIDER_USD_PER_MILLION_CREDITS_ENV,
     TAVILY_ADVANCED_SEARCH_CREDIT_ESTIMATE,
     calculate_credit_charge,
     calculate_model_credit_charge,
     calculate_research_credit_charge,
+    floor_credit_multipliers,
+    max_provider_usd_per_million_credits,
     research_credit_usage_from_metadata,
 )
 from server.billing.credit_estimator import estimate_model_credits, estimate_text_tokens
@@ -84,7 +87,7 @@ def test_research_preflight_reserves_the_normal_advanced_search_cost():
 
 @pytest.mark.parametrize(
     ("provider_credits", "expected_cortex_credits"),
-    [(0, 0), (1, 5_000), (2, 10_000), (3, 15_000)],
+    [(0, 0), (1, 8_000), (2, 16_000), (3, 24_000)],
 )
 def test_research_charge_scales_with_provider_usage(
     provider_credits,
@@ -112,7 +115,7 @@ def test_research_metadata_uses_reported_usage_and_never_charges_reuse():
 
     assert (fresh.provider_credits_used, fresh.cortex_credits, fresh.estimated) == (
         3,
-        15_000,
+        24_000,
         False,
     )
     assert (reused.provider_credits_used, reused.cortex_credits) == (0, 0)
@@ -123,7 +126,7 @@ def test_legacy_research_metadata_uses_marked_two_credit_fallback():
         {"research_used": True, "research_reused": False}
     )
     assert usage.provider_credits_used == 2
-    assert usage.cortex_credits == 10_000
+    assert usage.cortex_credits == 16_000
     assert usage.estimated is True
 
 
@@ -137,7 +140,7 @@ def test_provider_usage_is_billable_even_when_no_sources_were_usable():
         }
     )
     assert usage.provider_credits_used == 2
-    assert usage.cortex_credits == 10_000
+    assert usage.cortex_credits == 16_000
     assert usage.estimated is False
 
 
@@ -182,10 +185,13 @@ def test_credit_calculator_rejects_negative_accounting_inputs(field):
         )
 
 
+# Rates stay within the USD 1 per million credits calibration for the unit
+# multiplier used below, so these cases isolate cache ratios from the
+# provider-rate floor (cached reads at 10% and cache writes at 125% of input).
 CACHE_PRICING = {
-    "input": 2.0,
-    "cached_input": 0.2,
-    "cache_write": 2.5,
+    "input": 1.0,
+    "cached_input": 0.1,
+    "cache_write": 1.25,
 }
 
 
@@ -290,3 +296,150 @@ def test_reservation_uses_expensive_cache_write_multiplier():
         output_multiplier=candidate.output_credit_multiplier,
     )
     assert estimate.charge.input_credits > normal_only.input_credits
+
+
+# Gemini 3.1 Pro Preview's whole-request band above 200K prompt tokens, against
+# its 3 / 14 registry multipliers.
+LONG_CONTEXT_RATES = {
+    "long_context_applied": True,
+    "rates_per_1m": {
+        "input": "4.0",
+        "cached_input": "0.4",
+        "cache_write": "4.0",
+        "output": "18.0",
+    },
+}
+
+
+def test_default_credit_calibration_ceiling_is_one_dollar(monkeypatch):
+    monkeypatch.delenv(MAX_PROVIDER_USD_PER_MILLION_CREDITS_ENV, raising=False)
+    assert max_provider_usd_per_million_credits() == Decimal("1")
+
+
+def test_long_context_rates_floor_registry_multipliers_at_the_ceiling():
+    charge = calculate_model_credit_charge(
+        prompt_tokens=250_000,
+        output_tokens=1_000,
+        input_credit_multiplier=3,
+        output_credit_multiplier=14,
+        pricing_snapshot=LONG_CONTEXT_RATES,
+    )
+    # USD 4 and USD 18 per million at USD 1 per million credits replace 3 and 14.
+    assert charge.input_credits == 1_000_000
+    assert charge.output_credits == 18_000
+    assert charge.total_credits == 1_018_000
+
+
+def test_rates_within_the_ceiling_keep_registry_multipliers():
+    charge = calculate_model_credit_charge(
+        prompt_tokens=4_000,
+        output_tokens=800,
+        input_credit_multiplier=3,
+        output_credit_multiplier=14,
+        pricing_snapshot={"input": 2.0, "cached_input": 0.2, "output": 12.0},
+    )
+    assert (charge.input_credits, charge.output_credits) == (12_000, 11_200)
+
+
+def test_floor_raises_cache_multipliers_with_the_input_floor():
+    charge = calculate_model_credit_charge(
+        prompt_tokens=250_000,
+        cached_input_tokens=200_000,
+        output_tokens=0,
+        input_credit_multiplier=3,
+        output_credit_multiplier=14,
+        pricing_snapshot=LONG_CONTEXT_RATES,
+    )
+    assert charge.normal_input_credits == 200_000
+    assert charge.cached_input_credits == 80_000
+    assert charge.uncached_equivalent_credits == 1_000_000
+
+
+def test_legacy_charge_applies_the_floor_only_with_a_snapshot():
+    floored = calculate_credit_charge(
+        input_tokens=250_000,
+        output_tokens=1_000,
+        input_multiplier=3,
+        output_multiplier=14,
+        pricing_snapshot=LONG_CONTEXT_RATES,
+    )
+    registry_only = calculate_credit_charge(
+        input_tokens=250_000,
+        output_tokens=1_000,
+        input_multiplier=3,
+        output_multiplier=14,
+    )
+    assert floored.total_credits == 1_018_000
+    assert registry_only.total_credits == 764_000
+
+
+def test_explicit_reasoning_rate_counts_toward_the_output_floor():
+    assert floor_credit_multipliers(
+        input_credit_multiplier=1,
+        output_credit_multiplier=4,
+        pricing_snapshot={"input": 1.0, "output": 4.0, "reasoning": 6.0},
+    ) == (Decimal("1"), Decimal("6"))
+
+
+def test_floor_never_lowers_a_multiplier_and_ignores_missing_evidence():
+    assert floor_credit_multipliers(
+        input_credit_multiplier=6,
+        output_credit_multiplier=30,
+        pricing_snapshot={"rates_per_1m": {"input": "5", "output": "25"}},
+    ) == (Decimal("6"), Decimal("30"))
+    for snapshot in (None, {}, {"rates_per_1m": {"input": None, "output": "bad"}}):
+        assert floor_credit_multipliers(
+            input_credit_multiplier=3,
+            output_credit_multiplier=14,
+            pricing_snapshot=snapshot,
+        ) == (Decimal("3"), Decimal("14"))
+
+
+def test_configured_ceiling_scales_the_floor(monkeypatch):
+    monkeypatch.setenv(MAX_PROVIDER_USD_PER_MILLION_CREDITS_ENV, "0.8")
+    assert floor_credit_multipliers(
+        input_credit_multiplier=3,
+        output_credit_multiplier=14,
+        pricing_snapshot=LONG_CONTEXT_RATES,
+    ) == (Decimal("5"), Decimal("22.5"))
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "1.5", "abc", "NaN", "Infinity"])
+def test_invalid_credit_calibration_ceiling_is_rejected(monkeypatch, value):
+    monkeypatch.setenv(MAX_PROVIDER_USD_PER_MILLION_CREDITS_ENV, value)
+    with pytest.raises(ValueError, match=MAX_PROVIDER_USD_PER_MILLION_CREDITS_ENV):
+        max_provider_usd_per_million_credits()
+
+
+def test_reservation_covers_the_long_context_floor():
+    candidate = ModelRegistry.from_yaml().find_model("gemini", "gemini-3.1-pro-preview")
+    assert candidate is not None
+    estimate = estimate_model_credits(candidate, input_text="x" * 700_000, max_output_tokens=1)
+    snapshot = ModelPricing.get_pricing_snapshot(
+        "gemini",
+        "gemini-3.1-pro-preview",
+        prompt_tokens=estimate.input_tokens,
+    )
+    assert snapshot is not None and snapshot["long_context_applied"] is True
+    assert estimate.charge.input_credits == estimate.input_tokens * 4
+
+
+def test_every_enabled_long_context_band_is_covered_by_the_floor():
+    checked = 0
+    for candidate in ModelRegistry.from_yaml().list_models(include_disabled=False):
+        snapshot = ModelPricing.get_pricing_snapshot(
+            candidate.provider,
+            candidate.model_name,
+            prompt_tokens=2_000_000,
+        )
+        if not snapshot or not snapshot.get("long_context_applied"):
+            continue
+        input_rate, output_rate = floor_credit_multipliers(
+            input_credit_multiplier=candidate.input_credit_multiplier,
+            output_credit_multiplier=candidate.output_credit_multiplier,
+            pricing_snapshot=snapshot,
+        )
+        assert Decimal(str(snapshot["input"])) / input_rate <= 1, candidate.model_name
+        assert Decimal(str(snapshot["output"])) / output_rate <= 1, candidate.model_name
+        checked += 1
+    assert checked > 0

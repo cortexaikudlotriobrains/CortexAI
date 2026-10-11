@@ -50,6 +50,15 @@ Anthropic configuration; unresolved items are enumerated in
 
 ## Configuration inventory
 
+Provider pricing can use versioned PostgreSQL rate cards after the migration and
+seed in [provider rate-card operations](model-pricing.md). In database mode, Work
+selects token, search and managed-runtime cards at `work_runs.created_at`; the
+ledger retains normalized usage, Decimal components and each card reference.
+Mixed cache-write durations have separate provider expense rates. Customer
+credit multipliers, reservation limits and the reported provider `list_cost`
+minimum remain in the existing Work billing policy. A missing approved card is
+an explicit pricing failure; external synchronization is outside the run path.
+
 Required for production Work:
 
 - `CORTEX_WORK_ENABLED`

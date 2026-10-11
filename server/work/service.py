@@ -12,6 +12,7 @@ import socket
 from typing import Any, Mapping, Sequence
 from uuid import UUID, uuid4
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 from fastapi import HTTPException, status
 
@@ -737,7 +738,8 @@ def _usage_for_run(
     baseline_raw = config_snapshot.get("provider_usage_baseline")
     baseline = baseline_raw if isinstance(baseline_raw, Mapping) else {}
     model = str(run.get("billing_model_id") or config_snapshot.get("billing_model_id") or "")
-    return calculate_work_credit_usage(current_usage, baseline, model=model)
+    return calculate_work_credit_usage(current_usage, baseline, model=model,
+                                       request_at=run.get("created_at"))
 
 
 def _settle_work_billing(db: Any, run: Mapping[str, object], usage: WorkCreditUsage) -> int:
@@ -788,7 +790,9 @@ def _settle_work_billing(db: Any, run: Mapping[str, object], usage: WorkCreditUs
         output_credits=min(max(0, billed - usage.input_credits), usage.output_credits),
         fixed_credits=max(0, billed - min(billed, usage.model_credits)),
         total_credits=billed,
-        provider_cost_usd=usage.provider_cost_usd,
+        provider_cost_usd=Decimal(
+            str(usage.pricing_snapshot.get("work_provider_cost_usd", usage.provider_cost_usd))
+        ),
         uncached_equivalent_credits=billed,
         usage_estimated=True,
         pricing_version=usage.pricing_version,
@@ -809,6 +813,7 @@ def _settle_work_billing(db: Any, run: Mapping[str, object], usage: WorkCreditUs
             "managed_component_credits": usage.component_credits,
             "managed_provider_floor_credits": usage.provider_floor_credits,
             "managed_reported_provider_cost_usd": usage.reported_provider_cost_usd,
+            "pricing_snapshot": usage.pricing_snapshot,
             "managed_reconstructed_provider_cost_usd": usage.reconstructed_provider_cost_usd,
             "calculated_credits": usage.total_credits,
             "unbilled_credits": max(0, usage.total_credits - billed),
@@ -1266,6 +1271,7 @@ def reconcile_work_run(
                 usage_snapshot=dict(provider_session.usage),
                 provider_cost_snapshot={
                     "provider": agent.name,
+                    "pricing_snapshot": usage.pricing_snapshot,
                     "estimated_provider_cost_usd": usage.provider_cost_usd,
                     "reported_provider_cost_usd": usage.reported_provider_cost_usd,
                     "reconstructed_provider_cost_usd": usage.reconstructed_provider_cost_usd,

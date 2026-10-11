@@ -1,5 +1,6 @@
 import json
 import time
+from datetime import datetime, timezone
 from dataclasses import replace
 from typing import Any, Callable
 
@@ -150,6 +151,8 @@ class DeepSeekClient(BaseAIClient):
             search_operations = 0
             search_sources: list[dict[str, str]] = []
             search_usage_estimated = False
+            provider_calls: list[dict[str, Any]] = []
+            provider_started_at = datetime.fromtimestamp(start_time, timezone.utc)
 
             try:
                 if web_search_enabled:
@@ -159,12 +162,14 @@ class DeepSeekClient(BaseAIClient):
                         search_operations,
                         search_sources,
                         search_usage_estimated,
+                        provider_calls,
                     ) = self._run_web_search_loop(
                         request_payload=request_payload,
                         policy=web_search_policy,
                         executor=web_search_executor,
                     )
                 else:
+                    provider_started_at = datetime.now(timezone.utc)
                     response = self.client.chat.completions.create(**request_payload)
                     token_usage = self._openai_compatible_token_usage(
                         response.usage if hasattr(response, "usage") else None
@@ -197,6 +202,7 @@ class DeepSeekClient(BaseAIClient):
                             }
                         },
                     )
+                    provider_started_at = datetime.now(timezone.utc)
                     response = self.client.chat.completions.create(**retry_payload)
                     token_usage = self._openai_compatible_token_usage(
                         response.usage if hasattr(response, "usage") else None
@@ -222,12 +228,17 @@ class DeepSeekClient(BaseAIClient):
                 if self.cost_calculator.model_name == served_model
                 else CostCalculator("deepseek", served_model)
             )
-            cost = calculator.calculate_cost(
-                token_usage.prompt_tokens,
-                token_usage.completion_tokens,
-                cached_input_tokens=token_usage.cached_input_tokens,
-                cache_write_tokens=token_usage.cache_write_tokens,
-                reasoning_tokens=token_usage.reasoning_tokens,
+            cost = (
+                calculator.calculate_calls(provider_calls)
+                if provider_calls
+                else calculator.calculate_cost(
+                    request_at=provider_started_at,
+                    prompt_tokens=token_usage.prompt_tokens,
+                    completion_tokens=token_usage.completion_tokens,
+                    cached_input_tokens=token_usage.cached_input_tokens,
+                    cache_write_tokens=token_usage.cache_write_tokens,
+                    reasoning_tokens=token_usage.reasoning_tokens,
+                )
             )
             estimated_cost = cost["total_cost"]
 
@@ -283,13 +294,12 @@ class DeepSeekClient(BaseAIClient):
                 "endpoint": "chat.completions",
                 "pricing_unknown": bool(cost.get("pricing_unknown", False)),
                 **build_web_search_metadata(
+                    request_at=datetime.fromtimestamp(start_time, timezone.utc),
                     provider="deepseek",
                     backend="tavily",
                     requested_mode=str(web_search_policy.get("requested_mode") or "off"),
                     effective_mode=(
-                        str(web_search_policy.get("mode") or "off")
-                        if web_search_enabled
-                        else "off"
+                        str(web_search_policy.get("mode") or "off") if web_search_enabled else "off"
                     ),
                     operations=search_operations,
                     sources=search_sources,
@@ -344,11 +354,10 @@ class DeepSeekClient(BaseAIClient):
                     error_response,
                     token_usage=e.token_usage,
                     metadata=build_web_search_metadata(
+                        request_at=datetime.fromtimestamp(start_time, timezone.utc),
                         provider="deepseek",
                         backend="tavily",
-                        requested_mode=str(
-                            web_search_policy.get("requested_mode") or "off"
-                        ),
+                        requested_mode=str(web_search_policy.get("requested_mode") or "off"),
                         effective_mode=str(web_search_policy.get("mode") or "off"),
                         operations=e.operations,
                         sources=e.sources,
@@ -365,7 +374,7 @@ class DeepSeekClient(BaseAIClient):
         request_payload: dict[str, Any],
         policy: dict[str, Any],
         executor: Callable[[str], dict[str, Any]],
-    ) -> tuple[Any, TokenUsage, int, list[dict[str, str]], bool]:
+    ) -> tuple[Any, TokenUsage, int, list[dict[str, str]], bool, list[dict[str, Any]]]:
         """Run the bounded client-side tool loop used only by DeepSeek."""
         cap = max(1, min(3, int(policy.get("max_operations") or 3)))
         payload = dict(request_payload)
@@ -380,9 +389,7 @@ class DeepSeekClient(BaseAIClient):
                 ),
                 "parameters": {
                     "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "minLength": 2, "maxLength": 500}
-                    },
+                    "properties": {"query": {"type": "string", "minLength": 2, "maxLength": 500}},
                     "required": ["query"],
                     "additionalProperties": False,
                 },
@@ -398,10 +405,12 @@ class DeepSeekClient(BaseAIClient):
         usage_estimated = False
         source_candidates: list[dict[str, str]] = []
         final_response: Any = None
+        provider_calls: list[dict[str, Any]] = []
 
         for _round in range(cap + 1):
             payload["messages"] = messages
             try:
+                provider_started_at = datetime.now(timezone.utc)
                 final_response = self.client.chat.completions.create(**payload)
             except Exception as exc:
                 raise _DeepSeekWebSearchLoopError(
@@ -411,11 +420,22 @@ class DeepSeekClient(BaseAIClient):
                     sources=normalize_web_sources(source_candidates, limit=8),
                     usage_estimated=usage_estimated,
                 ) from exc
-            total_usage = self._add_usage(
-                total_usage,
-                self._openai_compatible_token_usage(
-                    final_response.usage if hasattr(final_response, "usage") else None
-                ),
+            call_usage = self._openai_compatible_token_usage(
+                final_response.usage if hasattr(final_response, "usage") else None
+            )
+            total_usage = self._add_usage(total_usage, call_usage)
+            provider_calls.append(
+                {
+                    "model": self._served_model(
+                        getattr(final_response, "model", payload["model"]), payload["model"]
+                    ),
+                    "request_at": provider_started_at,
+                    "prompt_tokens": call_usage.prompt_tokens,
+                    "completion_tokens": call_usage.completion_tokens,
+                    "cached_input_tokens": call_usage.cached_input_tokens,
+                    "cache_write_tokens": call_usage.cache_write_tokens,
+                    "reasoning_tokens": call_usage.reasoning_tokens,
+                }
             )
             choices = getattr(final_response, "choices", None) or []
             if not choices:
@@ -504,6 +524,7 @@ class DeepSeekClient(BaseAIClient):
             operations,
             normalize_web_sources(source_candidates, limit=8),
             usage_estimated,
+            provider_calls,
         )
 
     @staticmethod

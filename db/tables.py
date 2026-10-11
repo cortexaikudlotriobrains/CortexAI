@@ -30,6 +30,9 @@ _tables_lock = Lock()
 
 # All table names in the database
 TABLE_NAMES = [
+    "model_rate_cards",
+    "pricing_catalog_observations",
+    "pricing_sync_runs",
     "users",
     "api_keys",
     "api_key_settings",

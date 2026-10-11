@@ -12,6 +12,7 @@ import hashlib
 import json
 import zlib
 from datetime import date, datetime, timedelta
+from decimal import Decimal, ROUND_HALF_EVEN, localcontext
 from typing import Any, Mapping
 from uuid import UUID, uuid4
 
@@ -1346,9 +1347,19 @@ def create_llm_response(db: Session, llm_request_id: UUID, response: UnifiedResp
         "pricing_version": response.pricing_version,
         "pricing_unknown": response.pricing_unknown,
         "pricing_snapshot": dict(response.pricing_snapshot or {}),
+        "rate_card_id": (response.pricing_snapshot or {}).get("rate_card_id"),
+        "usage_calculated_provider_cost_usd": (response.pricing_snapshot or {}).get(
+            "usage_calculated_provider_cost_usd"
+        ),
         "completion_status": (response.metadata or {}).get("completion_status", "complete"),
         "stop_cause": (response.metadata or {}).get("stop_cause", "unknown"),
     }
+    if audit_values["usage_calculated_provider_cost_usd"] is not None:
+        with localcontext() as context:
+            context.prec = 40
+            audit_values["usage_calculated_provider_cost_usd"] = Decimal(
+                str(audit_values["usage_calculated_provider_cost_usd"])
+            ).quantize(Decimal("0.000000000000001"), rounding=ROUND_HALF_EVEN)
     values.update({key: value for key, value in audit_values.items() if key in column_names})
 
     stmt = insert(llm_responses).values(**values)
@@ -2664,9 +2675,7 @@ def get_compare_analysis_sources(
     response_error_expr = (
         llm_responses.c.error_message if "error_message" in resp_cols else literal(None)
     )
-    routing_trace_expr = (
-        routing_decisions.c.trace if "trace" in routing_cols else literal(None)
-    )
+    routing_trace_expr = routing_decisions.c.trace if "trace" in routing_cols else literal(None)
     created_expr = llm_requests.c.created_at if "created_at" in req_cols else llm_requests.c.id
     group_text_expr = func.lower(cast(llm_requests.c.request_group_id, String))
     group_match = or_(
@@ -3095,9 +3104,7 @@ def get_llm_history_entries(
 
     resp_text_col = llm_responses.c.text if "text" in resp_cols else None
     resp_latency_col = llm_responses.c.latency_ms if "latency_ms" in resp_cols else None
-    resp_prompt_tokens_col = (
-        llm_responses.c.prompt_tokens if "prompt_tokens" in resp_cols else None
-    )
+    resp_prompt_tokens_col = llm_responses.c.prompt_tokens if "prompt_tokens" in resp_cols else None
     resp_completion_tokens_col = (
         llm_responses.c.completion_tokens if "completion_tokens" in resp_cols else None
     )
@@ -3121,12 +3128,8 @@ def get_llm_history_entries(
         llm_responses.c.completion_status if "completion_status" in resp_cols else None
     )
     resp_stop_cause_col = llm_responses.c.stop_cause if "stop_cause" in resp_cols else None
-    resp_served_model_col = (
-        llm_responses.c.served_model if "served_model" in resp_cols else None
-    )
-    resp_pricing_model_col = (
-        llm_responses.c.pricing_model if "pricing_model" in resp_cols else None
-    )
+    resp_served_model_col = llm_responses.c.served_model if "served_model" in resp_cols else None
+    resp_pricing_model_col = llm_responses.c.pricing_model if "pricing_model" in resp_cols else None
     resp_lifecycle_col = (
         llm_responses.c.model_lifecycle_status
         if "model_lifecycle_status" in resp_cols
@@ -3228,7 +3231,9 @@ def get_llm_history_entries(
     generation_profile_expr = (
         req_generation_profile_col if req_generation_profile_col is not None else literal(None)
     )
-    effective_max_expr = req_effective_max_col if req_effective_max_col is not None else literal(None)
+    effective_max_expr = (
+        req_effective_max_col if req_effective_max_col is not None else literal(None)
+    )
     effective_reasoning_mode_expr = (
         req_effective_reasoning_mode_col
         if req_effective_reasoning_mode_col is not None

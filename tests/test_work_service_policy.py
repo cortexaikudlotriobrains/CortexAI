@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
+from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
@@ -521,9 +522,13 @@ def test_work_settlement_persists_full_cache_partition_and_provider_floor(monkey
     assert transaction["output_credits"] == 138_024
     assert transaction["fixed_credits"] == 4_089
     assert transaction["total_credits"] == 385_636
-    assert transaction["provider_cost_usd"] == pytest.approx(0.2025301889)
+    assert isinstance(transaction["provider_cost_usd"], Decimal)
+    assert transaction["provider_cost_usd"] == pytest.approx(Decimal("0.2025301889"))
     metadata = transaction["metadata"]
     assert isinstance(metadata, dict)
+    assert transaction["provider_cost_usd"] == Decimal(
+        metadata["pricing_snapshot"]["work_provider_cost_usd"]
+    )
     assert metadata["managed_component_credits"] == 385_636
     assert metadata["managed_provider_floor_credits"] == 200_000
     assert metadata["managed_reported_provider_cost_usd"] == pytest.approx(0.20)

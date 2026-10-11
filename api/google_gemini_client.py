@@ -1,5 +1,6 @@
 import os
 import time
+from datetime import datetime, timezone
 from collections.abc import Mapping
 from types import SimpleNamespace
 from typing import Any
@@ -192,16 +193,11 @@ class GeminiClient(BaseAIClient):
             endpoint = "models.generate_content"
             try:
                 if web_search_enabled:
-                    cap = max(
-                        1, min(3, int(web_search_policy.get("max_operations") or 3))
-                    )
-                    web_instruction = (
-                        f"Use no more than {cap} Google Search queries. "
-                        + (
-                            "Google Search is required for this request."
-                            if str(web_search_policy.get("mode") or "auto") == "required"
-                            else "Search only when current or externally verifiable information is needed."
-                        )
+                    cap = max(1, min(3, int(web_search_policy.get("max_operations") or 3)))
+                    web_instruction = f"Use no more than {cap} Google Search queries. " + (
+                        "Google Search is required for this request."
+                        if str(web_search_policy.get("mode") or "auto") == "required"
+                        else "Search only when current or externally verifiable information is needed."
                     )
                     interaction_config: dict[str, Any] = {
                         "max_output_tokens": max_output_tokens,
@@ -249,10 +245,12 @@ class GeminiClient(BaseAIClient):
                     raise
                 if web_search_enabled:
                     raise
-                dropped_param, retry_config = self._build_retry_payload_without_unsupported_parameter(
-                    config,
-                    request_exc,
-                    safe_parameters={"temperature", "max_output_tokens", "top_p", "top_k"},
+                dropped_param, retry_config = (
+                    self._build_retry_payload_without_unsupported_parameter(
+                        config,
+                        request_exc,
+                        safe_parameters={"temperature", "max_output_tokens", "top_p", "top_k"},
+                    )
                 )
                 if retry_config is not None and dropped_param is not None:
                     logger.warning(
@@ -284,9 +282,7 @@ class GeminiClient(BaseAIClient):
 
             # Extract text
             if endpoint == "interactions.create":
-                text, search_operations, search_sources = self._extract_interaction_search(
-                    response
-                )
+                text, search_operations, search_sources = self._extract_interaction_search(response)
             else:
                 text = response.text if hasattr(response, "text") else ""
                 text, search_operations, search_sources = self._extract_grounding(
@@ -307,14 +303,15 @@ class GeminiClient(BaseAIClient):
                         field_value(usage, "total_reasoning_tokens", 0),
                     )
                 )
-                cached_input_tokens = self._usage_int(
-                    field_value(usage, "total_cached_tokens", 0)
-                )
+                cached_input_tokens = self._usage_int(field_value(usage, "total_cached_tokens", 0))
                 total_tokens = self._usage_int(field_value(usage, "total_tokens", 0))
+                # Interactions reports answer and thought tokens separately;
+                # Cortex completion_tokens includes both billable partitions.
+                completion_tokens = output_tokens + reasoning_tokens
                 token_usage = TokenUsage(
                     prompt_tokens=prompt_tokens,
-                    completion_tokens=output_tokens,
-                    total_tokens=total_tokens or prompt_tokens + output_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens or prompt_tokens + completion_tokens,
                     cached_input_tokens=cached_input_tokens,
                     reasoning_tokens=reasoning_tokens,
                 )
@@ -326,15 +323,12 @@ class GeminiClient(BaseAIClient):
                 reasoning_tokens = self._usage_int(
                     getattr(usage_metadata, "thoughts_token_count", 0)
                 )
-                completion_tokens = self._usage_int(
-                    getattr(usage_metadata, "candidates_token_count", 0)
-                ) + reasoning_tokens
-                prompt_tokens = self._usage_int(
-                    getattr(usage_metadata, "prompt_token_count", 0)
+                completion_tokens = (
+                    self._usage_int(getattr(usage_metadata, "candidates_token_count", 0))
+                    + reasoning_tokens
                 )
-                total_tokens = self._usage_int(
-                    getattr(usage_metadata, "total_token_count", 0)
-                )
+                prompt_tokens = self._usage_int(getattr(usage_metadata, "prompt_token_count", 0))
+                total_tokens = self._usage_int(getattr(usage_metadata, "total_token_count", 0))
                 if total_tokens <= 0:
                     total_tokens = prompt_tokens + completion_tokens
                 token_usage = TokenUsage(
@@ -361,8 +355,9 @@ class GeminiClient(BaseAIClient):
                 else CostCalculator("gemini", served_model)
             )
             cost = calculator.calculate_cost(
-                token_usage.prompt_tokens,
-                token_usage.completion_tokens,
+                request_at=datetime.fromtimestamp(start_time, timezone.utc),
+                prompt_tokens=token_usage.prompt_tokens,
+                completion_tokens=token_usage.completion_tokens,
                 cached_input_tokens=token_usage.cached_input_tokens,
                 reasoning_tokens=token_usage.reasoning_tokens,
             )
@@ -379,7 +374,11 @@ class GeminiClient(BaseAIClient):
 
             # Normalize finish reason
             finish_reason = self._normalize_finish_reason(
-                "stop" if str(finish_reason_raw or "").lower() == "completed" else finish_reason_raw,
+                (
+                    "stop"
+                    if str(finish_reason_raw or "").lower() == "completed"
+                    else finish_reason_raw
+                ),
                 provider="gemini",
             )
 
@@ -427,13 +426,12 @@ class GeminiClient(BaseAIClient):
                 "endpoint": endpoint,
                 "pricing_unknown": bool(cost.get("pricing_unknown", False)),
                 **build_web_search_metadata(
+                    request_at=datetime.fromtimestamp(start_time, timezone.utc),
                     provider="gemini",
                     backend="google_search",
                     requested_mode=str(web_search_policy.get("requested_mode") or "off"),
                     effective_mode=(
-                        str(web_search_policy.get("mode") or "off")
-                        if web_search_enabled
-                        else "off"
+                        str(web_search_policy.get("mode") or "off") if web_search_enabled else "off"
                     ),
                     operations=search_operations,
                     sources=search_sources,
@@ -529,12 +527,8 @@ class GeminiClient(BaseAIClient):
                             stream_observer.emit_text(text)
                     elif delta_type == "text_annotation_delta":
                         annotations = current.setdefault("_annotations", [])
-                        for annotation in sequence_value(
-                            field_value(delta, "annotations", [])
-                        ):
-                            annotations.append(
-                                self._stream_payload(annotation) or annotation
-                            )
+                        for annotation in sequence_value(field_value(delta, "annotations", [])):
+                            annotations.append(self._stream_payload(annotation) or annotation)
                     else:
                         delta_payload = self._stream_payload(delta)
                         for key, value in delta_payload.items():
@@ -683,9 +677,7 @@ class GeminiClient(BaseAIClient):
         for support in sequence_value(field_value(grounding, "grounding_supports", [])):
             segment = field_value(support, "segment", {})
             end_index = field_value(segment, "end_index")
-            for raw_index in sequence_value(
-                field_value(support, "grounding_chunk_indices", [])
-            ):
+            for raw_index in sequence_value(field_value(support, "grounding_chunk_indices", [])):
                 try:
                     url = chunk_urls[int(raw_index)]
                 except (TypeError, ValueError, IndexError):
@@ -762,9 +754,7 @@ class GeminiClient(BaseAIClient):
                 if content_type != "text":
                     continue
                 block_text = str(field_value(content, "text", "") or "")
-                annotations = list(
-                    sequence_value(field_value(content, "annotations", []))
-                )
+                annotations = list(sequence_value(field_value(content, "annotations", [])))
                 text_blocks.append((block_text, annotations))
                 for annotation in annotations:
                     url = str(
@@ -778,9 +768,7 @@ class GeminiClient(BaseAIClient):
                     raw_sources.append(
                         {
                             "url": url,
-                            "title": str(
-                                field_value(annotation, "title", "") or url
-                            ),
+                            "title": str(field_value(annotation, "title", "") or url),
                         }
                     )
 
@@ -818,8 +806,7 @@ class GeminiClient(BaseAIClient):
 
         sources = normalize_web_sources(raw_sources, limit=8)
         source_index = {
-            source["url"].casefold().rstrip("/"): index + 1
-            for index, source in enumerate(sources)
+            source["url"].casefold().rstrip("/"): index + 1 for index, source in enumerate(sources)
         }
         rendered_blocks: list[str] = []
         for block_text, annotations in text_blocks:

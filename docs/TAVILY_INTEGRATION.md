@@ -43,9 +43,10 @@ Current behavior highlights:
 
 ## Credit Settlement
 
-- DeepSeek native-search preflight reserves up to three operations at `2 Tavily credits x 5,000 = 10,000 Cortex credits` per operation.
-- DeepSeek settlement charges `10,000 Cortex credits` per successful Tavily tool operation and records an immutable `item_type=tool` row with `backend=tavily`.
-- The legacy shared-research path reserves `2 Tavily credits x 5,000 = 10,000 Cortex credits` and settles `Tavily API credits used x 5,000 Cortex credits`.
+- One Tavily credit costs USD 0.008 at the pay-as-you-go rate and converts to `8,000 Cortex credits` at the USD 1 per million credits calibration ceiling. Advanced Search consumes two Tavily credits (USD 0.016).
+- DeepSeek native-search preflight reserves up to three operations at `2 Tavily credits x 8,000 = 16,000 Cortex credits` per operation.
+- DeepSeek settlement charges `16,000 Cortex credits` per successful Tavily tool operation and records an immutable `item_type=tool` row with `backend=tavily` and a USD 0.016 provider cost.
+- The legacy shared-research path reserves `2 Tavily credits x 8,000 = 16,000 Cortex credits` and settles `Tavily API credits used x 8,000 Cortex credits`.
 - If Tavily omits usage metadata, settlement uses the two-credit Advanced Search fallback and marks the ledger row as estimated.
 - Cache hits and session-state reuse report zero provider credits and add no new research charge.
 - Only the legacy rollback path performs one shared Compare retrieval. Native Compare search is per target.
