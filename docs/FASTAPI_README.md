@@ -988,6 +988,31 @@ Last updated: 2026-07-29
 
 ## Provider rate-card runtime
 
+Imported/manual cards preserve missing versus explicitly zero cache rates. A
+used dimension without a valid rate raises `PRICING_UNKNOWN`; long-context
+snapshots never inherit optional base cache rates. GPT-5.6 and later OpenAI cache
+writes use the documented 30-minute lifetime, including zero-write audit snapshots;
+earlier models retain their supported retention controls without a write fee.
+Unexpected write counters on an unsupported model fail pricing explicitly.
+Retired LiteLLM identities are observation-only; audio-specific Gemini imports
+remain rejected until the normalized usage contract retains audio and cached-audio
+partitions. Search charges remain separate service-card expense. Expired verified
+cards do not fall through to legacy seeds; bounded price changes and expired
+promotions require review. Operator JSON accepts `effective_from` and
+`effective_until`, and approval preserves future starts and rejects expired
+candidates. Known promotional identities require a verified approval
+`--effective-until` or manual JSON `effective_until`; approval dry-runs enforce
+the same guards, and no date is inferred from "at least through" provider wording.
+For `gemini-3.6-flash`, Google's prices through December 31, 2026 establish
+the registry's exclusive UTC `pricing_review.effective_until` boundary
+`2027-01-01T00:00:00Z`. Approval and manual intervals cannot exceed that boundary;
+unbounded imports remain candidates even with automatic activation enabled.
+No future successor card or legacy price change is introduced. See
+[Google pricing](https://ai.google.dev/gemini-api/docs/pricing#gemini-3.6-flash).
+The backend CI and local pre-push gates include the rate-card regression suite.
+No HTTP route/request field changes. Keep database pricing disabled
+until the [verification gates](LITELLM_PRICING_GUARDRAILS.md) are satisfied.
+
 Runtime snapshot identity includes the official GPT-5.4 Mini served alias.
 Gemini Interactions `completion_tokens` includes output plus thought tokens;
 `reasoning_tokens` retains that subset, so expense and customer credits count it

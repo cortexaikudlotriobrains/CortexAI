@@ -7,10 +7,15 @@ This map is the quick "where do I change X?" reference for the current API-first
 - Provider rate-card subsystem: `pricing/models.py`, `pricing/engine.py`,
   `pricing/identity.py`, `pricing/service.py`, `pricing/schedules.py`,
   `pricing/sources.py`, `pricing/sync.py`;
-  configuration: `config/model_pricing.py`; persistence: `db/pricing_repository.py`,
+  configuration: `config/model_pricing.py`, registry promotional-review metadata
+  in `config/model_registry.yaml`; promotional boundary validation for approvals/manual
+  overrides: `pricing/sync.py`; persistence: `db/pricing_repository.py`,
   `db/migrations/20261007_add_versioned_model_rate_cards.sql`; operator CLI:
   `scripts/sync_model_pricing.py`. Architecture and staged rollout:
-  `docs/MODEL_PRICING_ARCHITECTURE.md`, `docs/runbooks/model-pricing.md`.
+  `docs/MODEL_PRICING_ARCHITECTURE.md`, `docs/runbooks/model-pricing.md`;
+  LiteLLM correctness review and verification gates: `docs/LITELLM_PRICING_GUARDRAILS.md`.
+  Pricing regression enforcement: `.github/workflows/ci.yml` backend job and
+  `scripts/run_local_ci.py` pre-push gate (`tests/test_model_rate_cards.py`).
 
 - Full local app runner and guarded Free/Plus/Pro/unrestricted IntelliJ profiles: `run_app.py`; effective local profile construction: `server/billing/subscription_service.py`
 - API server: `run_server.py`

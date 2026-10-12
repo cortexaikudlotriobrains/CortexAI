@@ -56,6 +56,35 @@ def review_change(
     return None
 
 
+def requires_schedule(cards: list[dict[str, Any]], record: dict[str, Any], at: Any) -> bool:
+    active = select_card(cards, at)
+    if active and "schedule" in active["pricing_components"]:
+        return True
+    timestamp = utc(at)
+    return any(
+        "schedule" in rule
+        and utc(rule.get("effective_from") or "1970-01-01T00:00:00Z") <= timestamp
+        and (not rule.get("effective_until") or timestamp < utc(rule["effective_until"]))
+        for rule in record.get("pricing_rules", [])
+    )
+
+
+def requires_expiry(record: dict[str, Any]) -> bool:
+    """Provider-verified promotional identity; never infer dates from rates."""
+    return bool(record.get("pricing_review", {}).get("requires_expiry"))
+
+
+def validate_promotional_expiry(record: dict[str, Any], until: datetime | None) -> None:
+    """Keep operator intervals within a provider-verified promotional boundary."""
+    if not requires_expiry(record):
+        return
+    if until is None:
+        raise ValueError("Promotional pricing requires a verified effective_until")
+    documented_until = record["pricing_review"].get("effective_until")
+    if documented_until and utc(until) > utc(documented_until):
+        raise ValueError("Pricing interval exceeds the documented promotional effective_until")
+
+
 def synchronize(
     db: Session,
     catalog: Catalog,
@@ -106,6 +135,14 @@ def synchronize(
                     "rates": entry["rates"],
                     "separate_charges": entry.get("separate_charges", {}),
                     "included_input_dimensions": entry.get("included_input_dimensions", []),
+                    "unsupported_charge_dimensions": entry.get("unsupported_charge_dimensions", {}),
+                    "observed_charge_dimensions": entry.get("observed_charge_dimensions", {}),
+                    "pricing_review": identities.models.get(
+                        (entry_provider, canonical or ""), {}
+                    ).get("pricing_review", {}),
+                    "lifecycle_status": identities.models.get((entry_provider, canonical or ""), {})
+                    .get("lifecycle", {})
+                    .get("status", "UNKNOWN"),
                     "cortex_enabled": bool(
                         identities.models.get((entry_provider, canonical or ""), {}).get(
                             "enabled", False
@@ -118,6 +155,20 @@ def synchronize(
             continue
         groups.setdefault((entry_provider, canonical), []).append((external, entry))
     for (entry_provider, canonical), entries in groups.items():
+        if (
+            identities.models[entry_provider, canonical].get("lifecycle", {}).get("status")
+            == "RETIRED"
+        ):
+            summary["changes"].append(
+                {
+                    "provider": entry_provider,
+                    "model": canonical,
+                    "action": "observed",
+                    "reason": "retired_model_observation_only",
+                    "source_model_ids": [name for name, _ in entries],
+                }
+            )
+            continue
         valid = [entry for _, entry in entries if entry["rates"]]
         if len(valid) != len(entries) or len({fingerprint(entry["rates"]) for entry in valid}) != 1:
             summary["invalid"] += 1
@@ -131,6 +182,7 @@ def synchronize(
             )
             continue
         rates = valid[0]["rates"]
+        expiry_required = requires_expiry(identities.models[entry_provider, canonical])
         cards = repo.list_cards(entry_provider, canonical)
         external_card = select_card(
             [card for card in cards if card["source"] == "LITELLM"], timestamp
@@ -138,7 +190,10 @@ def synchronize(
         baseline = external_card or select_card(
             [card for card in cards if card["source"] == "LEGACY_CORTEX"], timestamp
         )
-        if baseline and "schedule" in baseline["pricing_components"] and "schedule" not in rates:
+        if (
+            requires_schedule(cards, identities.models[entry_provider, canonical], timestamp)
+            and "schedule" not in rates
+        ):
             summary["invalid"] += 1
             summary["changes"].append(
                 {
@@ -150,13 +205,34 @@ def synchronize(
                 }
             )
             continue
-        if external_card and fingerprint(rates) == external_card["fingerprint"]:
+        separate_charges = any(entry.get("separate_charges") for entry in valid)
+        if (
+            external_card
+            and fingerprint(rates) == external_card["fingerprint"]
+            and not separate_charges
+            and (not expiry_required or external_card["effective_to"] is not None)
+        ):
             summary["unchanged"] += 1
             if not dry_run:
                 repo.verified(external_card, timestamp)
             continue
         reason = review_change(baseline["pricing_components"] if baseline else None, rates, policy)
-        if any(entry.get("separate_charges") for entry in valid):
+        if (
+            external_card is None
+            and any(
+                card["source"] != "LEGACY_CORTEX" and utc(card["effective_from"]) <= timestamp
+                for card in cards
+            )
+            and select_card(cards, timestamp) is None
+        ):
+            reason = "expired_pricing_requires_review"
+        elif external_card and external_card["effective_to"] is not None:
+            # LiteLLM supplies rates without verified validity evidence. A rate
+            # change must not turn a bounded promotion into an open interval.
+            reason = "bounded_pricing_requires_review"
+        if expiry_required:
+            reason = "promotional_pricing_requires_expiry"
+        if separate_charges:
             reason = reason or "separate_service_charges_require_review"
         if not policy.auto_activate:
             reason = reason or "auto_activation_disabled"
@@ -168,6 +244,7 @@ def synchronize(
                 "model": canonical,
                 "action": status,
                 "reason": reason,
+                "requires_expiry": expiry_required,
                 "source_model_ids": [name for name, _ in entries],
                 "rates": rates,
             }
@@ -378,24 +455,33 @@ def manual_override(
     repo = PricingRepository(db)
     repo.lock()
     timestamp = utc(at)
+    effective_from = utc(data.get("effective_from") or timestamp)
+    until = utc(data["effective_until"]) if data.get("effective_until") else None
+    if until and (until <= effective_from or until <= timestamp):
+        raise ValueError("Pricing interval is invalid or expired")
     rates = validate_rates(data["rates"])
+    cards = repo.list_cards(data["provider"], data["model"], data["processing_mode"])
+    identities = ModelIdentityMap()
+    canonical = identities.resolve(data["provider"], data["model"]) or data["model"]
+    record = identities.models.get((data["provider"], canonical), {})
+    validate_promotional_expiry(record, until)
+    if requires_schedule(cards, record, effective_from) and "schedule" not in rates:
+        raise ValueError("Manual price omits the active billing schedule")
     previous = select_card(
-        [
-            card
-            for card in repo.list_cards(data["provider"], data["model"], data["processing_mode"])
-            if card["source"] == "CORTEX_MANUAL"
-        ],
-        timestamp,
+        [card for card in cards if card["source"] == "CORTEX_MANUAL"],
+        effective_from,
     )
     if previous:
-        repo.close(previous, timestamp)
+        repo.close(previous, effective_from)
     result = repo.add(
         provider=data["provider"],
         model=data["model"],
         mode=data["processing_mode"],
         source="CORTEX_MANUAL",
         rates=rates,
-        at=timestamp,
+        at=effective_from,
+        until=until,
+        verified_at=timestamp,
         reference="operator-override",
         version=timestamp.isoformat(),
         actor=actor,
@@ -431,7 +517,15 @@ def remove_override(db: Session, provider: str, model: str, *, actor: str, reaso
     )
 
 
-def approve_candidate(db: Session, card_id: str, *, actor: str, reason: str) -> None:
+def approve_candidate(
+    db: Session,
+    card_id: str,
+    *,
+    actor: str,
+    reason: str,
+    effective_until: Any = None,
+    dry_run: bool = False,
+) -> None:
     if not actor.strip() or not reason.strip():
         raise ValueError("Approval requires actor and reason")
     repo = PricingRepository(db)
@@ -444,14 +538,44 @@ def approve_candidate(db: Session, card_id: str, *, actor: str, reason: str) -> 
         .one()
     )
     timestamp = datetime.now(timezone.utc)
+    if candidate["effective_to"] and utc(candidate["effective_to"]) <= timestamp:
+        raise ValueError("Candidate pricing interval has expired; verify a successor price")
+    identities = ModelIdentityMap()
+    canonical = (
+        identities.resolve(candidate["provider"], candidate["canonical_model_id"])
+        or candidate["canonical_model_id"]
+    )
+    record = identities.models.get((candidate["provider"], canonical), {})
+    lifecycle = record.get("lifecycle", {})
+    if lifecycle.get("status") == "RETIRED":
+        raise ValueError(
+            "Retired model pricing is observation-only; verify the active pricing identity"
+        )
+    effective_from = max(timestamp, utc(candidate["effective_from"]))
+    until = utc(effective_until) if effective_until is not None else candidate["effective_to"]
+    if until is not None:
+        until = utc(until)
+        if until <= effective_from:
+            raise ValueError("Pricing interval must end after effective_from")
+        if candidate["effective_to"] and until > utc(candidate["effective_to"]):
+            raise ValueError("Candidate pricing interval cannot be extended")
+    validate_promotional_expiry(record, until)
     validate_rates(candidate["pricing_components"])
     approved = repo.list_cards(
         candidate["provider"], candidate["canonical_model_id"], candidate["processing_mode"]
     )
-    baseline = select_card(approved, timestamp)
+    if until is None and (
+        requires_expiry(record)
+        or candidate["review_reason"]
+        in {"bounded_pricing_requires_review", "expired_pricing_requires_review"}
+        or any(
+            card["source"] == candidate["source"] and card["effective_to"] is not None
+            for card in approved
+        )
+    ):
+        raise ValueError("Promotional or bounded pricing requires a verified effective_until")
     if (
-        baseline
-        and "schedule" in baseline["pricing_components"]
+        requires_schedule(approved, record, effective_from)
         and "schedule" not in candidate["pricing_components"]
     ):
         raise ValueError(
@@ -465,15 +589,29 @@ def approve_candidate(db: Session, card_id: str, *, actor: str, reason: str) -> 
             )
             if card["source"] == candidate["source"]
         ],
-        timestamp,
+        effective_from,
     )
+    for card in approved:
+        if (
+            card["source"] == candidate["source"]
+            and (not previous or card["id"] != previous["id"])
+            and (until is None or utc(card["effective_from"]) < until)
+            and (card["effective_to"] is None or effective_from < utc(card["effective_to"]))
+        ):
+            raise ValueError("Approved source rate-card intervals must not overlap")
+    if dry_run:
+        return
     if previous:
-        repo.close(previous, timestamp)
+        repo.close(previous, effective_from)
     db.execute(
         update(repo.cards)
         .where(repo.cards.c.id == card_id)
         .values(
-            status="approved", effective_from=timestamp, override_actor=actor, review_reason=reason
+            status="approved",
+            effective_from=effective_from,
+            effective_to=until,
+            override_actor=actor,
+            review_reason=reason,
         )
     )
     repo.record_run(
@@ -481,5 +619,11 @@ def approve_candidate(db: Session, card_id: str, *, actor: str, reason: str) -> 
         candidate["source_version"],
         timestamp,
         "completed",
-        {"action": "approve_candidate", "actor": actor, "reason": reason, "rate_card_id": card_id},
+        {
+            "action": "approve_candidate",
+            "actor": actor,
+            "reason": reason,
+            "rate_card_id": card_id,
+            "effective_until": until.isoformat() if until else None,
+        },
     )

@@ -123,6 +123,9 @@ jobs:
             tests/test_component_boundaries.py \
             -q
 
+      - name: Pricing rate-card regression suite
+        run: python -m pytest tests/test_model_rate_cards.py -q
+
       - name: pip-audit (dependency vulnerabilities)
         run: pip-audit -r requirements.txt -r requirements-dev.txt
 

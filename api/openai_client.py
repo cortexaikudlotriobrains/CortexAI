@@ -1,3 +1,4 @@
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any, TYPE_CHECKING
@@ -11,6 +12,7 @@ from config.cache_optimization import (
 )
 from config.web_search import load_native_web_search_config
 from models.unified_response import TokenUsage, UnifiedResponse
+from pricing.models import PricingUnavailableError
 from tools.web.provider_metadata import (
     build_web_search_metadata,
     extract_responses_web_search,
@@ -188,12 +190,18 @@ class OpenAIClient(BaseAIClient):
                 if self.cost_calculator.model_name == served_model
                 else CostCalculator("openai", served_model)
             )
+            cache_write_ttl = self._cache_write_ttl_for_model(served_model)
+            if token_usage.cache_write_tokens and cache_write_ttl != "30m":
+                raise PricingUnavailableError(
+                    "PRICING_UNKNOWN: unexpected cache-write usage for this OpenAI model"
+                )
             cost = calculator.calculate_cost(
                 request_at=datetime.fromtimestamp(start_time, timezone.utc),
                 prompt_tokens=token_usage.prompt_tokens,
                 completion_tokens=token_usage.completion_tokens,
                 cached_input_tokens=token_usage.cached_input_tokens,
                 cache_write_tokens=token_usage.cache_write_tokens,
+                cache_write_ttl=cache_write_ttl,
                 reasoning_tokens=token_usage.reasoning_tokens,
             )
             estimated_cost = cost["total_cost"]
@@ -510,13 +518,46 @@ class OpenAIClient(BaseAIClient):
         return payload
 
     @staticmethod
+    def _cache_write_ttl_for_model(model: str) -> str:
+        # OpenAI documents metered writes and a fixed 30m TTL for GPT-5.6
+        # and later. Older models have no metered writes; the unused pricing
+        # default below must never turn their retention policy into a write fee.
+        match = re.match(r"^gpt-(\d+)(?:\.(\d+))?(?:-|$)", (model or "").strip().lower())
+        if match and (int(match[1]), int(match[2] or 0)) >= (5, 6):
+            return "30m"
+        return "5m"
+
+    @staticmethod
+    def _supports_extended_prompt_cache(model: str) -> bool:
+        # Exact provider-documented retention capabilities, including dated
+        # snapshots. A shared family name does not grant 24h retention to minis.
+        canonical = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", (model or "").strip().lower())
+        return canonical in {
+            "gpt-5.5",
+            "gpt-5.5-pro",
+            "gpt-5.4",
+            "gpt-5.2",
+            "gpt-5.1-codex-max",
+            "gpt-5.1",
+            "gpt-5.1-codex",
+            "gpt-5.1-codex-mini",
+            "gpt-5.1-chat-latest",
+            "gpt-5",
+            "gpt-5-codex",
+            "gpt-4.1",
+        }
+
+    @staticmethod
     def _apply_prompt_cache_options(
         payload: dict[str, Any], cache_context: "CacheContext"
     ) -> None:
         if not cache_context.enabled or not openai_prompt_cache_enabled():
             return
         payload["prompt_cache_key"] = cache_context.cache_scope_key
-        if openai_extended_prompt_cache_enabled():
+        if (
+            openai_extended_prompt_cache_enabled()
+            and OpenAIClient._supports_extended_prompt_cache(str(payload.get("model") or ""))
+        ):
             payload["prompt_cache_retention"] = "24h"
 
     @staticmethod

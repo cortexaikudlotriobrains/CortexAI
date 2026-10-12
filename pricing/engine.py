@@ -21,25 +21,28 @@ def calculate(usage: NormalizedLLMUsage, snapshot: Mapping[str, Any]) -> CostCal
     with localcontext() as context:
         context.prec = 40
         million = Decimal(1_000_000)
+
+        def token_cost(key: str, quantity: int) -> Decimal:
+            if not quantity:
+                return Decimal(0)
+            if key not in snapshot or snapshot[key] is None:
+                raise PricingUnavailableError(f"PRICING_UNKNOWN for dimension {key}")
+            return Decimal(quantity) * amount(snapshot[key]) / million
+
         components = {
-            "input_cost": Decimal(normal) * amount(snapshot["input"]) / million,
-            "cached_input_cost": Decimal(usage.cached_input_tokens)
-            * amount(snapshot["cached_input"])
-            / million,
-            "cache_write_cost": Decimal(usage.cache_write_tokens - usage.cache_write_1h_tokens)
-            * amount(snapshot["cache_write"])
-            / million,
-            "output_cost": Decimal(
-                usage.output_tokens - (usage.reasoning_tokens if "reasoning" in snapshot else 0)
-            )
-            * amount(snapshot["output"])
-            / million,
+            "input_cost": token_cost("input", normal),
+            "cached_input_cost": token_cost("cached_input", usage.cached_input_tokens),
+            "cache_write_cost": token_cost(
+                "cache_write", usage.cache_write_tokens - usage.cache_write_1h_tokens
+            ),
+            "output_cost": token_cost(
+                "output",
+                usage.output_tokens - (usage.reasoning_tokens if "reasoning" in snapshot else 0),
+            ),
         }
         if usage.cache_write_1h_tokens:
-            if "cache_write_1h" not in snapshot:
-                raise PricingUnavailableError("PRICING_UNKNOWN for one-hour cache writes")
-            components["cache_write_1h_cost"] = (
-                Decimal(usage.cache_write_1h_tokens) * amount(snapshot["cache_write_1h"]) / million
+            components["cache_write_1h_cost"] = token_cost(
+                "cache_write_1h", usage.cache_write_1h_tokens
             )
         if "reasoning" in snapshot and usage.reasoning_tokens:
             components["reasoning_cost"] = (

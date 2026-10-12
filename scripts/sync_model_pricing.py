@@ -24,6 +24,7 @@ from pricing.sync import (
     approve_candidate,
     manual_override,
     remove_override,
+    requires_expiry,
     run_sync,
     seed_legacy,
 )
@@ -42,10 +43,15 @@ def main() -> None:
     action.add_argument("--approve", metavar="CANDIDATE_ID")
     parser.add_argument("--actor")
     parser.add_argument("--reason")
+    parser.add_argument(
+        "--effective-until", help="Verified exclusive UTC end for candidate approval"
+    )
     args = parser.parse_args()
     mutation = args.override or args.remove_override or args.approve
     if mutation and (not args.actor or not args.reason):
         parser.error("Override/approval actions require --actor and --reason")
+    if args.effective_until and not args.approve:
+        parser.error("--effective-until requires --approve; overrides use their JSON interval")
     if args.remove_override and (not args.provider or not args.model):
         parser.error("--remove-override requires --provider and --model")
     if args.seed_legacy and (args.provider or args.model):
@@ -91,6 +97,8 @@ def main() -> None:
                     )
                     row["cortex_enabled"] = product_model.get("enabled", False)
                     row["manually_overridden"] = row["source"] == "CORTEX_MANUAL"
+                    row["requires_expiry"] = requires_expiry(product_model)
+                    row["pricing_review"] = product_model.get("pricing_review", {})
                     row["pricing_stale"] = (
                         utc() - utc(row["last_verified_at"])
                     ).total_seconds() > load_pricing_policy().stale_hours * 3600
@@ -114,9 +122,19 @@ def main() -> None:
                         db, args.provider, args.model, actor=args.actor, reason=args.reason
                     )
             else:
-                result = {"action": "approve", "rate_card_id": args.approve}
-                if not args.dry_run:
-                    approve_candidate(db, args.approve, actor=args.actor, reason=args.reason)
+                result = {
+                    "action": "approve",
+                    "rate_card_id": args.approve,
+                    "effective_until": args.effective_until,
+                }
+                approve_candidate(
+                    db,
+                    args.approve,
+                    actor=args.actor,
+                    reason=args.reason,
+                    effective_until=args.effective_until,
+                    dry_run=args.dry_run,
+                )
     if not args.dry_run:
         clear_cache()
     print(json.dumps(result, indent=2, default=str))
