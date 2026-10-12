@@ -31,17 +31,31 @@ def select_card(cards: list[dict[str, Any]], at: Any) -> dict[str, Any] | None:
         and utc(card["effective_from"]) <= timestamp
         and (card.get("effective_to") is None or timestamp < utc(card["effective_to"]))
     ]
-    return max(
+    selected = max(
         applicable,
         key=lambda card: (SOURCE_PRIORITY[card["source"]], utc(card["effective_from"])),
         default=None,
     )
+    # Once a verified source layer has started, its expiry must not resurrect
+    # unverified legacy rates. A reviewer must supply an applicable successor.
+    if (
+        selected
+        and selected["source"] == "LEGACY_CORTEX"
+        and any(
+            card["status"] == "approved"
+            and card["source"] != "LEGACY_CORTEX"
+            and utc(card["effective_from"]) <= timestamp
+            for card in cards
+        )
+    ):
+        return None
+    return selected
 
 
 def snapshot(
     card: dict[str, Any], *, prompt_tokens: int = 0, cache_write_ttl: str = "5m", at: Any = None
 ) -> dict[str, Any]:
-    if cache_write_ttl not in {"5m", "1h"}:
+    if cache_write_ttl not in {"5m", "30m", "1h"}:
         raise ValueError("Unsupported cache TTL")
     rates = validate_rates(card["pricing_components"])
     tokens = dict(rates["tokens"])
@@ -54,9 +68,15 @@ def snapshot(
     threshold = None
     for band in rates["bands"]:
         if prompt_tokens >= band["minimum_input_tokens"]:
+            # Bands are complete optional partitions. Do not carry cache or
+            # reasoning rates from the base or a preceding context tier.
+            for key in ("cached_input", "cache_write", "cache_write_1h", "reasoning"):
+                tokens.pop(key, None)
             tokens.update(band["tokens"])
             threshold = band["minimum_input_tokens"]
     if cache_write_ttl == "1h":
+        if "cache_write_1h" not in tokens:
+            raise PricingUnavailableError("PRICING_UNKNOWN for dimension cache_write_1h")
         tokens["cache_write"] = tokens["cache_write_1h"]
     return {
         **tokens,

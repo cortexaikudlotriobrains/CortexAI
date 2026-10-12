@@ -988,6 +988,19 @@ Last updated: 2026-07-29
 
 ## Provider rate-card runtime
 
+Imported/manual cards preserve missing versus explicitly zero cache rates. A
+used dimension without a valid rate raises `PRICING_UNKNOWN`; long-context
+snapshots never inherit optional base cache rates. OpenAI-reported cache writes
+use its documented 30-minute lifetime, without fabricating one-hour usage.
+Retired LiteLLM identities are observation-only; audio-specific Gemini imports
+remain rejected until the normalized usage contract retains audio and cached-audio
+partitions. Search charges remain separate service-card expense. Expired verified
+cards do not fall through to legacy seeds; bounded price changes and expired
+promotions require review. Operator JSON accepts `effective_from` and
+`effective_until`, and approval preserves future starts and rejects expired
+candidates. No HTTP route/request field changes. Keep database pricing disabled
+until the [verification gates](LITELLM_PRICING_GUARDRAILS.md) are satisfied.
+
 Runtime snapshot identity includes the official GPT-5.4 Mini served alias.
 Gemini Interactions `completion_tokens` includes output plus thought tokens;
 `reasoning_tokens` retains that subset, so expense and customer credits count it

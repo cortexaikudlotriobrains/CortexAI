@@ -34,7 +34,13 @@ LiteLLM is a synchronization source, never an inference gateway or request depen
    venv\Scripts\python.exe -m mypy --explicit-package-bases --follow-imports=skip pricing/service.py tests/test_model_rate_cards.py
    ```
 
-5. Set `MODEL_PRICING_MODE=database` and restart every API/worker. Startup verifies
+5. Keep legacy mode until active-model and service coverage has been independently
+   verified, including context/cache partitions, schedules/calendars, promotions,
+   search API modes and the staging gates in
+   [the guardrails review](../LITELLM_PRICING_GUARDRAILS.md). Approved legacy seeds
+   and passing parity tests alone are not verified current-price authority.
+   After separate operator authorization, set `MODEL_PRICING_MODE=database` and
+   restart every API/worker. Startup verifies
    the schema and approved pricing for enabled models and required service cards.
    Runtime needs SELECT on pricing tables and normal response/ledger privileges;
    keep pricing mutations restricted to the trusted operator/job connection.
@@ -73,8 +79,11 @@ protects approved financial fields and deletion; closing an interval and updatin
 its verification time are allowed. Rates are immutable once approved.
 
 Sync fingerprints normalized rate dimensions. Unchanged data refreshes verification
-without making another approved card. Multiple external IDs mapping to one model
-must agree exactly; ambiguous entries are rejected. Unknown models are saved as
+without making another approved card. Multiple external IDs mapping to an active model
+must agree exactly, including missing versus explicitly zero optional rates;
+ambiguous entries are rejected. Retired identities remain observations with
+`retired_model_observation_only` and cannot be approved through the CLI. Their
+source prices never transfer to replacement models. Unknown models are saved as
 observations with no user enablement. A missing external record changes only
 `missing_since`, never lifecycle or registry enablement.
 
@@ -153,6 +162,14 @@ unknown standard charge fields, or contradictory exact identities are rejected.
 Do not approve separate-charge proposals before comparing observations with the
 applicable service-card rates and provider usage contract.
 
+Observation metadata retains all source `observed_charge_dimensions` and
+rejected `unsupported_charge_dimensions`, including the audio fields. The
+Gemini adapter currently retains aggregate input/cache tokens, not the optional
+API modality breakdowns; audio-priced proposals require normalized audio and
+cached-audio partitions before approval. New service evidence requires review
+even if an existing synchronized card has identical token prices. LiteLLM's
+search-context rate does not approve or update `__web_search__`.
+
 ## Manual override
 
 Prepare an operator-owned JSON file:
@@ -174,6 +191,36 @@ Token rates are USD/million; units are USD/unit. Token-only cards have no unit
 charges. Supported explicit unit keys are web-search count, request count,
 active seconds, and image/audio input/output units. Do not add separate image or
 reasoning costs when those resources are already counted in provider tokens.
+
+Imported/manual cards preserve missing optional rates. An explicitly zero rate
+is valid evidence; an absent price is not zero or the regular input price. The
+calculator only requires rates for used partitions. Long-context snapshots clear
+optional base cache/reasoning rates before applying the selected band. Provide
+the applicable tier cache prices explicitly; used unpriced partitions fail with
+`PRICING_UNKNOWN`. `cache_write_ttl=1h` requires a distinct explicit one-hour
+price. The OpenAI adapter already reads `input_tokens_details.cache_write_tokens`
+and records its documented `30m` lifetime; it never fabricates hour-write tokens.
+Existing legacy seeds keep their explicitly stored historical defaults.
+
+Manual JSON may additionally specify ISO-8601 `effective_from` and
+`effective_until` (UTC is recommended). Use these to bound a verified promotion;
+the end must follow the start and must not already have expired. Candidate
+approval preserves future starts and the declared end, while past starts become
+the approval time. Approved intervals cannot be extended. Expiry of a verified
+card cannot resurrect a legacy seed. A later applicable verified card can take
+over; if none exists, prepare a reviewed successor before expiry or requests fail
+explicitly. Sync of an expired interval requires `expired_pricing_requires_review`;
+a changed bounded source requires `bounded_pricing_requires_review`. A flat
+catalog does not prove a promotion's continuation or its replacement price.
+Schedule completeness is checked against applicable cards and registry rules in
+sync, manual override creation and candidate approval, including manual-only
+scheduled baselines.
+
+Before approval, compare any candidates created by an older importer against a
+fresh dry-run and source evidence. Previously synthesized cache rates cannot be
+recovered from their normalized card alone. Do not rewrite approved history;
+prepare a new reviewed version with complete applicable dimensions instead.
+See [the guardrails review](../LITELLM_PRICING_GUARDRAILS.md) for unresolved gates.
 
 ```powershell
 venv\Scripts\python.exe scripts/sync_model_pricing.py --override approved-card.json --actor <operator> --reason "Contract rate" --dry-run

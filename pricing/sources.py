@@ -10,7 +10,7 @@ from typing import Any, Protocol
 import httpx
 
 from pricing.identity import PROVIDERS
-from pricing.models import amount, validate_rates
+from pricing.models import amount, utc, validate_rates
 
 LITELLM_URL = (
     "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
@@ -103,6 +103,16 @@ class LiteLLMPricingSource:
                 "error": None,
                 "separate_charges": {},
                 "included_input_dimensions": [],
+                "unsupported_charge_dimensions": {},
+                "observed_charge_dimensions": {
+                    key: (
+                        {name: str(rate) for name, rate in value.items()}
+                        if isinstance(value, dict)
+                        else str(value)
+                    )
+                    for key, value in row.items()
+                    if "cost" in key
+                },
             }
             try:
                 if row.get("currency", "USD") != "USD":
@@ -152,9 +162,18 @@ class LiteLLMPricingSource:
                     if "cost" in key
                     and key not in supported_fields
                     and not key.endswith(("_batches", "_priority", "_flex", "_ultrafast"))
-                    and value not in (None, 0, "0")
+                    and (value not in (None, 0, "0") or "audio" in key)
                 ]
                 if unknown:
+                    entry["unsupported_charge_dimensions"] = {
+                        key: str(row[key]) for key in sorted(unknown)
+                    }
+                    if any("audio" in key for key in unknown):
+                        raise ValueError(
+                            "Audio pricing requires normalized audio and cached-audio token partitions; "
+                            "extend the provider usage contract before approving: "
+                            + ",".join(sorted(unknown))
+                        )
                     raise ValueError(
                         "Unsupported standard charge dimensions: " + ",".join(sorted(unknown))
                     )
@@ -182,14 +201,25 @@ class CortexManualPricingSource:
     @staticmethod
     def parse(payload: str) -> dict[str, Any]:
         data = json.loads(payload, parse_float=Decimal)
-        if not isinstance(data, dict) or set(data) != {
-            "provider",
-            "model",
-            "processing_mode",
-            "rates",
-        }:
+        required = {"provider", "model", "processing_mode", "rates"}
+        if (
+            not isinstance(data, dict)
+            or not required <= set(data)
+            or set(data) - required - {"effective_from", "effective_until"}
+        ):
             raise ValueError("Manual card requires provider, model, processing_mode, rates")
         if data["provider"] not in set(PROVIDERS.values()) or data["processing_mode"] != "standard":
             raise ValueError("Unsupported manual provider or mode")
         data["rates"] = validate_rates(data["rates"])
+        for key in ("effective_from", "effective_until"):
+            if key in data:
+                if not isinstance(data[key], str) or not data[key].strip():
+                    raise ValueError(f"Invalid {key}")
+                data[key] = utc(data[key]).isoformat()
+        if (
+            "effective_from" in data
+            and "effective_until" in data
+            and utc(data["effective_until"]) <= utc(data["effective_from"])
+        ):
+            raise ValueError("Pricing interval must end after effective_from")
         return data

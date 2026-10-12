@@ -75,9 +75,9 @@ def validate_rates(value: Mapping[str, Any]) -> dict[str, Any]:
     if set(tokens) - TOKEN_KEYS or set(units) - UNIT_KEYS or not {"input", "output"} <= set(tokens):
         raise ValueError("Unknown or missing pricing dimensions")
     normalized = {key: rate_string(val) for key, val in tokens.items()}
-    normalized.setdefault("cached_input", normalized["input"])
-    normalized.setdefault("cache_write", normalized["input"])
-    normalized.setdefault("cache_write_1h", normalized["cache_write"])
+    # Absence is evidence of an unknown dimension, not an input-price default.
+    # Legacy seeds explicitly carry their historical defaults; imported/manual
+    # cards must retain missing versus zero rates for review and calculation.
     bands = []
     for band in value.get("bands", []):
         if not isinstance(band, Mapping) or set(band) != {"minimum_input_tokens", "tokens"}:

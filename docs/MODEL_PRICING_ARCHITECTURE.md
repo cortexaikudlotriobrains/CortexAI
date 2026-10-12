@@ -52,6 +52,15 @@ suspicious/default-review proposals become candidates. Discovery and missing-sou
 observations never alter user enablement or lifecycle. Manual cards occupy a separate
 priority layer. Approved monetary history cannot be overwritten or deleted.
 
+Imported optional cache prices retain absence versus explicit zero, and context
+tiers require explicit optional partitions. Retired source identities are
+observation-only; unsupported audio partitions retain actionable source evidence.
+Search service evidence requires review even when token fingerprints are unchanged.
+Approved verified expiry cannot resurrect legacy seeds or be extended by flat
+source ingestion. Operator JSON uses the existing effective interval columns for
+bounded promotions, and schedule completeness applies across every approval path.
+See [the correctness review and verification gates](LITELLM_PRICING_GUARDRAILS.md).
+
 The rollout is schema → legacy seed → parity tests → database runtime switch →
 external proposals/review → optional conservative auto-activation. Legacy registry
 rates remain the explicit rollback/bootstrap source; database mode does not silently

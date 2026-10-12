@@ -194,6 +194,7 @@ class OpenAIClient(BaseAIClient):
                 completion_tokens=token_usage.completion_tokens,
                 cached_input_tokens=token_usage.cached_input_tokens,
                 cache_write_tokens=token_usage.cache_write_tokens,
+                cache_write_ttl="30m" if token_usage.cache_write_tokens else "5m",
                 reasoning_tokens=token_usage.reasoning_tokens,
             )
             estimated_cost = cost["total_cost"]

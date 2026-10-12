@@ -10,7 +10,8 @@ This map is the quick "where do I change X?" reference for the current API-first
   configuration: `config/model_pricing.py`; persistence: `db/pricing_repository.py`,
   `db/migrations/20261007_add_versioned_model_rate_cards.sql`; operator CLI:
   `scripts/sync_model_pricing.py`. Architecture and staged rollout:
-  `docs/MODEL_PRICING_ARCHITECTURE.md`, `docs/runbooks/model-pricing.md`.
+  `docs/MODEL_PRICING_ARCHITECTURE.md`, `docs/runbooks/model-pricing.md`;
+  LiteLLM correctness review and verification gates: `docs/LITELLM_PRICING_GUARDRAILS.md`.
 
 - Full local app runner and guarded Free/Plus/Pro/unrestricted IntelliJ profiles: `run_app.py`; effective local profile construction: `server/billing/subscription_service.py`
 - API server: `run_server.py`

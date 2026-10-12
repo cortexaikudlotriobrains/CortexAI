@@ -193,10 +193,9 @@ class CostCalculator:
             "source_url": pricing.get("source_url"),
             "source_verified_at": pricing.get("source_verified_at"),
             "rates_per_1m": {
-                "input": str(pricing["input"]),
-                "cached_input": str(pricing["cached_input"]),
-                "cache_write": str(pricing["cache_write"]),
-                "output": str(pricing["output"]),
+                key: str(pricing[key])
+                for key in ("input", "cached_input", "cache_write", "output")
+                if key in pricing
             },
         }
 
@@ -343,8 +342,8 @@ class CostCalculator:
             "model_name": self.model_name,
             "pricing_available": True,
             "input_price_per_million": snapshot["input"],
-            "cached_input_price_per_million": snapshot["cached_input"],
-            "cache_write_price_per_million": snapshot["cache_write"],
+            "cached_input_price_per_million": snapshot.get("cached_input"),
+            "cache_write_price_per_million": snapshot.get("cache_write"),
             "output_price_per_million": snapshot["output"],
             "pricing_rule_applied": snapshot["pricing_rule_id"],
             "pricing_version": snapshot["pricing_version"],

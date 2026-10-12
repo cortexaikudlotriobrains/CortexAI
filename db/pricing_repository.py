@@ -60,6 +60,8 @@ class PricingRepository:
         verified_at: Any = None,
     ) -> dict[str, Any]:
         rates = validate_rates(rates)
+        if until is not None and utc(until) <= utc(at):
+            raise ValueError("Pricing interval must end after effective_from")
         if status == "approved":
             for existing in self.list_cards(provider, model, mode):
                 if (
@@ -118,6 +120,8 @@ class PricingRepository:
     def close(self, card: dict[str, Any], at: Any) -> None:
         if utc(at) <= utc(card["effective_from"]):
             raise ValueError("Activation must follow the previous effective_from")
+        if card.get("effective_to") and utc(at) > utc(card["effective_to"]):
+            raise ValueError("Approved pricing interval cannot be extended")
         self.db.execute(
             update(self.cards).where(self.cards.c.id == card["id"]).values(effective_to=utc(at))
         )
