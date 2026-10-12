@@ -78,6 +78,36 @@ repository rejects overlapping approved intervals within each source. A trigger
 protects approved financial fields and deletion; closing an interval and updating
 its verification time are allowed. Rates are immutable once approved.
 
+Known promotional identities carry provider-verified `pricing_review.requires_expiry`
+metadata in `config/model_registry.yaml`. LiteLLM's token prices do not establish
+their validity interval. GPT-5.6 Sol is currently marked using the official
+[OpenAI pricing page](https://developers.openai.com/api/docs/pricing); its
+"available at least through" statement is a lower bound, not an exact expiry.
+No expiration date or successor price is derived from that statement.
+
+Such proposals remain candidates even with automatic activation enabled.
+`--inspect` and observations expose the review metadata. Approval also checks
+the registry for older candidates, and a bounded synchronized history or
+bounded/expired review reason cannot be approved indefinitely. Supply an
+independently verified exclusive end when approving:
+
+```powershell
+venv\Scripts\python.exe scripts/sync_model_pricing.py --approve <candidate-uuid> --effective-until <verified-UTC-end> --actor <operator> --reason "Verified provider validity evidence" --dry-run
+venv\Scripts\python.exe scripts/sync_model_pricing.py --approve <candidate-uuid> --effective-until <verified-UTC-end> --actor <operator> --reason "Verified provider validity evidence"
+```
+
+Approval dry-runs validate the same expiry/schedule/overlap checks without
+changing cards. A supplied end must follow the preserved future start and may
+shorten, never extend, a candidate's existing end. The end, actor and reason
+are audited. If an exact end is unknown, leave the promotional candidate pending;
+do not invent a date or a future standard rate. A new provider-verified ongoing
+pricing policy requires a separate review of provider evidence and this safeguard;
+verified ongoing manual pricing is supported after the registry restriction is
+explicitly removed. Manual promotional overrides
+also require `effective_until`; existing approved financial/history rows remain
+unchanged. Legacy seeds retain their bootstrap intervals and are not promotional
+price verification. Keep `MODEL_PRICING_MODE=legacy` and automatic activation off.
+
 Sync fingerprints normalized rate dimensions. Unchanged data refreshes verification
 without making another approved card. Multiple external IDs mapping to an active model
 must agree exactly, including missing versus explicitly zero optional rates;

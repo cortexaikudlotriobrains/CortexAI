@@ -59,6 +59,13 @@ Search service evidence requires review even when token fingerprints are unchang
 Approved verified expiry cannot resurrect legacy seeds or be extended by flat
 source ingestion. Operator JSON uses the existing effective interval columns for
 bounded promotions, and schedule completeness applies across every approval path.
+Known promotional identities have registry `pricing_review.requires_expiry`
+metadata. Approval requires a verified exclusive end, including older candidates,
+and the operator CLI validates approval dry-runs. Financial fingerprints and
+approved history remain immutable. OpenAI cache-write TTL selection follows the
+served model: GPT-5.6 and later use `30m`; older models retain only their supported
+retention controls and unexpected write counts fail explicitly. CI and local
+pre-push enforce the complete rate-card regression suite.
 See [the correctness review and verification gates](LITELLM_PRICING_GUARDRAILS.md).
 
 The rollout is schema → legacy seed → parity tests → database runtime switch →

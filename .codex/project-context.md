@@ -101,6 +101,7 @@ npm run --prefix frontend-react build
 ## High-Value Paths
 
 - Pricing guardrails: missing cache prices remain absent in imported/manual cards; used unpriced dimensions fail explicitly. Long-context cache partitions require explicit tier rates. Retired identities remain source observations. Gemini audio imports require normalized audio/cache partitions. Search stays on independent service cards. Expired verified cards never resurrect legacy seeds; bounded promotions require reviewed successors. Sync, manual overrides and approval all preserve required schedules. See `docs/LITELLM_PRICING_GUARDRAILS.md`; leave rollout/auto-activation flags unchanged during correctness repairs.
+- Known promotional registry identities (`pricing_review.requires_expiry`) cannot auto-activate or be approved without a verified exclusive end, including older candidates. Candidate approval accepts `--effective-until`, preserves future starts and existing shorter ends, and validates dry-runs. Promotional manual overrides require JSON `effective_until`; approved history remains immutable. OpenAI `30m` write TTL applies to GPT-5.6 and later, while older models use supported retention controls and must not report metered writes. CI and local pre-push gates always include the complete pricing regression suite.
 
 - API routes: `server/routes/`
 - API schemas: `server/schemas/`

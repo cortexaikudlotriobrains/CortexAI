@@ -6,6 +6,45 @@ Reviewed 2026-10-11 (America/Toronto), against freshly fetched `develop`
 approvals, schema changes, credit-policy changes, production database writes,
 environment edits, deployment changes, merge or deployment.
 
+## PR #84 review follow-up
+
+The existing `fix/litellm-pricing-guardrails` PR now enforces the complete
+`tests/test_model_rate_cards.py` suite in a named backend CI step and the matching
+local pre-push gate. The original 91 cases are retained, with additional
+promotion-approval and model-specific OpenAI adapter regressions.
+
+Provider-verified `pricing_review.requires_expiry` metadata marks known promotional
+identities, currently GPT-5.6 Sol and its declared alias. Sync always keeps those
+unbounded proposals under review, even when automatic activation is requested.
+Approval checks the current registry for older importer candidates and rejects
+indefinite successors to bounded source history. Operators can supply a verified
+`--effective-until`, validated on dry-run and recorded with actor/reason. Existing
+candidate ends may be shortened, never extended; financial fingerprints and
+historical cards remain unchanged. Promotional manual overrides also require an
+end. The provider's "at least through" wording is not an expiry date; candidates
+stay pending until validity evidence exists. No new expiration or future price is
+invented, and legacy seeds/pricing-mode/auto-activation defaults remain unchanged.
+
+OpenAI's documented GPT-5.6-and-later policy selects `30m` using the served model,
+including zero-write responses. Earlier models do not incur a separate write fee;
+unexpected write counters fail explicitly. The cache request builder adds `24h`
+only for the provider's documented earlier-model allowlist, including dated
+snapshots, so it no longer sends that unsupported control to GPT-5.6 models.
+Cached input and cache-write subsets still replace ordinary input once. Fixture
+end dates and rates in regression tests are test data, not provider authority.
+
+These follow-up changes do not modify deployment workflows, `.env`, production
+RDS or customer credits. Pricing/runtime, operator, CI and Postman documentation
+are synchronized; GitHub Actions evidence is reported on PR #84 after pushing.
+
+Follow-up local validation: **274 passed**, including **115 rate-card cases**
+(the original 91 plus 24 additional cases), relevant pricing/registry/credit,
+provider, identity, Work, billing-metering and local-hook tests. Ruff and MyPy
+passed all 11 changed Python files across the PR and follow-up. Validation uses
+isolated SQLite with legacy mode and automatic activation off; no production
+connection or provider request is required. Git hooks remain enabled for commit
+and push, with GitHub Actions authoritative for the final Python 3.12 CI run.
+
 ## Root causes and implemented scope
 
 | Issue | Finding | Change and remaining gate |

@@ -85,7 +85,7 @@ if ($pythonChangedFiles.Count -gt 0) {
 Run the blocking backend suites and dependency audit:
 
 ```powershell
-python -m pytest tests/test_baseline_safety_rails.py tests/test_provider_catalog.py tests/test_client_registry_and_schema_dynamic.py tests/test_fastapi_contract_and_guardrails.py tests/test_dynamic_provider_discovery_e2e.py tests/test_component_boundaries.py -q
+python -m pytest tests/test_baseline_safety_rails.py tests/test_provider_catalog.py tests/test_client_registry_and_schema_dynamic.py tests/test_fastapi_contract_and_guardrails.py tests/test_dynamic_provider_discovery_e2e.py tests/test_component_boundaries.py tests/test_model_rate_cards.py -q
 pip-audit -r requirements.txt -r requirements-dev.txt
 docker build -f Dockerfile.api -t cortexai-api:ci .
 ```

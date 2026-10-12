@@ -720,6 +720,264 @@ def test_retired_candidate_approval_is_rejected(pricing_db):
     assert not repo.list_cards("deepseek", "deepseek-chat")
 
 
+@pytest.mark.parametrize("auto_activate", [False, True])
+def test_known_promotion_without_source_expiry_always_requires_review(pricing_db, auto_activate):
+    db, repo = pricing_db
+    result = synchronize(
+        db, sol_proposal(), at=AT, policy=replace(auto_policy(), auto_activate=auto_activate)
+    )
+    assert result["candidate"] == 1
+    assert result["changes"][0]["reason"] == "promotional_pricing_requires_expiry"
+    assert result["changes"][0]["requires_expiry"] is True
+    assert not repo.list_cards("openai", "gpt-5.6-sol")
+    observed = db.execute(select(repo.observations)).mappings().one()
+    assert observed["metadata"]["pricing_review"]["requires_expiry"] is True
+
+
+@pytest.mark.parametrize("model", ["gpt-5.6-sol", "gpt-5.6"])
+def test_old_importer_cannot_approve_unbounded_known_promotion(pricing_db, model):
+    db, repo = pricing_db
+    candidate = repo.add(
+        provider="openai",
+        model=model,
+        source="LITELLM",
+        rates=rates(),
+        at=AT,
+        reference="old-importer",
+        version="v1",
+        status="candidate",
+        reason="no_known_baseline",
+    )
+    with pytest.raises(ValueError, match="verified effective_until"):
+        approve_candidate(db, candidate["id"], actor="reviewer", reason="verified")
+    with pytest.raises(ValueError, match="verified effective_until"):
+        approve_candidate(db, candidate["id"], actor="reviewer", reason="verified", dry_run=True)
+    assert not repo.list_cards("openai", "gpt-5.6-sol")
+
+
+def test_promotional_approval_bounds_candidate_and_keeps_history(pricing_db):
+    db, repo = pricing_db
+    historic = repo.add(
+        provider="openai",
+        model="gpt-5.6-sol",
+        source="LITELLM",
+        rates=rates("3"),
+        at=AT,
+        until=AT + timedelta(days=1),
+        reference="historic",
+        version="v0",
+    )
+    candidate = repo.add(
+        provider="openai",
+        model="gpt-5.6-sol",
+        source="LITELLM",
+        rates=rates(),
+        at=utc(),
+        reference="provider-evidence",
+        version="v1",
+        status="candidate",
+    )
+    end = utc() + timedelta(days=2)
+    approve_candidate(
+        db,
+        candidate["id"],
+        actor="reviewer",
+        reason="verified interval fixture",
+        effective_until=end,
+        dry_run=True,
+    )
+    assert len(repo.list_cards("openai", "gpt-5.6-sol")) == 1
+    approve_candidate(
+        db,
+        candidate["id"],
+        actor="reviewer",
+        reason="verified interval fixture",
+        effective_until=end,
+    )
+    stored = {row["id"]: row for row in repo.list_cards("openai", "gpt-5.6-sol")}
+    assert utc(stored[candidate["id"]]["effective_to"]) == end
+    assert stored[candidate["id"]]["fingerprint"] == candidate["fingerprint"]
+    assert stored[historic["id"]]["pricing_components"] == historic["pricing_components"]
+    assert utc(stored[historic["id"]]["effective_to"]) == utc(historic["effective_to"])
+    audit = db.execute(select(repo.runs)).mappings().one()["summary"]
+    assert audit["effective_until"] == end.isoformat()
+
+
+@pytest.mark.parametrize("invalid_end", ["before_start", "extend", "malformed"])
+def test_candidate_approval_rejects_invalid_or_extended_bounds(pricing_db, invalid_end):
+    db, repo = pricing_db
+    start = utc() + timedelta(days=2)
+    end = start + timedelta(days=1)
+    candidate = add(repo, status="candidate", until=end)
+    db.execute(
+        repo.cards.update().where(repo.cards.c.id == candidate["id"]).values(effective_from=start)
+    )
+    requested_end = {
+        "before_start": start,
+        "extend": end + timedelta(days=1),
+        "malformed": "not-a-date",
+    }[invalid_end]
+    with pytest.raises(ValueError):
+        approve_candidate(
+            db,
+            candidate["id"],
+            actor="reviewer",
+            reason="verified",
+            effective_until=requested_end,
+        )
+    assert not repo.list_cards("openai", "gpt-4o-mini")
+
+
+@pytest.mark.parametrize("model", ["gpt-5.6-sol", "gpt-5.6"])
+def test_manual_known_promotion_requires_and_preserves_verified_expiry(pricing_db, model):
+    db, repo = pricing_db
+    data = {
+        "provider": "openai",
+        "model": model,
+        "processing_mode": "standard",
+        "rates": rates(),
+    }
+    with pytest.raises(ValueError, match="verified effective_until"):
+        manual_override(db, data, actor="reviewer", reason="promotion", at=AT)
+    end = AT + timedelta(days=2)
+    card = manual_override(
+        db,
+        {**data, "effective_until": end},
+        actor="reviewer",
+        reason="verified interval",
+        at=AT,
+    )
+    assert utc(card["effective_to"]) == end
+    assert select_card(repo.list_cards("openai", model), end) is None
+
+
+def test_bounded_source_history_blocks_indefinite_successor_approval(pricing_db):
+    db, repo = pricing_db
+    repo.add(
+        provider="openai",
+        model="gpt-4o-mini",
+        source="LITELLM",
+        rates=rates(),
+        at=AT,
+        until=AT + timedelta(days=1),
+        reference="promo",
+        version="v0",
+    )
+    candidate = repo.add(
+        provider="openai",
+        model="gpt-4o-mini",
+        source="LITELLM",
+        rates=rates("3"),
+        at=utc(),
+        reference="old-importer",
+        version="v1",
+        status="candidate",
+    )
+    with pytest.raises(ValueError, match="verified effective_until"):
+        approve_candidate(db, candidate["id"], actor="reviewer", reason="verified")
+
+
+@pytest.mark.parametrize(
+    "model", ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.6", "gpt-5.6-sol-2026-07-22"]
+)
+def test_openai_cache_write_ttl_and_request_retention_follow_model(model, monkeypatch):
+    from api.openai_client import OpenAIClient
+    from orchestrator.cache_context import CacheContext
+
+    monkeypatch.setattr("api.openai_client.openai_prompt_cache_enabled", lambda: True)
+    monkeypatch.setattr("api.openai_client.openai_extended_prompt_cache_enabled", lambda: True)
+    assert OpenAIClient._cache_write_ttl_for_model(model) == "30m"
+    payload = {"model": model}
+    OpenAIClient._apply_prompt_cache_options(
+        payload, CacheContext(enabled=True, cache_scope_key="fixture")
+    )
+    assert "prompt_cache_retention" not in payload
+    assert payload["prompt_cache_key"] == "fixture"
+
+
+@pytest.mark.parametrize(
+    "model,extended",
+    [("gpt-5.4", True), ("gpt-5.5", True), ("gpt-4o-mini", False), ("gpt-5.4-mini", False)],
+)
+def test_earlier_openai_models_preserve_retention_without_metered_writes(
+    model, extended, monkeypatch
+):
+    from api.openai_client import OpenAIClient
+    from orchestrator.cache_context import CacheContext
+
+    monkeypatch.setattr("api.openai_client.openai_prompt_cache_enabled", lambda: True)
+    monkeypatch.setattr("api.openai_client.openai_extended_prompt_cache_enabled", lambda: True)
+    assert OpenAIClient._cache_write_ttl_for_model(model) != "30m"
+    payload = {"model": model}
+    OpenAIClient._apply_prompt_cache_options(
+        payload, CacheContext(enabled=True, cache_scope_key="fixture")
+    )
+    if extended:
+        assert payload["prompt_cache_retention"] == "24h"
+    else:
+        assert "prompt_cache_retention" not in payload
+
+
+@pytest.mark.parametrize(
+    "model,writes",
+    [("gpt-5.6-sol", 100), ("gpt-5.6-luna", 0), ("gpt-5.4-mini", 0), ("gpt-5.4-mini", 100)],
+)
+def test_openai_adapter_uses_model_ttl_and_exact_reported_cost(
+    pricing_db, monkeypatch, model, writes
+):
+    from api.openai_client import OpenAIClient
+
+    db, repo = pricing_db
+    repo.add(
+        provider="openai",
+        model=model,
+        source="LITELLM",
+        rates=rates(),
+        at=AT,
+        reference="fixture",
+        version="v1",
+    )
+    repo.add(
+        provider="openai",
+        model="__web_search__",
+        source="LITELLM",
+        rates=validate_rates(
+            {"tokens": {"input": "0", "output": "0"}, "units": {"web_search_count": "0.01"}}
+        ),
+        at=AT,
+        reference="fixture",
+        version="v1",
+    )
+    db.commit()
+    monkeypatch.setenv("MODEL_PRICING_MODE", "database")
+    client = OpenAIClient(api_key="fixture", model_name=model)
+    response = {
+        "model": model,
+        "output": [],
+        "output_text": "answer",
+        "usage": {
+            "input_tokens": 1000,
+            "output_tokens": 10,
+            "input_tokens_details": {"cached_tokens": 200, "cache_write_tokens": writes},
+        },
+    }
+    monkeypatch.setattr(
+        client, "_create_openai_completion", lambda **kwargs: (response, "responses", None)
+    )
+    result = client.get_completion(prompt="fixture")
+    if model == "gpt-5.4-mini" and writes:
+        assert result.is_error
+        assert result.error.details["exception_type"] == "PricingUnavailableError"
+        return
+    assert not result.is_error
+    assert result.token_usage.cache_write_tokens == writes
+    assert result.pricing_snapshot["cache_write_ttl"] == (
+        "30m" if model.startswith("gpt-5.6") else "5m"
+    )
+    expected = Decimal("0.00179") if writes else Decimal("0.00174")
+    assert Decimal(result.pricing_snapshot["usage_calculated_provider_cost_usd"]) == expected
+
+
 def catalog(input_rate=Decimal("0.000002"), output_rate=Decimal("0.00001"), extra=None):
     entry = {
         "litellm_provider": "openai",

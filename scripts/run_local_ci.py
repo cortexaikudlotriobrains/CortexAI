@@ -82,6 +82,7 @@ BACKEND_TESTS = (
     "tests/test_fastapi_contract_and_guardrails.py",
     "tests/test_dynamic_provider_discovery_e2e.py",
     "tests/test_component_boundaries.py",
+    "tests/test_model_rate_cards.py",
 )
 
 
