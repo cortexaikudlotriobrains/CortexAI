@@ -85,6 +85,16 @@ their validity interval. GPT-5.6 Sol is currently marked using the official
 "available at least through" statement is a lower bound, not an exact expiry.
 No expiration date or successor price is derived from that statement.
 
+Google's [Gemini 3.6 Flash pricing](https://ai.google.dev/gemini-api/docs/pricing#gemini-3.6-flash)
+documents promotional prices through December 31, 2026. Its registry review
+metadata also records `effective_until: "2027-01-01T00:00:00Z"`, the exclusive
+boundary in Cortex's UTC intervals. Candidate approvals and manual overrides
+must supply or retain a verified end no later than this boundary. Approval
+dry-runs enforce the same ceiling, including dates already stored on older
+candidates. The metadata does not populate a candidate's missing source end,
+change legacy rates, or create a future successor card. Prices after the boundary
+require a separately reviewed card with verified rates and validity evidence.
+
 Such proposals remain candidates even with automatic activation enabled.
 `--inspect` and observations expose the review metadata. Approval also checks
 the registry for older candidates, and a bounded synchronized history or

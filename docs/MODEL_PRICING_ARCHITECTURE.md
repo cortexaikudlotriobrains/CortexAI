@@ -61,7 +61,12 @@ source ingestion. Operator JSON uses the existing effective interval columns for
 bounded promotions, and schedule completeness applies across every approval path.
 Known promotional identities have registry `pricing_review.requires_expiry`
 metadata. Approval requires a verified exclusive end, including older candidates,
-and the operator CLI validates approval dry-runs. Financial fingerprints and
+and the operator CLI validates approval dry-runs. Optional provider-verified
+`pricing_review.effective_until` metadata sets the latest allowed exclusive end
+for both candidate approval and manual overrides in `pricing/sync.py`.
+For Gemini 3.6 Flash, Google's December 31, 2026 boundary is stored as
+`2027-01-01T00:00:00Z`. It leaves unbounded imports pending without creating a
+future successor card or changing legacy rates. Financial fingerprints and
 approved history remain immutable. OpenAI cache-write TTL selection follows the
 served model: GPT-5.6 and later use `30m`; older models retain only their supported
 retention controls and unexpected write counts fail explicitly. CI and local

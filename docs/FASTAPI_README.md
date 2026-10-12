@@ -1003,6 +1003,12 @@ promotions require review. Operator JSON accepts `effective_from` and
 candidates. Known promotional identities require a verified approval
 `--effective-until` or manual JSON `effective_until`; approval dry-runs enforce
 the same guards, and no date is inferred from "at least through" provider wording.
+For `gemini-3.6-flash`, Google's prices through December 31, 2026 establish
+the registry's exclusive UTC `pricing_review.effective_until` boundary
+`2027-01-01T00:00:00Z`. Approval and manual intervals cannot exceed that boundary;
+unbounded imports remain candidates even with automatic activation enabled.
+No future successor card or legacy price change is introduced. See
+[Google pricing](https://ai.google.dev/gemini-api/docs/pricing#gemini-3.6-flash).
 The backend CI and local pre-push gates include the rate-card regression suite.
 No HTTP route/request field changes. Keep database pricing disabled
 until the [verification gates](LITELLM_PRICING_GUARDRAILS.md) are satisfied.

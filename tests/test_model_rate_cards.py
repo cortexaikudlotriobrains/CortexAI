@@ -720,6 +720,174 @@ def test_retired_candidate_approval_is_rejected(pricing_db):
     assert not repo.list_cards("deepseek", "deepseek-chat")
 
 
+def gemini_flash_proposal():
+    return LiteLLMPricingSource.parse(
+        json.dumps(
+            {
+                "gemini-3.6-flash": {
+                    "litellm_provider": "gemini",
+                    "input_cost_per_token": "0.00000075",
+                    "output_cost_per_token": "0.00000375",
+                    "cache_read_input_token_cost": "0.000000075",
+                }
+            }
+        ).encode()
+    )
+
+
+@pytest.mark.parametrize("auto_activate", [False, True])
+@pytest.mark.parametrize("baseline_source", ["LEGACY_CORTEX", "LITELLM"])
+def test_gemini_promotion_never_auto_activates_without_source_expiry(
+    pricing_db, auto_activate, baseline_source
+):
+    db, repo = pricing_db
+    proposal = gemini_flash_proposal()
+    repo.add(
+        provider="gemini",
+        model="gemini-3.6-flash",
+        source=baseline_source,
+        rates=proposal.entries["gemini-3.6-flash"]["rates"],
+        at=AT,
+        reference="old baseline",
+        version="v0",
+    )
+    result = synchronize(
+        db,
+        proposal,
+        at=AT + timedelta(days=1),
+        policy=replace(auto_policy(), auto_activate=auto_activate),
+    )
+    assert result["candidate"] == 1
+    assert result["added"] == result["changed"] == result["unchanged"] == 0
+    assert result["changes"][0]["reason"] == "promotional_pricing_requires_expiry"
+    candidates = (
+        db.execute(select(repo.cards).where(repo.cards.c.status == "candidate")).mappings().all()
+    )
+    assert len(candidates) == 1
+    assert candidates[0]["effective_to"] is None
+    observed = db.execute(select(repo.observations)).mappings().one()
+    assert observed["metadata"]["pricing_review"]["effective_until"] == "2027-01-01T00:00:00Z"
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_gemini_unbounded_promotion_cannot_be_approved_with_auto_enabled(
+    pricing_db, monkeypatch, mocker, dry_run
+):
+    db, repo = pricing_db
+    mocker.patch("pricing.sync.datetime").now.return_value = AT
+    monkeypatch.setenv("MODEL_PRICING_ALLOW_AUTO_ACTIVATION", "true")
+    candidate = repo.add(
+        provider="gemini",
+        model="gemini-3.6-flash",
+        source="LITELLM",
+        rates=gemini_flash_proposal().entries["gemini-3.6-flash"]["rates"],
+        at=AT,
+        reference="old importer",
+        version="v1",
+        status="candidate",
+        reason="no_known_baseline",
+    )
+    with pytest.raises(ValueError, match="verified effective_until"):
+        approve_candidate(db, candidate["id"], actor="reviewer", reason="verified", dry_run=dry_run)
+    stored = db.execute(select(repo.cards)).mappings().one()
+    assert stored["status"] == "candidate"
+    assert stored["fingerprint"] == candidate["fingerprint"]
+    assert not repo.list_cards("gemini", "gemini-3.6-flash")
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+@pytest.mark.parametrize("end_on_candidate", [False, True])
+def test_gemini_promotional_approval_cannot_exceed_documented_boundary(
+    pricing_db, mocker, dry_run, end_on_candidate
+):
+    db, repo = pricing_db
+    mocker.patch("pricing.sync.datetime").now.return_value = AT
+    late_end = utc("2027-01-02T00:00:00Z")
+    candidate = repo.add(
+        provider="gemini",
+        model="gemini-3.6-flash",
+        source="LITELLM",
+        rates=gemini_flash_proposal().entries["gemini-3.6-flash"]["rates"],
+        at=AT,
+        until=late_end if end_on_candidate else None,
+        reference="fixture",
+        version="v1",
+        status="candidate",
+    )
+    with pytest.raises(ValueError, match="documented promotional effective_until"):
+        approve_candidate(
+            db,
+            candidate["id"],
+            actor="reviewer",
+            reason="verified",
+            effective_until=None if end_on_candidate else late_end,
+            dry_run=dry_run,
+        )
+    assert not repo.list_cards("gemini", "gemini-3.6-flash")
+
+
+def test_gemini_approval_preserves_documented_boundary_without_successor(pricing_db, mocker):
+    db, repo = pricing_db
+    mocker.patch("pricing.sync.datetime").now.return_value = AT
+    historic = repo.add(
+        provider="gemini",
+        model="gemini-3.6-flash",
+        source="LEGACY_CORTEX",
+        rates=rates("1.5", "7.5", "0.15"),
+        at=AT,
+        reference="legacy fixture",
+        version="v0",
+    )
+    candidate = repo.add(
+        provider="gemini",
+        model="gemini-3.6-flash",
+        source="LITELLM",
+        rates=gemini_flash_proposal().entries["gemini-3.6-flash"]["rates"],
+        at=AT,
+        reference="provider evidence",
+        version="v1",
+        status="candidate",
+    )
+    boundary = utc("2027-01-01T00:00:00Z")
+    approve_candidate(
+        db,
+        candidate["id"],
+        actor="reviewer",
+        reason="Verified Google pricing boundary",
+        effective_until=boundary,
+    )
+    cards = repo.list_cards("gemini", "gemini-3.6-flash")
+    assert len(cards) == 2
+    selected = select_card(cards, boundary - timedelta(microseconds=1))
+    assert selected["id"] == candidate["id"]
+    assert utc(selected["effective_to"]) == boundary
+    assert selected["fingerprint"] == candidate["fingerprint"]
+    assert select_card(cards, boundary) is None
+    assert select_card(cards, boundary + timedelta(days=1)) is None
+    retained = next(card for card in cards if card["id"] == historic["id"])
+    assert retained["pricing_components"] == historic["pricing_components"]
+    assert retained["effective_to"] is None
+
+
+@pytest.mark.parametrize("end", [None, "2027-01-02T00:00:00Z", "2027-01-01T00:00:00Z"])
+def test_gemini_manual_promotion_preserves_verified_expiry(pricing_db, end):
+    db, _ = pricing_db
+    data = {
+        "provider": "gemini",
+        "model": "gemini-3.6-flash",
+        "processing_mode": "standard",
+        "rates": gemini_flash_proposal().entries["gemini-3.6-flash"]["rates"],
+    }
+    if end:
+        data["effective_until"] = end
+    if end != "2027-01-01T00:00:00Z":
+        with pytest.raises(ValueError, match="effective_until"):
+            manual_override(db, data, actor="reviewer", reason="verified promotion", at=AT)
+    else:
+        card = manual_override(db, data, actor="reviewer", reason="verified promotion", at=AT)
+        assert utc(card["effective_to"]) == utc(end)
+
+
 @pytest.mark.parametrize("auto_activate", [False, True])
 def test_known_promotion_without_source_expiry_always_requires_review(pricing_db, auto_activate):
     db, repo = pricing_db

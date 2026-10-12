@@ -74,6 +74,17 @@ def requires_expiry(record: dict[str, Any]) -> bool:
     return bool(record.get("pricing_review", {}).get("requires_expiry"))
 
 
+def validate_promotional_expiry(record: dict[str, Any], until: datetime | None) -> None:
+    """Keep operator intervals within a provider-verified promotional boundary."""
+    if not requires_expiry(record):
+        return
+    if until is None:
+        raise ValueError("Promotional pricing requires a verified effective_until")
+    documented_until = record["pricing_review"].get("effective_until")
+    if documented_until and utc(until) > utc(documented_until):
+        raise ValueError("Pricing interval exceeds the documented promotional effective_until")
+
+
 def synchronize(
     db: Session,
     catalog: Catalog,
@@ -453,8 +464,7 @@ def manual_override(
     identities = ModelIdentityMap()
     canonical = identities.resolve(data["provider"], data["model"]) or data["model"]
     record = identities.models.get((data["provider"], canonical), {})
-    if requires_expiry(record) and until is None:
-        raise ValueError("Promotional pricing requires a verified effective_until")
+    validate_promotional_expiry(record, until)
     if requires_schedule(cards, record, effective_from) and "schedule" not in rates:
         raise ValueError("Manual price omits the active billing schedule")
     previous = select_card(
@@ -549,6 +559,7 @@ def approve_candidate(
             raise ValueError("Pricing interval must end after effective_from")
         if candidate["effective_to"] and until > utc(candidate["effective_to"]):
             raise ValueError("Candidate pricing interval cannot be extended")
+    validate_promotional_expiry(record, until)
     validate_rates(candidate["pricing_components"])
     approved = repo.list_cards(
         candidate["provider"], candidate["canonical_model_id"], candidate["processing_mode"]

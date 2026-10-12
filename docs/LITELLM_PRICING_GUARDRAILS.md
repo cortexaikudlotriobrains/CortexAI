@@ -14,16 +14,29 @@ local pre-push gate. The original 91 cases are retained, with additional
 promotion-approval and model-specific OpenAI adapter regressions.
 
 Provider-verified `pricing_review.requires_expiry` metadata marks known promotional
-identities, currently GPT-5.6 Sol and its declared alias. Sync always keeps those
+identities, currently GPT-5.6 Sol (including its declared alias) and Gemini 3.6
+Flash. Sync always keeps those
 unbounded proposals under review, even when automatic activation is requested.
 Approval checks the current registry for older importer candidates and rejects
 indefinite successors to bounded source history. Operators can supply a verified
 `--effective-until`, validated on dry-run and recorded with actor/reason. Existing
 candidate ends may be shortened, never extended; financial fingerprints and
 historical cards remain unchanged. Promotional manual overrides also require an
-end. The provider's "at least through" wording is not an expiry date; candidates
+end. OpenAI's "at least through" wording is not an expiry date; candidates
 stay pending until validity evidence exists. No new expiration or future price is
 invented, and legacy seeds/pricing-mode/auto-activation defaults remain unchanged.
+
+Google's [official Gemini 3.6 Flash pricing](https://ai.google.dev/gemini-api/docs/pricing#gemini-3.6-flash)
+lists promotional prices through December 31, 2026. The registry records the
+exclusive UTC `pricing_review.effective_until` boundary `2027-01-01T00:00:00Z`.
+The shared promotional validator rejects later approval/manual ends, including
+dates retained on older candidates and approval dry-runs. Imports with no source
+expiry remain candidates even when auto-activation is requested; the metadata
+does not fill a missing source date or create a successor card. Fourteen new
+regression cases cover automatic activation on/off with legacy and synchronized
+baselines, unbounded approval, overlong dates, manual expiry, exact boundary
+selection and retained history. Approval tests freeze the review clock before
+the documented boundary so the suite remains deterministic after expiry.
 
 OpenAI's documented GPT-5.6-and-later policy selects `30m` using the served model,
 including zero-write responses. Earlier models do not incur a separate write fee;
@@ -37,8 +50,8 @@ These follow-up changes do not modify deployment workflows, `.env`, production
 RDS or customer credits. Pricing/runtime, operator, CI and Postman documentation
 are synchronized; GitHub Actions evidence is reported on PR #84 after pushing.
 
-Follow-up local validation: **274 passed**, including **115 rate-card cases**
-(the original 91 plus 24 additional cases), relevant pricing/registry/credit,
+Follow-up local validation: **288 passed**, including **129 rate-card cases**
+(the original 91 plus 38 additional cases), relevant pricing/registry/credit,
 provider, identity, Work, billing-metering and local-hook tests. Ruff and MyPy
 passed all 11 changed Python files across the PR and follow-up. Validation uses
 isolated SQLite with legacy mode and automatic activation off; no production

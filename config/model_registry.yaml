@@ -426,6 +426,12 @@ providers:
       - name: "gemini-3.6-flash"
         display_name: "Gemini 3.6 Flash"
         description: "Current high-throughput Gemini model for fast reasoning and multimodal tasks."
+        pricing_review:
+          requires_expiry: true
+          effective_until: "2027-01-01T00:00:00Z"
+          source_url: "https://ai.google.dev/gemini-api/docs/pricing#gemini-3.6-flash"
+          verified_at: "2026-10-12"
+          note: "Promotional prices through December 31, 2026; exclusive UTC boundary January 1, 2027."
         tier: "T1"
         billing_class: "standard"
         input_credit_multiplier: 2.0

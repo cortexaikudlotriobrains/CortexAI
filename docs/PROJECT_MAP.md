@@ -8,7 +8,8 @@ This map is the quick "where do I change X?" reference for the current API-first
   `pricing/identity.py`, `pricing/service.py`, `pricing/schedules.py`,
   `pricing/sources.py`, `pricing/sync.py`;
   configuration: `config/model_pricing.py`, registry promotional-review metadata
-  in `config/model_registry.yaml`; persistence: `db/pricing_repository.py`,
+  in `config/model_registry.yaml`; promotional boundary validation for approvals/manual
+  overrides: `pricing/sync.py`; persistence: `db/pricing_repository.py`,
   `db/migrations/20261007_add_versioned_model_rate_cards.sql`; operator CLI:
   `scripts/sync_model_pricing.py`. Architecture and staged rollout:
   `docs/MODEL_PRICING_ARCHITECTURE.md`, `docs/runbooks/model-pricing.md`;
