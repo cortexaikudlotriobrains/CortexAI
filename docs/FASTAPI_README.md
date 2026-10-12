@@ -975,6 +975,12 @@ Run compare orchestrator tests:
 pytest tests/test_multi_compare_mode.py -v
 ```
 
+Run a headed live browser readiness smoke check (requires the E2E database/auth configuration in `e2e/README.md`, but submits no provider prompts):
+```bash
+npm run --prefix e2e test:headed -- specs/00.app-readiness.spec.mjs
+```
+The live readiness check waits for the composer and desktop `Workspace mode` navigation before test scenarios start.
+
 Run React responsive browser tests without a backend or database:
 ```bash
 npm run --prefix e2e test:mobile

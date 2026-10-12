@@ -181,7 +181,9 @@ async function waitForTextGrowth(page, indices, { firstContentTimeoutMs, complet
 /** Wait until the main composer and model selectors are ready for interaction. */
 export async function waitForComposerReady(page, config) {
     await expect(page.locator("#promptInput")).toBeVisible({ timeout: config.timeouts.frontendReadyMs });
-    await expect(page.getByRole("navigation", { name: "Chat mode" })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Workspace mode", exact: true })).toBeVisible({
+        timeout: config.timeouts.frontendReadyMs,
+    });
     await expect(page.getByRole("alert")).toHaveCount(0);
 }
 

@@ -1461,6 +1461,8 @@ Run browser E2E suite (Playwright):
 npm run --prefix e2e test
 ```
 
+For a headed startup/readiness smoke check without submitting provider prompts, run `npm run --prefix e2e test:headed -- specs/00.app-readiness.spec.mjs`. The live harness waits for the composer and desktop `Workspace mode` navigation; setup instructions are in [e2e/README.md](e2e/README.md).
+
 Run the frontend-only responsive suites independently:
 ```bash
 npm run --prefix e2e test:mobile

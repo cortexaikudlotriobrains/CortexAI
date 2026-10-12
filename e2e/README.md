@@ -19,7 +19,7 @@ Nothing in this folder is used by the API image or the frontend deployment artif
 - `helpers/api.mjs`: HTTP polling and history-cleanup requests.
 - `helpers/db.mjs`: direct Postgres assertions and cleanup backstop; case snapshots match both prompt markers and E2E request IDs so optimizer rewrites remain discoverable and removable.
 - `helpers/network.mjs`: request-id injection plus optional fault headers.
-- `helpers/ui.mjs`: browser actions and stream-observation helpers.
+- `helpers/ui.mjs`: browser actions and stream-observation helpers; readiness waits for the prompt input and the desktop `Workspace mode` navigation within `E2E_FRONTEND_READY_TIMEOUT_MS`, with no error alerts.
 - `server/run_e2e_server.py`: E2E-only FastAPI bootstrap.
 - `server/fault_injection.py`: request-scoped fallback fault injection for special-path tests.
 - `server/stream_tuning.py`: makes local streaming easier to observe in browser assertions.
@@ -64,6 +64,14 @@ npm run --prefix e2e test:headed
 npm run --prefix e2e test:debug
 npm run --prefix e2e test:report
 ```
+
+To verify live startup and UI readiness without submitting a provider prompt:
+
+```bash
+npm run --prefix e2e test:headed -- specs/00.app-readiness.spec.mjs
+```
+
+This smoke check uses the same live database and authentication prerequisites as the full suite. Global setup opens a headless readiness probe before the headed test browser starts.
 
 ## Playwright MCP (option 1)
 
