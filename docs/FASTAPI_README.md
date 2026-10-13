@@ -975,12 +975,19 @@ Run compare orchestrator tests:
 pytest tests/test_multi_compare_mode.py -v
 ```
 
+Run a headed live browser readiness smoke check (requires the E2E database/auth configuration in `e2e/README.md`, but submits no provider prompts):
+```bash
+npm run --prefix e2e test:headed -- specs/00.app-readiness.spec.mjs
+```
+The live readiness check waits for the composer and desktop `Workspace mode` navigation before test scenarios start.
+
 Run React responsive browser tests without a backend or database:
 ```bash
 npm run --prefix e2e test:mobile
 npm run --prefix e2e test:desktop-ipad
 ```
 The suites start isolated Vite servers and mock frontend API contracts. Mobile tests cover phone navigation, composer clearance and growth, full visibility of narrow-screen feature controls, attachments, Compare model controls, history restoration, and stacked response cards. Desktop/iPad tests cover the desktop shell, iPad breakpoint behavior, model selection, and independent Compare response scrolling.
+Mobile composer containment checks measure the feature row and buttons in a shared browser layout snapshot, retaining a one-pixel tolerance while avoiding stale bounds during asynchronous font swaps.
 
 ---
 

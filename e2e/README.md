@@ -19,7 +19,7 @@ Nothing in this folder is used by the API image or the frontend deployment artif
 - `helpers/api.mjs`: HTTP polling and history-cleanup requests.
 - `helpers/db.mjs`: direct Postgres assertions and cleanup backstop; case snapshots match both prompt markers and E2E request IDs so optimizer rewrites remain discoverable and removable.
 - `helpers/network.mjs`: request-id injection plus optional fault headers.
-- `helpers/ui.mjs`: browser actions and stream-observation helpers.
+- `helpers/ui.mjs`: browser actions and stream-observation helpers; readiness waits for the prompt input and the desktop `Workspace mode` navigation within `E2E_FRONTEND_READY_TIMEOUT_MS`, with no error alerts.
 - `server/run_e2e_server.py`: E2E-only FastAPI bootstrap.
 - `server/fault_injection.py`: request-scoped fallback fault injection for special-path tests.
 - `server/stream_tuning.py`: makes local streaming easier to observe in browser assertions.
@@ -57,6 +57,8 @@ npm run --prefix e2e test:desktop-ipad
 
 The mobile suite covers 320px and 390px phone layouts. The desktop/iPad suite covers 1440px desktop, 1024px iPad landscape, and 820px iPad portrait behavior. The shared responsive fixture can switch its mocked effective plan and catalogue ordering so Free/Plus/Pro Ask and Compare default coverage verifies plan eligibility without pretending that the live unrestricted harness represents paid-plan isolation. Each command can be run independently.
 
+Mobile composer containment checks measure the feature row and its buttons in one browser layout snapshot so asynchronous font swaps cannot mix old container bounds with new button bounds. The one-pixel containment tolerance remains unchanged.
+
 Useful variants:
 
 ```bash
@@ -64,6 +66,14 @@ npm run --prefix e2e test:headed
 npm run --prefix e2e test:debug
 npm run --prefix e2e test:report
 ```
+
+To verify live startup and UI readiness without submitting a provider prompt:
+
+```bash
+npm run --prefix e2e test:headed -- specs/00.app-readiness.spec.mjs
+```
+
+This smoke check uses the same live database and authentication prerequisites as the full suite. Global setup opens a headless readiness probe before the headed test browser starts.
 
 ## Playwright MCP (option 1)
 

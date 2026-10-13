@@ -1461,12 +1461,15 @@ Run browser E2E suite (Playwright):
 npm run --prefix e2e test
 ```
 
+For a headed startup/readiness smoke check without submitting provider prompts, run `npm run --prefix e2e test:headed -- specs/00.app-readiness.spec.mjs`. The live harness waits for the composer and desktop `Workspace mode` navigation; setup instructions are in [e2e/README.md](e2e/README.md).
+
 Run the frontend-only responsive suites independently:
 ```bash
 npm run --prefix e2e test:mobile
 npm run --prefix e2e test:desktop-ipad
 ```
 These responsive suites start their own Vite server and use mocked frontend API contracts, so they do not require PostgreSQL, provider keys, or the live E2E environment. Mobile coverage exercises 320px and 390px phone behavior; the desktop/iPad suite covers desktop plus iPad portrait and landscape layouts.
+Mobile composer containment assertions capture the feature row and its controls together to avoid inconsistent bounds during font swaps; the existing one-pixel tolerance is preserved.
 
 Run high-impact UI business scenarios only:
 ```bash
