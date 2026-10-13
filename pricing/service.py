@@ -195,3 +195,22 @@ def validate_readiness() -> None:
             raise PricingUnavailableError(f"Seed search pricing for {provider}")
     if get_snapshot("claude", "__managed_runtime__") is None:
         raise PricingUnavailableError("Seed Managed Agent runtime pricing")
+    validate_model_registry()
+
+
+def validate_model_registry() -> None:
+    """Build the full model registry from the active pricing source.
+
+    Every enabled model having a price is not enough: the catalog, Ask,
+    Compare and history all build ``ModelRegistry`` from these snapshots, so a
+    snapshot the registry cannot read takes every provider offline even while
+    ``/health`` stays green. Fail startup instead.
+    """
+    from orchestrator.model_registry import ModelRegistry
+
+    try:
+        ModelRegistry.from_yaml()
+    except Exception as exc:
+        raise PricingUnavailableError(
+            f"Model registry failed to build with the active pricing source: {exc!r}"
+        ) from exc

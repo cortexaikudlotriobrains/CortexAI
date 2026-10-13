@@ -880,8 +880,11 @@ Provider prices can be maintained in PostgreSQL independently of application
 releases with `MODEL_PRICING_MODE=database`. The default `legacy` mode keeps the
 existing registry rates available for staged migration/rollback. Apply
 `20261007_add_versioned_model_rate_cards.sql`, seed existing prices using
-`python scripts/sync_model_pricing.py --seed-legacy`, verify parity, then enable
-database mode and restart API/workers. External LiteLLM synchronization is an
+`python scripts/sync_model_pricing.py --seed-legacy`, verify parity, run the
+read-only `python scripts/preflight_database_pricing.py` on the API host, then enable
+database mode and restart API/workers. Startup readiness builds the full model
+registry, and the catalog reports a rate missing from an approved card as `null`
+(never `0`); `/health` alone does not prove the catalog works. External LiteLLM synchronization is an
 operator/scheduled command. Manual overrides, effective-dated history,
 suspicious-change review and exact Decimal calculation evidence are retained.
 Model enablement/lifecycle and subscription credit policy remain separate.

@@ -83,6 +83,7 @@ BACKEND_TESTS = (
     "tests/test_dynamic_provider_discovery_e2e.py",
     "tests/test_component_boundaries.py",
     "tests/test_model_rate_cards.py",
+    "tests/test_database_pricing_model_registry.py",
 )
 
 
