@@ -57,6 +57,8 @@ npm run --prefix e2e test:desktop-ipad
 
 The mobile suite covers 320px and 390px phone layouts. The desktop/iPad suite covers 1440px desktop, 1024px iPad landscape, and 820px iPad portrait behavior. The shared responsive fixture can switch its mocked effective plan and catalogue ordering so Free/Plus/Pro Ask and Compare default coverage verifies plan eligibility without pretending that the live unrestricted harness represents paid-plan isolation. Each command can be run independently.
 
+Mobile composer containment checks measure the feature row and its buttons in one browser layout snapshot so asynchronous font swaps cannot mix old container bounds with new button bounds. The one-pixel containment tolerance remains unchanged.
+
 Useful variants:
 
 ```bash

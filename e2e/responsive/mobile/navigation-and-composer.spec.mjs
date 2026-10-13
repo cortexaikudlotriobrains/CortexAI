@@ -442,20 +442,32 @@ async function composerMetrics(page) {
 
 async function expectMobileComposerControlsFullyVisible(page) {
     const featureControls = page.locator("#promptFeatureControls");
-    const featureBounds = await featureControls.boundingBox();
-    expect(featureBounds).not.toBeNull();
-
-    for (const [role, name] of [
+    const featureButtons = [
         ["switch", "Smart routing"],
         ["button", "More options"],
-    ]) {
-        const control = page.getByRole(role, { name });
-        await expect(control).toBeVisible();
-        const bounds = await control.boundingBox();
+    ];
+    for (const [role, name] of featureButtons) {
+        await expect(page.getByRole(role, { name })).toBeVisible();
+    }
+
+    // Font swaps can reflow the row between separate boundingBox calls.
+    // Read the container and its buttons in the same browser layout snapshot.
+    const { featureBounds, buttonBounds } = await featureControls.evaluate((feature, names) => {
+        const featureRect = feature.getBoundingClientRect();
+        return {
+            featureBounds: { x: featureRect.x, right: featureRect.right },
+            buttonBounds: names.map(name => {
+                const rect = feature.querySelector(`[aria-label="${name}"]`)?.getBoundingClientRect();
+                return { name, bounds: rect ? { x: rect.x, right: rect.right } : null };
+            }),
+        };
+    }, featureButtons.map(([, name]) => name));
+
+    for (const { name, bounds } of buttonBounds) {
         expect(bounds, `${name} bounds`).not.toBeNull();
         expect(bounds.x, `${name} left edge`).toBeGreaterThanOrEqual(featureBounds.x - 1);
-        expect(bounds.x + bounds.width, `${name} right edge`).toBeLessThanOrEqual(
-            featureBounds.x + featureBounds.width + 1,
+        expect(bounds.right, `${name} right edge`).toBeLessThanOrEqual(
+            featureBounds.right + 1,
         );
     }
 

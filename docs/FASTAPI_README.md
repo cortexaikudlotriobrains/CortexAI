@@ -987,6 +987,7 @@ npm run --prefix e2e test:mobile
 npm run --prefix e2e test:desktop-ipad
 ```
 The suites start isolated Vite servers and mock frontend API contracts. Mobile tests cover phone navigation, composer clearance and growth, full visibility of narrow-screen feature controls, attachments, Compare model controls, history restoration, and stacked response cards. Desktop/iPad tests cover the desktop shell, iPad breakpoint behavior, model selection, and independent Compare response scrolling.
+Mobile composer containment checks measure the feature row and buttons in a shared browser layout snapshot, retaining a one-pixel tolerance while avoiding stale bounds during asynchronous font swaps.
 
 ---
 
