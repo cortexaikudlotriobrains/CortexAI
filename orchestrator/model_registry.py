@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import yaml
 
@@ -212,16 +212,8 @@ class ModelRegistry:
                             and pricing_snapshot.get("long_context_threshold_tokens")
                             else None
                         ),
-                        cached_input_cost_per_1m=(
-                            float(pricing_snapshot["cached_input"])
-                            if pricing_snapshot is not None
-                            else None
-                        ),
-                        cache_write_cost_per_1m=(
-                            float(pricing_snapshot["cache_write"])
-                            if pricing_snapshot is not None
-                            else None
-                        ),
+                        cached_input_cost_per_1m=_optional_rate(pricing_snapshot, "cached_input"),
+                        cache_write_cost_per_1m=_optional_rate(pricing_snapshot, "cache_write"),
                         max_output_tokens=(
                             int(model["max_output_tokens"])
                             if model.get("max_output_tokens") not in (None, "")
@@ -400,6 +392,24 @@ class ModelRegistry:
         if include_disabled:
             return candidates
         return [candidate for candidate in candidates if candidate.enabled]
+
+
+def _optional_rate(snapshot: Mapping[str, Any] | None, key: str) -> float | None:
+    """Read an optional per-million rate for catalog display.
+
+    Approved database rate cards carry only the dimensions their source
+    published (Gemini has no cache-write price, for example), so an absent
+    dimension stays ``None``. It is never read as ``0``: billing still raises
+    PRICING_UNKNOWN if a request actually uses that dimension. An explicit
+    zero rate is kept as ``0.0``.
+    """
+
+    if snapshot is None:
+        return None
+    value = snapshot.get(key)
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    return float(value)
 
 
 def _positive_float(value: object, label: str) -> float:

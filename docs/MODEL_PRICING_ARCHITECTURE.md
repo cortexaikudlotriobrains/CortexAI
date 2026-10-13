@@ -171,3 +171,37 @@ was rewritten or external candidate approved during these repairs.
 - Validation: Ruff and changed-file MyPy pass; the backend suite passes
   (1,047 passed, 18 skipped) apart from the pre-existing frontend port assertion in
   `test_run_app.py` (5173 expected versus the runner's 5174 default).
+
+## Database-mode registry incident and fix (2026-10-13 UTC)
+
+- Production enabled `MODEL_PRICING_MODE=database`. `/health` and startup readiness
+  passed, but `ModelRegistry.from_yaml()` raised `KeyError: 'cache_write'`: the
+  approved LiteLLM card for `gemini-3.6-flash` has no cache-write rate, and
+  `orchestrator/model_registry.py` read `cached_input`/`cache_write` from every
+  snapshot by index. Database snapshots carry only the dimensions on the card
+  (legacy snapshots always filled them), so legacy mode never exposed this.
+- Every route that builds the registry failed: `/v1/model-options`, `/v1/providers`,
+  `/v1/history` (credit usage per row), Ask and Compare. React fell back to its
+  bundled five-model catalog (OpenAI, Claude, DeepSeek only) and kept its last
+  loaded history because history load errors are not shown. Rolling back to
+  legacy mode restored service.
+- Fix: the registry reads optional rates with `_optional_rate`, so a missing
+  dimension is `None` in `ModelCandidate` and `null` in the catalog DTO; an
+  explicit zero stays `0.0`. Input/output remain required. Billing is unchanged:
+  `pricing/engine.py` still raises `PRICING_UNKNOWN` when usage needs a missing
+  rate, and database mode still has no conservative or legacy fallback.
+- `pricing/service.py::validate_readiness` now also builds the registry, so this
+  class of failure stops startup instead of degrading every provider.
+  `scripts/preflight_database_pricing.py` runs the same checks read-only from a
+  separate process before any mode change; see the runbook.
+- Remaining exposure: an enabled model with no applicable approved card still
+  prevents the registry from building. The GPT-5.6 Sol card ends
+  `2026-11-21T00:00:00Z` and the Gemini 3.6 Flash card ends
+  `2027-01-01T00:00:00Z`; approve reviewed successors before then.
+- Validation: `tests/test_database_pricing_model_registry.py` (22 cases) seeds
+  every enabled model plus the four approved production LiteLLM cards in an
+  isolated SQLite store and fails with the production `KeyError` on the old code.
+  Pricing suites: 156 passed. Full backend suite: 1,067 passed, 3 skipped, with
+  the same 10 failures as unmodified `develop` (nine order-dependent
+  `test_routing_regression.py` cases from shared circuit-breaker state and the
+  runner port assertion).

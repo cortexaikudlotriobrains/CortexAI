@@ -124,7 +124,11 @@ jobs:
             -q
 
       - name: Pricing rate-card regression suite
-        run: python -m pytest tests/test_model_rate_cards.py -q
+        run: |
+          python -m pytest \
+            tests/test_model_rate_cards.py \
+            tests/test_database_pricing_model_registry.py \
+            -q
 
       - name: pip-audit (dependency vulnerabilities)
         run: pip-audit -r requirements.txt -r requirements-dev.txt

@@ -39,9 +39,12 @@ LiteLLM is a synchronization source, never an inference gateway or request depen
    search API modes and the staging gates in
    [the guardrails review](../LITELLM_PRICING_GUARDRAILS.md). Approved legacy seeds
    and passing parity tests alone are not verified current-price authority.
-   After separate operator authorization, set `MODEL_PRICING_MODE=database` and
-   restart every API/worker. Startup verifies
-   the schema and approved pricing for enabled models and required service cards.
+   Run the [read-only preflight](#database-pricing-preflight-read-only) on the
+   API host and require `RESULT: PASS`. After separate operator authorization,
+   set `MODEL_PRICING_MODE=database` and restart every API/worker. Startup verifies
+   the schema, approved pricing for enabled models and required service cards, and
+   then builds the complete model registry. A green `/health` alone does not prove
+   the catalog works.
    Runtime needs SELECT on pricing tables and normal response/ledger privileges;
    keep pricing mutations restricted to the trusted operator/job connection.
 6. Inspect external proposals before activation:
@@ -62,6 +65,63 @@ Migration SQL targets
 `public`, like existing migrations. Scheduling is external: invoke the command
 approximately every six hours through the deployment's scheduler. No startup
 fetch or permanent pricing scheduler is installed.
+
+## Database-pricing preflight (read-only)
+
+On 2026-10-13 production switched to database pricing. `/health` and the
+per-model readiness checks passed, but `ModelRegistry.from_yaml()` raised
+`KeyError: 'cache_write'`: the approved LiteLLM card for `gemini-3.6-flash` has
+no cache-write price, and the registry assumed every optional rate existed.
+`/v1/model-options`, `/v1/providers`, `/v1/history`, Ask and Compare all build
+that registry, so they failed. React fell back to its bundled OpenAI/Claude/
+DeepSeek model list and kept its last loaded history. Rolling back to legacy
+mode restored service. The registry now reports a missing optional rate as
+`null`, startup readiness builds the full registry, and this preflight checks
+the same path before any service change.
+
+`scripts/preflight_database_pricing.py` sets database pricing for its own
+process only. It never edits `.env`, writes to the database, restarts the API,
+calls a provider or charges anyone, and it logs to stdout rather than the
+service's log files. It:
+
+1. runs the API's startup pricing readiness check;
+2. builds the full registry from approved cards and compares its enabled and
+   selectable models with the registry configuration;
+3. requires every provider (`openai`, `claude`, `gemini`, `grok`, `deepseek`)
+   to have a selectable model;
+4. prints each selectable model's card source, card ID, input, output, cache-read,
+   cache-write and one-hour cache-write rates (`-` = not on the card) and fails
+   if the catalog shows a rate the card does not have, or a different one;
+5. checks the `--expect` rates/card IDs and `--long-context` start you pass;
+6. warns about cards ending within 45 days with no approved successor.
+
+Exit status `0` (`RESULT: PASS`, warnings allowed) means database mode can be
+enabled; `1` means keep legacy mode. On the EC2 host, from the deployed
+application directory, after the fix is deployed (confirm the interpreter
+against the API unit's `ExecStart`, for example `sudo systemctl cat cortexai`):
+
+```bash
+cd /home/ec2-user/cortex_8_21
+git log -1 --oneline                       # deployed commit includes the fix
+grep '^MODEL_PRICING_MODE=' .env           # expect legacy; the preflight does not change it
+sudo -u ec2-user ./venv/bin/python scripts/preflight_database_pricing.py \
+  --min-selectable 21 \
+  --expect claude:claude-haiku-4-5=1/5@6884812d-54ab-49ec-9313-b64cf2c825ae \
+  --expect claude:claude-sonnet-5=2/10@7ea64bd6-380d-4d6e-9d60-9b0831eb3ae1 \
+  --expect gemini:gemini-3.6-flash=0.75/3.75@f6021121-63be-40e5-b434-9cdaa12251ef \
+  --expect openai:gpt-5.6-sol=4/20@7d77e71c-8395-46cb-9746-0e3acb19f408 \
+  --long-context openai:gpt-5.6-sol=272001
+echo "preflight exit status: $?"
+```
+
+Expect `-` in the `write` and `write1h` columns for `gemini-3.6-flash` (absent,
+not $0) and a warning that the `gpt-5.6-sol` card ends `2026-11-21T00:00:00Z`.
+An enabled model with no applicable card stops the whole registry from building,
+so Ask, Compare, the catalog and startup fail for every provider at that moment.
+Approve a reviewed successor card before each `effective_until`, then rerun the
+preflight. After switching modes and restarting, confirm in the browser that
+the model picker lists all providers and that History loads; do not rely on
+`/health`.
 
 ## Approval and history
 
@@ -237,7 +297,9 @@ is valid evidence; an absent price is not zero or the regular input price. The
 calculator only requires rates for used partitions. Long-context snapshots clear
 optional base cache/reasoning rates before applying the selected band. Provide
 the applicable tier cache prices explicitly; used unpriced partitions fail with
-`PRICING_UNKNOWN`. `cache_write_ttl=1h` requires a distinct explicit one-hour
+`PRICING_UNKNOWN`. The model registry and catalog (`/v1/model-options`,
+`/v1/models`) report an absent cache rate as `null`, never `0`.
+`cache_write_ttl=1h` requires a distinct explicit one-hour
 price. The OpenAI adapter already reads `input_tokens_details.cache_write_tokens`
 and records its documented `30m` lifetime; it never fabricates hour-write tokens.
 Existing legacy seeds keep their explicitly stored historical defaults.
@@ -368,6 +430,8 @@ time can use a manual override instead:
 | Suspicious rate | Persist candidate/reason; current approved price continues |
 | Database unavailable | A fresh lookup fails; a previously cached approved card may serve only within its TTL; no YAML fallback in database mode |
 | Stale pricing | Retain last approved card, mark snapshot `pricing_stale`, emit structured warning |
+| Card ends with no approved successor | That model has no price, so the registry cannot build: catalog, History, Ask/Compare and startup readiness fail for all models. The preflight warns 45 days ahead |
+| Registry cannot read an approved card | Startup readiness fails before traffic; the preflight reports it without a restart |
 | Manual override | Wins over sync until deliberately closed |
 
 Inspect cards with `--inspect`; `--provider` and `--model` scope sync/inspection.
@@ -386,7 +450,8 @@ unit usage is supplied; current image-input adapters report token usage. Complex
 unsupported external charge dimensions stay in review rather than underbilling.
 Search and Managed Agent runtime service-card changes currently use manual overrides.
 
-Rollback uses `MODEL_PRICING_MODE=legacy` and an API/worker restart. Retain all
+Rollback uses `MODEL_PRICING_MODE=legacy` and an API/worker restart (as on
+2026-10-13). Retain all
 rate cards, observations, sync runs and request evidence. The default legacy mode
 keeps the original registry pricing/fallback available during the staged rollout;
 the database path requires migration and seeding, and is the target runtime mode.

@@ -220,7 +220,10 @@ patch does not retrospectively correct synthesized fields in old cards.
    boundaries, same-source overlap rejection and PostgreSQL rollback/concurrency
    in staging. Approve only with actor, evidence and reason; supply a bounded
    manual card for a verified promotion when source validity is absent.
-4. Database cutover is a separate explicit operator approval. Prepare verified
+4. Database cutover is a separate explicit operator approval. Before it, run
+   `scripts/preflight_database_pricing.py` on the API host and require
+   `RESULT: PASS` (see the runbook's read-only preflight section); `/health`
+   alone does not prove the model catalog builds. Prepare verified
    successors before promotion/calendar expiry, restart all API/workers on any
    flag change, and monitor `PRICING_UNKNOWN`, stale evidence, review reasons,
    selected intervals, component totals and credit/provider-cost reconciliation.
