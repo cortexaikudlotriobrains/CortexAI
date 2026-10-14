@@ -2,7 +2,7 @@ import { expect, expectNoHorizontalOverflow, test } from "../fixtures/responsive
 
 test("mobile Usage route renders the compact dashboard and footer navigation", async ({
     responsiveApp,
-}) => {
+}, testInfo) => {
     const { page } = responsiveApp;
 
     await page.goto("/usage");
@@ -18,8 +18,16 @@ test("mobile Usage route renders the compact dashboard and footer navigation", a
 
     await expect(page.getByText("TOKENS", { exact: true })).toBeVisible();
     await expect(page.getByText("TOTAL TOKENS", { exact: true })).toBeHidden();
-    await expect(page.getByText("AVG COST", { exact: true })).toBeVisible();
-    await expect(page.getByText("$12.16 total", { exact: true })).toBeVisible();
+    await expect(page.getByText("AVG COST", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("AVG COST / REQ", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("$12.16 total", { exact: true })).toHaveCount(0);
+    const metrics = page.getByRole("region", { name: "Usage key metrics" });
+    await expect(metrics.locator("article")).toHaveCount(3);
+    const widths = await metrics.locator("article").evaluateAll(cards =>
+        cards.map(card => card.getBoundingClientRect().width),
+    );
+    expect(widths[2]).toBeGreaterThan(widths[0] * 1.9);
+    await metrics.screenshot({ path: testInfo.outputPath("b2c-usage-metrics.png") });
     await expect(page.getByText("720 via Smart", { exact: true })).toBeVisible();
     await expect(page.getByText("1,336 total", { exact: true })).toBeHidden();
     await expect(page.getByText(/top Smart pick/)).toBeVisible();
@@ -46,6 +54,25 @@ test("mobile Usage route renders the compact dashboard and footer navigation", a
     await expect(mobileNav.getByRole("button", { name: "Compare" })).toBeVisible();
     await expect(mobileNav.getByRole("button", { name: "History" })).toBeVisible();
 
+    await expectNoHorizontalOverflow(page);
+});
+
+test("mobile Usage shows costs only for configured BYOK", async ({ responsiveApp }, testInfo) => {
+    const { page, state } = responsiveApp;
+    state.byokProviders = [{ provider: "openai", configured: true }];
+    await page.goto("/usage");
+
+    await expect(page.getByText("AVG COST", { exact: true })).toBeVisible();
+    await expect(page.getByText("$12.16 total", { exact: true })).toBeVisible();
+    const metrics = page.getByRole("region", { name: "Usage key metrics" });
+    await expect(metrics.locator("article")).toHaveCount(4);
+    await metrics.screenshot({ path: testInfo.outputPath("byok-usage-metrics.png") });
+
+    state.byokProviders = [];
+    await page.reload();
+    await expect(page.getByRole("region", { name: "Usage summary loaded" })).toBeVisible();
+    await expect(page.getByText("AVG COST", { exact: true })).toHaveCount(0);
+    await expect(metrics.locator("article")).toHaveCount(3);
     await expectNoHorizontalOverflow(page);
 });
 

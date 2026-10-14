@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ResponseCard } from "../components/results/ResponseCard";
+import { CortexIcon } from "../components/shared/CortexIcon";
 import type { ChatResponse } from "../types";
 
 describe("ResponseCard", () => {
@@ -14,6 +15,34 @@ describe("ResponseCard", () => {
     expect(screen.getByRole("heading", { name: "Claude Sonnet" })).toBeInTheDocument();
     expect(screen.getByText("claude-sonnet-4-5")).toBeInTheDocument();
     expect(container.querySelector('img[src*="claude.ai"]')).toBeInTheDocument();
+  });
+
+  it.each([
+    ["openai", "gpt-5.1", "GPT-5.1"],
+    ["claude", "claude-sonnet-4-5", "Claude Sonnet"],
+    ["gemini", "gemini-2.5-flash", "Gemini Flash"],
+    ["grok", "grok-4", "Grok"],
+    ["deepseek", "deepseek-chat", "DeepSeek Chat"],
+    ["smart", "smart", "Smart routing"],
+    ["other", "custom-model", "Other"],
+  ])("omits decorative labels from %s Ask and Compare headers", (provider, model, label) => {
+    const answer = "MODEL, DEEP, FASTEST, RAW, ADVANCED and SMART · MODEL are answer text.";
+    const item = { ...response(false, answer), provider, model, ai_credits: 1_234 };
+    const { container, rerender } = render(<ResponseCard response={item} />);
+
+    for (const compact of [false, true]) {
+      rerender(<ResponseCard response={item} compact={compact} />);
+
+      const header = within(container.querySelector("header")!);
+      expect(header.getByRole("heading", { name: label })).toBeInTheDocument();
+      expect(header.getByText(model)).toBeInTheDocument();
+      expect(header.getByText("20.0s")).toBeInTheDocument();
+      expect(header.getByText("1.234 credits")).toBeInTheDocument();
+      expect(
+        header.queryByText(/^(MODEL|DEEP|FASTEST|RAW|ADVANCED|SMART · MODEL)$/i),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText(answer)).toBeInTheDocument();
+    }
   });
 
   it("falls back to the provider initial when the shared logo cannot load", () => {
@@ -119,6 +148,10 @@ describe("ResponseCard", () => {
     expect(stats).toHaveTextContent("1.234 credits");
     expect(stats).not.toHaveTextContent("$0.0010");
     expect(stats?.querySelectorAll("svg")).toHaveLength(2);
+    const currencyIcon = render(<CortexIcon name="cost" />).container.querySelector("svg");
+    const creditAmount = screen.getByText("1.234 credits");
+    expect(creditAmount).not.toHaveTextContent("$");
+    expect(creditAmount.querySelector("svg")?.innerHTML).not.toBe(currencyIcon?.innerHTML);
     expect(screen.getByText("Saved ~0.25 credits through context reuse")).toBeInTheDocument();
   });
 

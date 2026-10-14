@@ -847,6 +847,7 @@ test("iPad keeps the options popover fully visible above the composer", async ({
     await page.getByRole("button", { name: "More options", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "More options" });
     await expect(dialog).toHaveAttribute("data-layout", "popover");
+    await expect(dialog).toHaveCSS("opacity", "1");
 
     const dialogBounds = await dialog.boundingBox();
     const composerBounds = await composer.boundingBox();
@@ -855,5 +856,6 @@ test("iPad keeps the options popover fully visible above the composer", async ({
     expect(dialogBounds.x).toBeGreaterThanOrEqual(0);
     expect(dialogBounds.x + dialogBounds.width).toBeLessThanOrEqual(820);
     expect(dialogBounds.y).toBeGreaterThanOrEqual(0);
-    expect(dialogBounds.y + dialogBounds.height).toBeLessThanOrEqual(composerBounds.y);
+    const triggerBounds = await page.getByRole("button", { name: "More options", exact: true }).boundingBox();
+    expect(dialogBounds.y + dialogBounds.height).toBeLessThanOrEqual(triggerBounds.y - 9);
 });

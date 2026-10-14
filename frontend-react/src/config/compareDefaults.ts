@@ -7,15 +7,30 @@ export const DEFAULT_COMPARE_MODEL_KEYS = [
 
 export const DEFAULT_ADDED_COMPARE_MODEL_KEY = "deepseek:deepseek-v4-flash";
 
+export function newCompareModelKeys(
+  models: ModelCatalogItem[],
+  smartOffModel: string,
+  eligibleModels: ModelCatalogItem[] = models,
+): [string, string, string] {
+  const second =
+    smartOffModel === DEFAULT_COMPARE_MODEL_KEYS[1]
+      ? DEFAULT_COMPARE_MODEL_KEYS[0]
+      : DEFAULT_COMPARE_MODEL_KEYS[1];
+  const eligibleKeys = eligibleModels.map(modelKey);
+  return resolveCompareModelKeys(
+    models,
+    [smartOffModel, eligibleKeys.includes(second) ? second : "", ""],
+    eligibleModels,
+  );
+}
+
 export function resolveCompareModelKeys(
   models: ModelCatalogItem[],
   currentKeys: [string, string, string],
   defaultModels: ModelCatalogItem[] = models,
 ): [string, string, string] {
   const availableKeys = models.map(modelKey);
-  const defaultKeys = defaultModels
-    .map(modelKey)
-    .filter((key) => availableKeys.includes(key));
+  const defaultKeys = defaultModels.map(modelKey).filter((key) => availableKeys.includes(key));
   const selected = new Set<string>();
   const resolved = currentKeys.map((currentKey, index) => {
     if (currentKey && availableKeys.includes(currentKey) && !selected.has(currentKey)) {
@@ -55,9 +70,7 @@ export function removeCompareModelKey(
   currentKeys: [string, string, string],
   removeIndex: 0 | 1 | 2,
 ): [string, string, string] {
-  const remaining = currentKeys.filter(
-    (key, index) => index !== removeIndex && Boolean(key),
-  );
+  const remaining = currentKeys.filter((key, index) => index !== removeIndex && Boolean(key));
   return [remaining[0] ?? "", remaining[1] ?? "", remaining[2] ?? ""];
 }
 

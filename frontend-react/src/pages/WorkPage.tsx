@@ -431,6 +431,10 @@ export function WorkPage() {
           <CenteredMessage><strong>Sign in to use Cortex Work</strong><button className={styles.inkButton} onClick={login}>Sign in</button></CenteredMessage>
         ) : !runtimeWorkEnabled ? (
           <CenteredMessage><strong>Cortex Work is not enabled in this environment.</strong><span>Ask and Compare remain available.</span></CenteredMessage>
+        ) : !subscription.entitlements ? (
+          subscription.loading ? <CenteredMessage>Loading Work...</CenteredMessage> : (
+            <CenteredMessage><strong>Unable to check your Work access</strong><span>Please try again.</span><button className={styles.inkButton} onClick={subscription.reload}>Retry</button></CenteredMessage>
+          )
         ) : !planWorkEnabled ? (
           <CenteredMessage><CortexIcon name="work" size={28} /><strong>Upgrade to use Cortex Work</strong><span>Delegate multi-step tasks, connected tools, and deliverables on Plus or Pro.</span><button className={styles.startButton} onClick={() => navigate("/pricing")}>View plans</button></CenteredMessage>
         ) : startPending && !store.run ? (

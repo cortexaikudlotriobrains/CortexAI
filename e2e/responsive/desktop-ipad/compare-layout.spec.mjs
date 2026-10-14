@@ -75,6 +75,12 @@ test("desktop three-model Compare keeps all cards visible in one grid row", asyn
     await page.setViewportSize({ width: 1440, height: 900 });
     await restoreHistoryThread(page, "Three model platform comparison");
 
+    const headers = page.locator("[data-response-index] > header");
+    await expect(headers).toHaveCount(3);
+    await expect(headers.getByRole("heading")).toHaveCount(3);
+    await expect(headers.getByText(/^(MODEL|DEEP|FASTEST|RAW|ADVANCED|SMART · MODEL)$/i)).toHaveCount(0);
+    await expect(headers.locator('[id^="response-stats-"]')).toHaveCount(3);
+
     const responseGrid = page
         .locator('article[aria-label="Model comparison"]')
         .first()

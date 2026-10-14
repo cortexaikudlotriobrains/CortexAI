@@ -145,7 +145,7 @@ describe("ResultsSection layout states", () => {
     expect(screen.queryByRole("button", { name: "Jump to latest" })).not.toBeInTheDocument();
   });
 
-  it("renders the Compare run summary with credits and a fastest metric tag", () => {
+  it("renders Compare credits and first-visible durations without ranking labels", () => {
     const turn = compareTurn("compare-metrics", "Compare metrics");
     turn.responses = [
       response("compare-metrics-openai", "openai", "gpt-5.1", {
@@ -186,9 +186,11 @@ describe("ResultsSection layout states", () => {
     expect(screen.queryByText("300 tok")).not.toBeInTheDocument();
     expect(screen.getByText("0.47 credits")).toBeInTheDocument();
     expect(screen.queryByText("$0.00470")).not.toBeInTheDocument();
-    const fastestLabel = screen.getByText(/Fastest/);
-    expect(fastestLabel).toHaveClass("winner-label");
-    expect(fastestLabel.parentElement).toHaveTextContent("0.3s");
+    expect(screen.getByText("0.6s")).toBeInTheDocument();
+    expect(screen.getByText("0.3s")).toBeInTheDocument();
+    expect(screen.getByText("0.5s")).toBeInTheDocument();
+    expect(screen.queryByText(/Fastest/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^(MODEL|DEEP|RAW|ADVANCED|SMART · MODEL)$/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Cheapest/)).not.toBeInTheDocument();
   });
 

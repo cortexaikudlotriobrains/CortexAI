@@ -25,6 +25,7 @@ import {
 import type { SubscriptionError } from "../subscription/subscriptionErrors";
 import { clearAttachmentUploads } from "../uploads/attachmentUploadQueue";
 import type { UserFacingError } from "../errors/userFacingError";
+import { loadChatComposer, saveChatComposer, useComposerPrefsStore } from "./composerPrefsStore";
 
 interface BeginTurnInput {
   mode: ChatMode;
@@ -53,13 +54,18 @@ interface ChatStoreState {
   optimizeMode: boolean;
   askReasoningLevel: ReasoningLevel;
   compareReasoningLevel: ReasoningLevel;
-  setSmartMode: (v: boolean) => void;
+  lastManualModel: string | null;
+  composerInitialized: boolean;
+  compareHasSent: boolean;
+  comparePrefsModel: string | null;
+  setSmartMode: (v: boolean, smartOffModel?: string) => void;
   setOptimizeMode: (v: boolean) => void;
   setAskReasoningLevel: (level: ReasoningLevel) => void;
   setCompareReasoningLevel: (level: ReasoningLevel) => void;
 
   selectedModelKey: string;
   setSelectedModelKey: (key: string) => void;
+  setResolvedModelKey: (key: string) => void;
   compareModelKeys: [string, string, string];
   setCompareModelKey: (index: 0 | 1 | 2, key: string) => void;
 
@@ -76,11 +82,7 @@ interface ChatStoreState {
   activeTurnId: string | null;
   beginTurn: (input: BeginTurnInput) => string;
   prepareTurnForStreaming: (turnId: string, input: PrepareTurnInput) => void;
-  prepareTurnResponseForStreaming: (
-    turnId: string,
-    index: number,
-    response: ChatResponse,
-  ) => void;
+  prepareTurnResponseForStreaming: (turnId: string, index: number, response: ChatResponse) => void;
   setTurnOptimization: (turnId: string, optimization: PromptOptimizationState) => void;
   updateTurnResponse: (turnId: string, index: number, response: ChatResponse) => void;
   appendTurnResponseText: (
@@ -92,16 +94,9 @@ interface ChatStoreState {
   setTurnStatus: (turnId: string, status: TurnStatus) => void;
   discardTurn: (turnId: string) => void;
   setTurnCompareSummary: (turnId: string, summary: CompareResponse) => void;
-  setTurnAnalysisStatus: (
-    turnId: string,
-    status: CortexAnalysisStatus,
-    error?: string,
-  ) => void;
+  setTurnAnalysisStatus: (turnId: string, status: CortexAnalysisStatus, error?: string) => void;
   addTurnAnalysisRun: (turnId: string, run: CortexAnalysisRun) => void;
-  hydrateFromHistoryThread: (
-    thread: HistoryThread,
-    analysisRuns?: CortexAnalysisRun[],
-  ) => void;
+  hydrateFromHistoryThread: (thread: HistoryThread, analysisRuns?: CortexAnalysisRun[]) => void;
   startNewChat: () => void;
 
   responses: ChatResponse[];
@@ -138,17 +133,28 @@ export const useChatStore = create<ChatStoreState>((set) => ({
   mode: "single",
   setMode: (mode) => set({ mode }),
 
-  smartMode: true,
+  smartMode: useComposerPrefsStore.getState().prefs.smartForNewChats,
+  lastManualModel: null,
+  composerInitialized: false,
+  compareHasSent: false,
+  comparePrefsModel: null,
   optimizeMode: false,
   askReasoningLevel: "auto",
   compareReasoningLevel: "low",
-  setSmartMode: (v) => set({ smartMode: v }),
+  setSmartMode: (v, smartOffModel) =>
+    set((state) => ({
+      smartMode: v,
+      ...(!v
+        ? { selectedModelKey: state.lastManualModel ?? smartOffModel ?? state.selectedModelKey }
+        : {}),
+    })),
   setOptimizeMode: (v) => set({ optimizeMode: v }),
   setAskReasoningLevel: (level) => set({ askReasoningLevel: level }),
   setCompareReasoningLevel: (level) => set({ compareReasoningLevel: level }),
 
   selectedModelKey: "",
-  setSelectedModelKey: (key) => set({ selectedModelKey: key }),
+  setSelectedModelKey: (key) => set({ selectedModelKey: key, lastManualModel: key || null }),
+  setResolvedModelKey: (key) => set({ selectedModelKey: key }),
   compareModelKeys: ["", "", ""],
   setCompareModelKey: (index, key) =>
     set((state) => {
@@ -209,6 +215,7 @@ export const useChatStore = create<ChatStoreState>((set) => ({
       streaming: turn.status === "optimizing" || turn.status === "streaming",
       streamingText: "",
       error: null,
+      compareHasSent: state.compareHasSent || input.mode === "compare",
     }));
     return id;
   },
@@ -242,9 +249,7 @@ export const useChatStore = create<ChatStoreState>((set) => ({
         turns: updated.turns.map((turn) =>
           turn.id === turnId ? { ...turn, status: "streaming" as const } : turn,
         ),
-        responses:
-          updated.turns.find((turn) => turn.id === turnId)?.responses ??
-          updated.responses,
+        responses: updated.turns.find((turn) => turn.id === turnId)?.responses ?? updated.responses,
         streaming: true,
         streamingText: "",
         error: null,
@@ -252,9 +257,7 @@ export const useChatStore = create<ChatStoreState>((set) => ({
     }),
   setTurnOptimization: (turnId, optimization) =>
     set((state) => ({
-      turns: state.turns.map((turn) =>
-        turn.id === turnId ? { ...turn, optimization } : turn,
-      ),
+      turns: state.turns.map((turn) => (turn.id === turnId ? { ...turn, optimization } : turn)),
     })),
   updateTurnResponse: (turnId, index, response) =>
     set((state) => updateResponseState(state, turnId, index, () => response)),
@@ -327,9 +330,7 @@ export const useChatStore = create<ChatStoreState>((set) => ({
               ...turn,
               analysisRuns: [
                 run,
-                ...(turn.analysisRuns ?? []).filter(
-                  (item) => item.analysisId !== run.analysisId,
-                ),
+                ...(turn.analysisRuns ?? []).filter((item) => item.analysisId !== run.analysisId),
               ],
               analysisStatus: "idle",
               analysisError: undefined,
@@ -347,13 +348,33 @@ export const useChatStore = create<ChatStoreState>((set) => ({
     }
     const turns = buildTurnsFromHistoryEntries(thread.entries).map((turn) => ({
       ...turn,
-      analysisRuns: turn.requestGroupId
-        ? analysisByGroup.get(turn.requestGroupId) ?? []
-        : [],
+      analysisRuns: turn.requestGroupId ? (analysisByGroup.get(turn.requestGroupId) ?? []) : [],
       analysisStatus: "idle" as const,
     }));
     const latestTurn = turns[turns.length - 1] ?? null;
     const sessionId = normalizeSessionId(thread.sessionId);
+    const savedComposer = sessionId ? loadChatComposer(sessionId) : null;
+    const lastAsk = [...turns].reverse().find((turn) => turn.mode === "single");
+    const lastAskResponse = lastAsk?.responses[0];
+    const smartMode = !lastAskResponse?.routing_mode || lastAskResponse.routing_mode === "smart";
+    const lastManualResponse = [...thread.entries]
+      .reverse()
+      .find(
+        (entry) =>
+          entry.mode !== "compare" && Boolean(entry.routing_mode) && entry.routing_mode !== "smart",
+      );
+    const lastManualModel = lastManualResponse
+      ? `${lastManualResponse.provider}:${lastManualResponse.requested_model || lastManualResponse.model}`
+      : null;
+    const lastCompare = [...turns].reverse().find((turn) => turn.mode === "compare");
+    const restoredCompareKeys = [0, 1, 2].map((index) => {
+      const response = lastCompare?.responses[index];
+      if (!response) return "";
+      const entry = thread.entries.find(
+        (item) => (item.request_id || String(item.id)) === response.request_id,
+      );
+      return `${response.provider}:${entry?.requested_model || response.model}`;
+    }) as [string, string, string];
     persistActiveSessionId(sessionId);
     set({
       mode: latestTurn?.mode ?? thread.preferredMode,
@@ -368,6 +389,14 @@ export const useChatStore = create<ChatStoreState>((set) => ({
       pendingNewSession: !sessionId,
       error: null,
       subscriptionError: null,
+      smartMode,
+      selectedModelKey: lastManualModel ?? "",
+      lastManualModel,
+      compareModelKeys: restoredCompareKeys,
+      ...savedComposer,
+      compareHasSent: Boolean(lastCompare) || savedComposer?.compareHasSent === true,
+      composerInitialized: true,
+      comparePrefsModel: null,
     });
   },
   startNewChat: () => {
@@ -385,6 +414,15 @@ export const useChatStore = create<ChatStoreState>((set) => ({
       subscriptionError: null,
       sessionId: null,
       pendingNewSession: true,
+      smartMode: useComposerPrefsStore.getState().prefs.smartForNewChats,
+      selectedModelKey: "",
+      lastManualModel: null,
+      askReasoningLevel: "auto",
+      compareReasoningLevel: "low",
+      compareModelKeys: ["", "", ""],
+      compareHasSent: false,
+      comparePrefsModel: null,
+      composerInitialized: false,
     });
   },
 
@@ -397,8 +435,7 @@ export const useChatStore = create<ChatStoreState>((set) => ({
   streamingText: "",
   setStreaming: (v) => set({ streaming: v }),
   setStreamingText: (text) => set({ streamingText: text }),
-  appendStreamingText: (chunk) =>
-    set((state) => ({ streamingText: state.streamingText + chunk })),
+  appendStreamingText: (chunk) => set((state) => ({ streamingText: state.streamingText + chunk })),
 
   error: null,
   setError: (error) => set({ error }),
@@ -419,6 +456,27 @@ export const useChatStore = create<ChatStoreState>((set) => ({
   pendingNewSession: !initialSessionId,
   setPendingNewSession: (v) => set({ pendingNewSession: v }),
 }));
+
+useChatStore.subscribe((state, previous) => {
+  if (
+    !state.sessionId ||
+    !state.composerInitialized ||
+    (state.sessionId === previous.sessionId &&
+      state.smartMode === previous.smartMode &&
+      state.selectedModelKey === previous.selectedModelKey &&
+      state.lastManualModel === previous.lastManualModel &&
+      state.compareModelKeys === previous.compareModelKeys &&
+      state.compareHasSent === previous.compareHasSent)
+  )
+    return;
+  saveChatComposer(state.sessionId, {
+    smartMode: state.smartMode,
+    selectedModelKey: state.selectedModelKey,
+    lastManualModel: state.lastManualModel,
+    compareModelKeys: state.compareModelKeys,
+    compareHasSent: state.compareHasSent,
+  });
+});
 
 export function makePlaceholderResponse(
   index: number,
@@ -471,7 +529,8 @@ function updateResponseState(
   const active = turns.find((turn) => turn.id === state.activeTurnId);
   return {
     turns,
-    responses: state.activeTurnId === turnId ? active?.responses ?? state.responses : state.responses,
+    responses:
+      state.activeTurnId === turnId ? (active?.responses ?? state.responses) : state.responses,
   };
 }
 
@@ -489,10 +548,7 @@ function summarizeCompareResponses(
       (total, response) => total + (response.token_usage?.total_tokens ?? 0),
       0,
     ),
-    total_cost: responses.reduce(
-      (total, response) => total + (response.estimated_cost || 0),
-      0,
-    ),
+    total_cost: responses.reduce((total, response) => total + (response.estimated_cost || 0), 0),
   };
 }
 
@@ -509,10 +565,10 @@ function mergeCompletedResponses(
       started_at: previous?.started_at ?? response.started_at,
       first_visible_at: previous?.first_visible_at ?? response.first_visible_at,
       completed_at: failed
-        ? response.completed_at ?? previous?.completed_at
-        : response.completed_at ?? previous?.completed_at ?? resolvedAt,
+        ? (response.completed_at ?? previous?.completed_at)
+        : (response.completed_at ?? previous?.completed_at ?? resolvedAt),
       failed_at: failed
-        ? response.failed_at ?? previous?.failed_at ?? resolvedAt
+        ? (response.failed_at ?? previous?.failed_at ?? resolvedAt)
         : response.failed_at,
       ui_status: failed ? "failed" : "complete",
     };
@@ -523,10 +579,7 @@ function hasVisibleResponseText(text: string): boolean {
   return text.trim().length > 0;
 }
 
-function recordFirstVisibleTimestamp(
-  current: ChatResponse,
-  next: ChatResponse,
-): ChatResponse {
+function recordFirstVisibleTimestamp(current: ChatResponse, next: ChatResponse): ChatResponse {
   if (next.first_visible_at) return next;
   if (current.first_visible_at) {
     return { ...next, first_visible_at: current.first_visible_at };

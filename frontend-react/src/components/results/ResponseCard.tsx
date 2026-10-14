@@ -34,9 +34,6 @@ interface ResponseCardProps {
   onSuggestedFollowUp?: (suggestion: string) => void | Promise<void>;
   onRegenerate?: () => void;
   onRetryWithMoreRoom?: () => void;
-  compareHighlights?: {
-    fastest?: boolean;
-  };
 }
 
 export function ResponseCard({
@@ -51,7 +48,6 @@ export function ResponseCard({
   onSuggestedFollowUp,
   onRegenerate,
   onRetryWithMoreRoom,
-  compareHighlights,
 }: ResponseCardProps) {
   const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
@@ -59,7 +55,6 @@ export function ResponseCard({
   const hasError = !!response.error;
   const softError = response.error?.details?.kind === "transient_capacity";
   const visibleError = response.error ? presentResponseError(response.error) : null;
-  const badge = getModelBadge(response.provider, response.model);
   const modelPresentation = getModelPresentation(response.provider, response.model);
   const accent = resolveProviderAccent(response.provider, slotIndex);
   const loadingStatus = resolveLoadingStatus(response, !!isStreaming, hasError);
@@ -149,9 +144,6 @@ export function ResponseCard({
               <span>{response.model || response.provider}</span>
             </div>
           </div>
-          <div className={styles.headerActions}>
-            <span className={`${styles.badge} ${styles[badge.tone]}`}>{badge.label}</span>
-          </div>
         </div>
         {hasMetaContent && (
           <div
@@ -177,24 +169,14 @@ export function ResponseCard({
             ) : (
               <>
                 {durationMs !== null && (
-                  <span
-                    className={`${styles.metricPill} ${styles.metricText} ${
-                      compareHighlights?.fastest ? styles.metricHighlight : ""
-                    }`}
-                  >
+                  <span className={`${styles.metricPill} ${styles.metricText}`}>
                     <CortexIcon name="latency" />
                     {formatMetricDurationSeconds(durationMs)}
-                    {compareHighlights?.fastest && (
-                      <span className={`${styles.winnerLabel} winner-label`}>
-                        {" "}
-                        &middot; Fastest
-                      </span>
-                    )}
                   </span>
                 )}
                 {hasCredits && (
                   <span className={`${styles.metricPill} ${styles.metricText}`}>
-                    <CortexIcon name="cost" />
+                    <CortexIcon name="credits" />
                     {formatAiCredits(aiCredits)} credits
                     {response.credit_usage_estimated ? " estimated" : ""}
                   </span>
@@ -547,19 +529,6 @@ async function writeClipboardText(text: string): Promise<boolean> {
   } finally {
     document.body.removeChild(textArea);
   }
-}
-
-function getModelBadge(provider: string, model: string) {
-  const value = `${provider} ${model}`.toLowerCase();
-  if (value.includes("smart")) return { label: "SMART · MODEL", tone: "advanced" as const };
-  if (value.includes("gemini")) return { label: "FASTEST", tone: "fastest" as const };
-  if (value.includes("grok") || value.includes("xai"))
-    return { label: "RAW", tone: "raw" as const };
-  if (value.includes("claude") || value.includes("anthropic")) {
-    return { label: "ADVANCED", tone: "advanced" as const };
-  }
-  if (value.includes("deepseek")) return { label: "DEEP", tone: "deep" as const };
-  return { label: "MODEL", tone: "legacy" as const };
 }
 
 interface ProviderAccent {

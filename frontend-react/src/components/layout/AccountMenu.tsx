@@ -100,7 +100,7 @@ export function AccountMenu({
     menuActions.push({
       key: "credits",
       label: "AI credits",
-      icon: "cost",
+      icon: "credits",
     });
   }
   if (canOpenModels && canOpenBilling) {

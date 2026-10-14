@@ -12,6 +12,7 @@ interface MockUsageState {
   loading: boolean;
   error: UserFacingError | null;
   reload: () => void;
+  hasConfiguredByok?: boolean;
 }
 
 interface MockUsageParams {
@@ -26,7 +27,7 @@ const hookMocks = vi.hoisted(() => ({
       loading: true as boolean,
       error: null as UserFacingError | null,
       reload: vi.fn(),
-    } satisfies MockUsageState,
+    } as MockUsageState,
   },
   usageParams: {
     current: {} as MockUsageParams,
@@ -109,10 +110,7 @@ describe("UsageInsightsPage states", () => {
   it("renders the Step 2 loading skeleton state", () => {
     renderPage();
 
-    expect(screen.getByLabelText("Loading usage insights")).toHaveAttribute(
-      "aria-busy",
-      "true",
-    );
+    expect(screen.getByLabelText("Loading usage insights")).toHaveAttribute("aria-busy", "true");
   });
 
   it("renders backend-driven KPI cards after usage data loads", () => {
@@ -125,37 +123,53 @@ describe("UsageInsightsPage states", () => {
 
     renderPage();
 
-    expect(
-      screen.getByLabelText("TOTAL TOKENS 2.84M 18.4% vs prev 30d"),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByLabelText("REQUESTS 1,336 across 312 sessions"),
-    ).toBeInTheDocument();
+    expect(screen.getByLabelText("TOTAL TOKENS 2.84M 18.4% vs prev 30d")).toBeInTheDocument();
+    expect(screen.getByLabelText("REQUESTS 1,336 across 312 sessions")).toBeInTheDocument();
     expect(
       screen.getByLabelText("AVG LATENCY 4.6s p95 8.1s \u00b7 fastest 1.4s"),
     ).toBeInTheDocument();
-    expect(
-      screen.getByLabelText("AVG COST / REQ $0.0091 $12.16 total spend"),
-    ).toBeInTheDocument();
+    expect(screen.queryByText("AVG COST / REQ")).not.toBeInTheDocument();
+    expect(screen.queryByText("AVG COST")).not.toBeInTheDocument();
+    expect(screen.queryByText(/total spend/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Usage key metrics").children).toHaveLength(3);
   });
 
-  it("keeps credit balance and activity out of the usage analytics page", () => {
-    hookMocks.subscriptionState.current = { entitlements: entitlementFixture() };
+  it("shows provider costs only when configured BYOK is confirmed", () => {
     hookMocks.usageState.current = {
       summary: usageSummary(),
       loading: false,
       error: null,
       reload: vi.fn(),
+      hasConfiguredByok: true,
     };
 
     renderPage();
 
-    expect(screen.queryByRole("heading", { name: "AI credit balance" })).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("heading", { name: "Recent credit activity" }),
-    ).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Models that replied" })).toBeInTheDocument();
+    expect(screen.getByLabelText("AVG COST / REQ $0.0091 $12.16 total spend")).toBeInTheDocument();
+    expect(screen.getByLabelText("Usage key metrics").children).toHaveLength(4);
   });
+
+  it.each(["free", "plus"] as const)(
+    "keeps %s B2C usage free of provider costs and credit ledger panels",
+    (plan) => {
+      hookMocks.subscriptionState.current = { entitlements: entitlementFixture(plan) };
+      hookMocks.usageState.current = {
+        summary: usageSummary(),
+        loading: false,
+        error: null,
+        reload: vi.fn(),
+      };
+
+      renderPage();
+
+      expect(screen.queryByRole("heading", { name: "AI credit balance" })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("heading", { name: "Recent credit activity" }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Models that replied" })).toBeInTheDocument();
+      expect(screen.queryByText("AVG COST / REQ")).not.toBeInTheDocument();
+    },
+  );
 
   it("renders the model leaderboard with Smart routing metadata and provider logos", () => {
     hookMocks.usageState.current = {
@@ -168,9 +182,7 @@ describe("UsageInsightsPage states", () => {
     renderPage();
 
     expect(screen.getByRole("heading", { name: "Models that replied" })).toBeInTheDocument();
-    expect(
-      screen.getByText("720 of 1,336 replies auto-routed by Smart"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("720 of 1,336 replies auto-routed by Smart")).toBeInTheDocument();
     expect(screen.getByText("1,336 total")).toBeInTheDocument();
     expect(screen.getByText("MOST USED IN SMART")).toBeInTheDocument();
     expect(screen.getByText("manual only")).toBeInTheDocument();
@@ -269,7 +281,9 @@ describe("UsageInsightsPage states", () => {
     await user.click(screen.getByRole("button", { name: "Select usage period: Last 30 days" }));
     await user.click(screen.getByRole("menuitemradio", { name: "Last 7 days" }));
 
-    expect(screen.getByRole("button", { name: "Select usage period: Last 7 days" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Select usage period: Last 7 days" }),
+    ).toBeInTheDocument();
     expect(hookMocks.usageParams.current).toEqual(expectedTrailingPeriod(7));
   });
 

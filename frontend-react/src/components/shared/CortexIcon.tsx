@@ -21,6 +21,7 @@ export type CortexIconName =
   | "composer-smart"
   | "copy"
   | "cost"
+  | "credits"
   | "debug"
   | "download"
   | "expand-sidebar"
@@ -268,6 +269,14 @@ function iconPath(name: Exclude<CortexIconName, "stop" | "composer-smart">) {
           <path d="M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7" />
           <path d="M6.5 7h11l-.7 12A2 2 0 0 1 14.8 21H9.2a2 2 0 0 1-2-1.9z" />
           <path d="M10 11v6M14 11v6" />
+        </>
+      );
+    case "credits":
+      return (
+        <>
+          <ellipse cx="12" cy="5" rx="8" ry="3" />
+          <path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5" />
+          <path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6" />
         </>
       );
     case "cost":

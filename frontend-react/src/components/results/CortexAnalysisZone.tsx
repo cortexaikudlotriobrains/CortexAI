@@ -286,7 +286,7 @@ function AnalysisResult({
                 </span>
                 {(run.aiCredits ?? 0) > 0 && (
                   <span className={styles.creditUsage}>
-                    <CortexIcon name="cost" size={14} />
+                    <CortexIcon name="credits" size={14} />
                     <span>
                       {formatAiCredits(run.aiCredits)} credits
                       {run.creditUsageEstimated ? " estimated" : ""}

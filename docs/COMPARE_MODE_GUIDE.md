@@ -14,6 +14,7 @@ This guide covers both:
 - CLI compare mode (`COMPARE_MODE=true`)
 - Browser Compare mode, where provider-native search is automatic and no Web control is shown. Empty initial model slots are filled only after effective entitlements load and only from models allowed by the current plan; higher-plan models remain visible for discovery.
 - Browser Compare reasoning starts at Low and enables only levels supported by every selected target. Auto lets each model use its own managed default; unsupported levels remain visible but disabled, and changing a target recomputes the intersection.
+- Browser response headers show model names, exact model IDs, response-start duration, and AI-credit usage. Response and Cortex Analysis credit amounts use a neutral credit icon without currency symbols. Live and restored responses omit decorative category badges and fastest-response labels and highlighting on desktop, tablet, and phone layouts.
 - Browser Cortex Analysis, an on-demand synthesis of two or three completed Compare responses.
 
 ## Cortex Analysis

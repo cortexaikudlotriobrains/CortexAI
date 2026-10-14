@@ -57,6 +57,12 @@ npm run --prefix e2e test:desktop-ipad
 
 The mobile suite covers 320px and 390px phone layouts. The desktop/iPad suite covers 1440px desktop, 1024px iPad landscape, and 820px iPad portrait behavior. The shared responsive fixture can switch its mocked effective plan and catalogue ordering so Free/Plus/Pro Ask and Compare default coverage verifies plan eligibility without pretending that the live unrestricted harness represents paid-plan isolation. Each command can be run independently.
 
+Compare layout and history checks also verify that restored response headers keep model identity and usage metrics without decorative category or fastest-response labels, including inactive mobile response panels.
+
+The desktop and mobile Cortex Analysis scenarios capture `analysis-credit-usage.png` to verify the currency-free credit icon beside saved usage amounts.
+
+The Usage scenarios verify B2C cost-card removal, confirmed-BYOK cost visibility, and responsive three/four-card geometry. They capture `b2c-usage-metrics.png` and `byok-usage-metrics.png`; the responsive fixture mocks configured provider status through `byokProviders`.
+
 Mobile composer containment checks measure the feature row and its buttons in one browser layout snapshot so asynchronous font swaps cannot mix old container bounds with new button bounds. The one-pixel containment tolerance remains unchanged.
 
 Useful variants:
@@ -126,3 +132,9 @@ PyCharm fallback (if npm Run Configuration is unavailable):
 - Every test attempt gets a unique `case_id`.
 - Cleanup uses both the stable E2E owner and the per-attempt `case_id`.
 - Fallback injection is only enabled inside the E2E server bootstrap.
+
+### Smart composer preferences
+
+Both responsive suites exercise the shared scenarios in `responsive/fixtures/smart-preferences.mjs`, loaded by each suite's `smart-preferences.spec.mjs`. They cover immediate Smart changes in the current Ask chat, synchronization between the composer and menu Smart controls in both directions, saved settings for new chats, restoration of an existing session after toggling, the fixed Smart-switch subtitle, Smart-off model saving, composer-picker isolation, Compare slot updates and freezing after send, upgrade locks, downgrade fallback with saved-ID retention, Escape and focus restoration, the 760px sheet breakpoint, mobile reasoning segments, light/dark styling, and reduced motion. Theme checks write `smart-menu-light.png` and `smart-menu-dark.png` under the test's output directory.
+
+Run the focused scenarios with `npm run --prefix e2e test:mobile -- smart-preferences.spec.mjs` and `npm run --prefix e2e test:desktop-ipad -- smart-preferences.spec.mjs`. Use the full responsive commands for the existing Ask/Compare/Work regression coverage. These scenarios mock provider and subscription APIs; they never submit live provider work. See [Smart composer preferences](../docs/SMART_COMPOSER_PREFERENCES.md) for lifecycle and browser-storage behavior.

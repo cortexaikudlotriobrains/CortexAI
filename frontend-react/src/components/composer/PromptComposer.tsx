@@ -14,7 +14,8 @@ import type { ModelCatalogItem } from "../../types";
 import type { UseSubscriptionResult } from "../../hooks/useSubscription";
 import { DEFAULT_MODELS } from "../../config/defaultModels";
 import { resolveAskModelKey } from "../../config/askDefaults";
-import { resolveCompareModelKeys } from "../../config/compareDefaults";
+import { newCompareModelKeys, resolveCompareModelKeys } from "../../config/compareDefaults";
+import { resolveSmartOffModel, useComposerPrefsStore } from "../../store/composerPrefsStore";
 import {
   compareReasoningLevels,
   defaultModelReasoningLevel,
@@ -63,6 +64,14 @@ export function PromptComposer({
   const setCompareReasoningLevel = useChatStore((s) => s.setCompareReasoningLevel);
   const selectedModelKey = useChatStore((s) => s.selectedModelKey);
   const setSelectedModelKey = useChatStore((s) => s.setSelectedModelKey);
+  const setResolvedModelKey = useChatStore((s) => s.setResolvedModelKey);
+  const prefs = useComposerPrefsStore((s) => s.prefs);
+  const updatePrefs = useComposerPrefsStore((s) => s.updatePrefs);
+  const composerInitialized = useChatStore((s) => s.composerInitialized);
+  const compareHasSent = useChatStore((s) => s.compareHasSent);
+  const comparePrefsModel = useChatStore((s) => s.comparePrefsModel);
+  const sessionId = useChatStore((s) => s.sessionId);
+  const hasTurns = useChatStore((s) => s.turns.length > 0);
   const compareModelKeys = useChatStore((s) => s.compareModelKeys);
   const setCompareModelKey = useChatStore((s) => s.setCompareModelKey);
   const prompt = useChatStore((s) => s.prompt);
@@ -71,6 +80,7 @@ export function PromptComposer({
   const streaming = useChatStore((s) => s.streaming);
   const setError = useChatStore((s) => s.setError);
   const setSubscriptionError = useChatStore((s) => s.setSubscriptionError);
+  const subscriptionError = useChatStore((s) => s.subscriptionError);
   const uploadTasks = useAttachmentUploadStore((s) => s.tasks);
 
   const { submit, cancel } = useChat();
@@ -96,6 +106,11 @@ export function PromptComposer({
       const required = requiredPlanForModel(model.billing_class, entitlements, plans);
       return [`${model.provider}:${model.model}`, required ? capitalize(required) : "Unavailable"];
     }),
+  );
+  const smartOffModel = resolveSmartOffModel(
+    prefs,
+    { code: entitlements?.plan.code ?? "free", lockedModelKeys },
+    availableModels,
   );
   const improveFeatureError = featureAccessError("prompt_improvement", entitlements, plans);
   const improveAllowanceError = allowanceAccessError("ai_credits", 1, entitlements, plans);
@@ -149,42 +164,78 @@ export function PromptComposer({
 
   useEffect(() => {
     if (subscriptionLoading || modelsLoading || availableModels.length === 0) return;
+    // An active session must hydrate before initial choices can write its local snapshot.
+    if (sessionId && !composerInitialized && !hasTurns) return;
 
-    if (availableModels.length >= 2) {
+    if (!compareHasSent && availableModels.length >= 2) {
       const defaultModels = entitlements
         ? availableModels.filter((model) =>
             entitlements.model_access.allowed_billing_classes.includes(model.billing_class),
           )
         : availableModels;
-      const resolvedCompareKeys = resolveCompareModelKeys(
-        availableModels,
-        compareModelKeys,
-        defaultModels,
-      );
+      const followPreference = !compareHasSent && comparePrefsModel !== smartOffModel;
+      const initialCompare = !compareModelKeys[0] && !compareModelKeys[1];
+      const currentKeys: [string, string, string] =
+        followPreference && comparePrefsModel !== null
+          ? [
+              smartOffModel,
+              compareModelKeys[1] === smartOffModel ? "" : compareModelKeys[1],
+              compareModelKeys[2] === smartOffModel ? "" : compareModelKeys[2],
+            ]
+          : compareModelKeys;
+      const resolvedCompareKeys =
+        initialCompare || (followPreference && comparePrefsModel !== null)
+          ? resolveCompareModelKeys(
+              availableModels,
+              [
+                smartOffModel,
+                currentKeys[1] ||
+                  newCompareModelKeys(availableModels, smartOffModel, defaultModels)[1],
+                currentKeys[2],
+              ],
+              defaultModels,
+            )
+          : resolveCompareModelKeys(availableModels, currentKeys, defaultModels);
       for (const index of [0, 1, 2] as const) {
         if (resolvedCompareKeys[index] !== compareModelKeys[index]) {
           setCompareModelKey(index, resolvedCompareKeys[index]);
         }
       }
     }
+    if (!composerInitialized || (!compareHasSent && comparePrefsModel !== smartOffModel)) {
+      useChatStore.setState({ composerInitialized: true, comparePrefsModel: smartOffModel });
+    }
 
     const resolvedAskModelKey = resolveAskModelKey(
       availableModels,
-      selectedModelKey,
+      selectedModelKey || smartOffModel,
       entitlements?.plan.code ?? null,
       entitlements?.model_access.allowed_billing_classes ?? null,
     );
     if (resolvedAskModelKey !== selectedModelKey) {
-      setSelectedModelKey(resolvedAskModelKey);
+      setResolvedModelKey(resolvedAskModelKey);
+    }
+    if (!composerInitialized && !smartMode && !selectedModelKey) {
+      setAskReasoningLevel(
+        defaultModelReasoningLevel(modelForKey(resolvedAskModelKey, availableModels)),
+      );
     }
   }, [
     availableModels,
+    composerInitialized,
+    compareHasSent,
+    comparePrefsModel,
+    sessionId,
+    hasTurns,
     compareModelKeys,
     entitlements,
     modelsLoading,
     selectedModelKey,
     setCompareModelKey,
-    setSelectedModelKey,
+    setResolvedModelKey,
+    setAskReasoningLevel,
+    smartMode,
+    smartOffModel,
     subscriptionLoading,
   ]);
 
@@ -247,12 +298,20 @@ export function PromptComposer({
 
   const showModelDropdown = isModelDropdownVisible(mode, smartMode);
   const showModelRow = mode === "compare" || showModelDropdown;
+  const handleSmartToggle = (enabled: boolean) => {
+    updatePrefs({ smartForNewChats: enabled });
+    setSmartMode(enabled, smartOffModel);
+    setAskReasoningLevel(
+      enabled
+        ? "auto"
+        : defaultModelReasoningLevel(
+            modelForKey(useChatStore.getState().selectedModelKey, availableModels),
+          ),
+    );
+  };
   const featureChipProps = {
     smartMode,
-    onSmartToggle: (enabled: boolean) => {
-      setSmartMode(enabled);
-      setAskReasoningLevel(enabled ? "auto" : defaultModelReasoningLevel(selectedModel));
-    },
+    onSmartToggle: handleSmartToggle,
   };
 
   const reasoningContextLabel =
@@ -261,10 +320,8 @@ export function PromptComposer({
       : smartMode
         ? "Smart Ask"
         : selectedModel?.display_name || selectedModel?.model || "Selected model";
-  const setReasoningLevel =
-    mode === "compare" ? setCompareReasoningLevel : setAskReasoningLevel;
-  const hasOptionChips =
-    optimizeMode || (!reasoningUnavailable && reasoningLevel !== "auto");
+  const setReasoningLevel = mode === "compare" ? setCompareReasoningLevel : setAskReasoningLevel;
+  const hasOptionChips = optimizeMode || (!reasoningUnavailable && reasoningLevel !== "auto");
 
   const handleOptimizeChange = (enabled: boolean) => {
     setOptimizeMode(enabled);
@@ -320,7 +377,7 @@ export function PromptComposer({
         </div>
       )}
 
-      <div className={styles.composerBody}>
+      <div className={`${styles.composerBody} ${optionsOpen ? styles.optionsOpen : ""}`}>
         <textarea
           ref={textareaRef}
           id="promptInput"
@@ -354,9 +411,24 @@ export function PromptComposer({
                 reasoningUnavailable={reasoningUnavailable}
                 reasoningContextLabel={reasoningContextLabel}
                 onReasoningChange={handleReasoningChange}
-                modeLabel={mode === "compare" ? "Compare" : smartMode ? "Smart Ask" : "Manual Ask"}
-                anchorRef={cardRef}
+                modeLabel={mode === "compare" ? "Compare" : ""}
+                models={availableModels.filter(
+                  (model) => model.enabled && model.selectable !== false,
+                )}
+                smartOffModel={smartOffModel}
+                onSmartOffModelChange={(id) => updatePrefs({ smartOffModelId: id })}
+                currentModel={mode === "single" && !smartMode ? selectedModelKey : undefined}
+                lockedKeys={lockedModelKeys}
+                lockedLabels={lockedModelLabels}
+                onLockedSelect={handleLockedModel}
+                {...(mode === "single"
+                  ? {
+                      smartForNewChats: smartMode,
+                      onSmartForNewChatsChange: handleSmartToggle,
+                    }
+                  : {})}
                 open={optionsOpen}
+                interactionBlocked={Boolean(subscriptionError)}
                 onOpenChange={setOptionsOpen}
               />
             </div>

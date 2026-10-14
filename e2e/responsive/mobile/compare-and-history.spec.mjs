@@ -141,6 +141,11 @@ test("mobile History search restores a grouped Compare session", async ({ respon
     await thread.click();
 
     await expect(page.locator('article[aria-label="Model comparison"]')).toHaveCount(3);
+    const headers = page.locator("[data-response-index] > header");
+    await expect(headers).toHaveCount(6);
+    await expect(headers.getByRole("heading", { includeHidden: true })).toHaveCount(6);
+    await expect(headers.getByText(/^(MODEL|DEEP|FASTEST|RAW|ADVANCED|SMART · MODEL)$/i)).toHaveCount(0);
+    await expect(headers.locator('[id^="response-stats-"]')).toHaveCount(6);
     await expect(page.locator("#promptInput")).toHaveAttribute(
         "placeholder",
         "Ask once and compare model responses",

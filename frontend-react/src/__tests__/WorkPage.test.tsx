@@ -26,6 +26,7 @@ const apiMocks = vi.hoisted(() => ({
   streamWorkEvents: vi.fn(),
   testToolConnection: vi.fn(),
 }));
+const subscriptionMocks = vi.hoisted(() => ({ useSubscription: vi.fn() }));
 
 vi.mock("../api/work", () => apiMocks);
 vi.mock("../config/runtimeConfig", () => ({
@@ -41,14 +42,7 @@ vi.mock("../hooks/useAuth", () => ({
     logout: vi.fn(),
   }),
 }));
-vi.mock("../hooks/useSubscription", () => ({
-  useSubscription: () => ({
-    entitlements: {
-      features: { work_enabled: true },
-      limits: { max_work_credit_budget: 1_000_000 },
-    },
-  }),
-}));
+vi.mock("../hooks/useSubscription", () => subscriptionMocks);
 vi.mock("../hooks/useTheme", () => ({
   useTheme: () => ({ theme: "light", toggleTheme: vi.fn() }),
 }));
@@ -104,6 +98,14 @@ vi.mock("../components/work/WorkApproval", () => ({ WorkApproval: () => null }))
 describe("WorkPage terminal event synchronization", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    subscriptionMocks.useSubscription.mockReturnValue({
+      entitlements: {
+        features: { work_enabled: true },
+        limits: { max_work_credit_budget: 1_000_000 },
+      },
+      loading: false,
+      reload: vi.fn(),
+    });
     const state = useWorkStore.getState();
     state.resetWorkspace();
     state.setSessions([]);
@@ -158,6 +160,65 @@ describe("WorkPage terminal event synchronization", () => {
   afterEach(() => {
     cleanup();
     useWorkStore.getState().resetWorkspace();
+  });
+
+  it("waits for Work access before showing the workspace or an upgrade", async () => {
+    const loadedSubscription = subscriptionMocks.useSubscription();
+    subscriptionMocks.useSubscription.mockReturnValue({
+      ...loadedSubscription,
+      entitlements: null,
+      loading: true,
+    });
+    const page = () => <MemoryRouter><WorkPage /></MemoryRouter>;
+    const { rerender } = render(page());
+
+    expect(screen.getByText("Loading Work...")).toBeInTheDocument();
+    expect(screen.queryByText("Upgrade to use Cortex Work")).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Work goal" })).not.toBeInTheDocument();
+
+    subscriptionMocks.useSubscription.mockReturnValue(loadedSubscription);
+    rerender(page());
+    expect(await screen.findByRole("textbox", { name: "Work goal" })).toBeInTheDocument();
+    expect(screen.queryByText("Upgrade to use Cortex Work")).not.toBeInTheDocument();
+  });
+
+  it("offers a retry when Work access could not be loaded", async () => {
+    const loadedSubscription = subscriptionMocks.useSubscription();
+    const reload = vi.fn();
+    subscriptionMocks.useSubscription.mockReturnValue({
+      ...loadedSubscription,
+      entitlements: null,
+      loading: false,
+      reload,
+    });
+    const page = () => <MemoryRouter><WorkPage /></MemoryRouter>;
+    const { rerender } = render(page());
+
+    expect(screen.getByText("Unable to check your Work access")).toBeInTheDocument();
+    expect(screen.queryByText("Upgrade to use Cortex Work")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(reload).toHaveBeenCalledOnce();
+
+    subscriptionMocks.useSubscription.mockReturnValue(loadedSubscription);
+    rerender(page());
+    expect(await screen.findByRole("textbox", { name: "Work goal" })).toBeInTheDocument();
+  });
+
+  it("keeps the workspace visible while refreshing known Work access", async () => {
+    const loadedSubscription = subscriptionMocks.useSubscription();
+    const page = () => <MemoryRouter><WorkPage /></MemoryRouter>;
+    const { rerender } = render(page());
+    expect(await screen.findByRole("textbox", { name: "Work goal" })).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "Work goal" }), {
+      target: { value: "Keep this Work draft" },
+    });
+
+    subscriptionMocks.useSubscription.mockReturnValue({ ...loadedSubscription, loading: true });
+    rerender(page());
+
+    expect(screen.getByRole("textbox", { name: "Work goal" })).toHaveValue("Keep this Work draft");
+    expect(screen.queryByText("Loading Work...")).not.toBeInTheDocument();
+    expect(screen.queryByText("Upgrade to use Cortex Work")).not.toBeInTheDocument();
   });
 
   it("keeps the new-work introduction concise while preserving detailed prompts", async () => {
