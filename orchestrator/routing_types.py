@@ -97,6 +97,8 @@ class ModelCandidate:
     supported_attachment_mime_types: list[str] = field(default_factory=list)
     max_attachment_bytes: int | None = None
     max_attachments_per_request: int | None = None
+    # Position in routing_defaults.coding_preference (0 = tried first), if listed.
+    coding_preference_rank: int | None = None
 
 
 @dataclass(frozen=True)

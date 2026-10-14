@@ -47,9 +47,11 @@ SOL_UNTIL = utc("2026-11-21T00:00:00Z")
 
 PROVIDERS = {"openai", "claude", "gemini", "grok", "deepseek"}
 
-# The 21 models selectable in production on 2026-10-13. Asserted as a subset so
-# adding a model to the registry does not break this test, but losing one does.
-PRODUCTION_SELECTABLE_MODELS = {
+# The 21 models selectable in production on 2026-10-13. The 2026-10 model update
+# hid 13 of them (``selectable: false``) and renamed deepseek-v4-flash to
+# deepseek-flash; every one must still build and bill, because hidden models keep
+# serving existing threads and API callers.
+PRODUCTION_ENABLED_MODELS = {
     ("openai", "gpt-5.6-luna"),
     ("openai", "gpt-5.4-nano"),
     ("openai", "gpt-4o-mini"),
@@ -71,6 +73,29 @@ PRODUCTION_SELECTABLE_MODELS = {
     ("claude", "claude-sonnet-4-6"),
     ("claude", "claude-opus-4-6"),
     ("claude", "claude-opus-4-5"),
+}
+
+# The 18 models selectable after the 2026-10 model update. Asserted as a subset so
+# adding a model to the registry does not break this test, but losing one does.
+PRODUCTION_SELECTABLE_MODELS = {
+    ("openai", "gpt-6-luna"),
+    ("openai", "gpt-6.1-sol"),
+    ("openai", "gpt-6-astra"),
+    ("openai", "gpt-5.4-nano"),
+    ("openai", "gpt-4o-mini"),
+    ("openai", "gpt-5.4-mini"),
+    ("openai", "gpt-5.4"),
+    ("gemini", "gemini-3.5-flash-lite"),
+    ("gemini", "gemini-3.8-flash"),
+    ("gemini", "gemini-4-argon"),
+    ("deepseek", "deepseek-flash"),
+    ("deepseek", "deepseek-v4-pro"),
+    ("grok", "grok-4.3"),
+    ("grok", "grok-4.7"),
+    ("claude", "claude-haiku-5-5"),
+    ("claude", "claude-sonnet-5-5"),
+    ("claude", "claude-opus-5-5"),
+    ("claude", "claude-fable-5-1"),
 }
 
 # Approved LiteLLM cards in production PostgreSQL (rates per LiteLLM token units).
@@ -257,6 +282,7 @@ def test_registry_builds_with_every_provider_and_selectable_model(
 
     assert {provider for provider, _ in selectable} == PROVIDERS
     assert PRODUCTION_SELECTABLE_MODELS <= selectable
+    assert PRODUCTION_ENABLED_MODELS <= enabled
 
     # Database pricing must not change which models exist, only their rates.
     monkeypatch.setenv("MODEL_PRICING_MODE", "legacy")
@@ -306,7 +332,7 @@ def test_optional_rates_mirror_card_presence_for_every_model(production_rate_car
             else:
                 assert value is None, (candidate.model_name, key)
 
-    deepseek = registry.find_model("deepseek", "deepseek-v4-flash")
+    deepseek = registry.find_model("deepseek", "deepseek-flash")
     assert deepseek.cache_write_cost_per_1m == 0.0
 
 
@@ -464,9 +490,20 @@ def test_model_options_endpoint_returns_full_catalog_in_database_mode(catalog_cl
     assert {provider for provider, _ in pairs} == PROVIDERS
     assert PRODUCTION_SELECTABLE_MODELS <= pairs
     assert body["total"] == len(body["models"])
+    # Hidden models keep working but are no longer offered in the pickers.
+    assert ("gemini", "gemini-3.6-flash") not in pairs
+    assert all(item["selectable"] for item in body["models"])
 
-    by_pair = {(item["provider"], item["model"]): item for item in body["models"]}
+
+def test_full_models_catalog_keeps_hidden_models_and_missing_rates(catalog_client, monkeypatch):
+    monkeypatch.setenv("ENABLE_MODELS_CATALOG", "true")
+    response = catalog_client.get("/v1/models", params={"enabled_only": "false"})
+    assert response.status_code == 200
+    by_pair = {(item["provider"], item["model"]): item for item in response.json()["models"]}
+
+    assert PRODUCTION_ENABLED_MODELS <= set(by_pair)
     gemini = by_pair[("gemini", "gemini-3.6-flash")]
+    assert gemini["selectable"] is False
     assert gemini["input_cost_per_1m"] == 0.75
     assert gemini["output_cost_per_1m"] == 3.75
     assert gemini["cached_input_cost_per_1m"] == 0.075
@@ -506,7 +543,7 @@ def test_history_credit_usage_builds_registry_in_database_mode(production_rate_c
 
 PREFLIGHT_ARGS = [
     "--min-selectable",
-    "21",
+    "18",
     "--expect",
     "claude:claude-haiku-4-5=1/5@6884812d-54ab-49ec-9313-b64cf2c825ae",
     "--expect",
@@ -542,7 +579,7 @@ def test_preflight_passes_and_flags_cards_ending_without_successor(preflight):
     assert status == 0, output
     assert "FAIL" not in output
     assert "all providers have selectable models" in output
-    assert "selectable models match the registry configuration (21)" in output
+    assert "selectable models match the registry configuration (18)" in output
     assert "missing rates stay missing, not $0" in output
     assert "long-context pricing starts at 272001 tokens (input 4 -> 8)" in output
     # GPT-5.6 Sol's approved card ends 2026-11-21 with no successor approved.

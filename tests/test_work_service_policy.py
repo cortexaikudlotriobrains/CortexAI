@@ -513,15 +513,16 @@ def test_work_settlement_persists_full_cache_partition_and_provider_floor(monkey
         usage,
     )
 
-    assert billed == 385_636
+    # Claude Sonnet 5 credits are 3/14 per token since 2026-10-14 (were 4/18).
+    assert billed == 294_084
     assert transaction["input_tokens"] == 273_714
     assert transaction["normal_input_tokens"] == 30
     assert transaction["cached_input_tokens"] == 244_569
     assert transaction["cache_write_tokens"] == 29_115
-    assert transaction["input_credits"] == 243_523
-    assert transaction["output_credits"] == 138_024
+    assert transaction["input_credits"] == 182_643
+    assert transaction["output_credits"] == 107_352
     assert transaction["fixed_credits"] == 4_089
-    assert transaction["total_credits"] == 385_636
+    assert transaction["total_credits"] == 294_084
     assert isinstance(transaction["provider_cost_usd"], Decimal)
     assert transaction["provider_cost_usd"] == pytest.approx(Decimal("0.2025301889"))
     metadata = transaction["metadata"]
@@ -529,6 +530,6 @@ def test_work_settlement_persists_full_cache_partition_and_provider_floor(monkey
     assert transaction["provider_cost_usd"] == Decimal(
         metadata["pricing_snapshot"]["work_provider_cost_usd"]
     )
-    assert metadata["managed_component_credits"] == 385_636
+    assert metadata["managed_component_credits"] == 294_084
     assert metadata["managed_provider_floor_credits"] == 200_000
     assert metadata["managed_reported_provider_cost_usd"] == pytest.approx(0.20)

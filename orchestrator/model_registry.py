@@ -36,6 +36,8 @@ class ModelRegistry:
             raise ValueError("Invalid model registry: missing providers")
 
         providers: dict[str, list[ModelCandidate]] = {}
+        coding_preference = (data.get("routing_defaults") or {}).get("coding_preference") or []
+        coding_rank = {str(key): index for index, key in enumerate(coding_preference)}
         for provider, pdata in data["providers"].items():
             provider_defaults = pdata.get("defaults", {})
             if not isinstance(provider_defaults, dict):
@@ -253,6 +255,7 @@ class ModelRegistry:
                         ],
                         max_attachment_bytes=max_attachment_bytes,
                         max_attachments_per_request=max_attachments,
+                        coding_preference_rank=coding_rank.get(f"{provider}:{model['name']}"),
                     )
                 )
             providers[provider] = candidates

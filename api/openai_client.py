@@ -452,7 +452,10 @@ class OpenAIClient(BaseAIClient):
         if attachments:
             return True
         model_norm = (model or "").strip().lower()
-        return "codex" in model_norm or model_norm.startswith("gpt-5.6")
+        # GPT-5.6 and later (including GPT-6) use the Responses API, which carries
+        # their reasoning controls and metered prompt-cache writes.
+        generation = OpenAIClient._gpt_generation(model_norm)
+        return "codex" in model_norm or (generation is not None and generation >= (5, 6))
 
     @staticmethod
     def _should_retry_with_responses_api(exc: Exception) -> bool:
@@ -522,10 +525,17 @@ class OpenAIClient(BaseAIClient):
         # OpenAI documents metered writes and a fixed 30m TTL for GPT-5.6
         # and later. Older models have no metered writes; the unused pricing
         # default below must never turn their retention policy into a write fee.
-        match = re.match(r"^gpt-(\d+)(?:\.(\d+))?(?:-|$)", (model or "").strip().lower())
-        if match and (int(match[1]), int(match[2] or 0)) >= (5, 6):
+        generation = OpenAIClient._gpt_generation(model)
+        if generation is not None and generation >= (5, 6):
             return "30m"
         return "5m"
+
+    @staticmethod
+    def _gpt_generation(model: str) -> tuple[int, int] | None:
+        """`gpt-6.1-sol` -> (6, 1); `gpt-6-luna` -> (6, 0); non-GPT names -> None."""
+
+        match = re.match(r"^gpt-(\d+)(?:\.(\d+))?(?:-|$)", (model or "").strip().lower())
+        return (int(match[1]), int(match[2] or 0)) if match else None
 
     @staticmethod
     def _supports_extended_prompt_cache(model: str) -> bool:

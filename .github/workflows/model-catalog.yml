@@ -1,0 +1,220 @@
+name: Model catalog
+
+# Weekly: compare LiteLLM's price catalog with config/model_registry.yaml and open a
+# report issue (label `model-catalog`). A reviewer ticks the models to add in that
+# issue; each edit starts the "Apply model updates" job, which waits for approval
+# in the protected `model-updates` environment, then opens a pull request against
+# develop. See docs/runbooks/model-updates.md.
+
+on:
+  schedule:
+    - cron: "17 13 * * 1" # Mondays 13:17 UTC
+  issues:
+    types: [edited]
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: "Apply the ticked models of this report issue number (empty = build a new report)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  BASE_BRANCH: develop
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  report:
+    name: Report catalog changes
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.issue == '')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: model-catalog-report
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BASE_BRANCH }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Build the report from LiteLLM
+        id: report
+        run: |
+          python scripts/models.py report --markdown report.md --summary-json summary.json
+          echo "fingerprint=$(jq -r .fingerprint summary.json)" >> "$GITHUB_OUTPUT"
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open a report issue when the findings changed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FINGERPRINT: ${{ steps.report.outputs.fingerprint }}
+        run: |
+          gh label create model-catalog --color 5319e7 \
+            --description "Weekly model catalog report" 2>/dev/null || true
+          same="$(gh issue list --label model-catalog --state open --limit 50 --json number,body \
+            --jq "[.[] | select(.body | contains(\"model-catalog:fingerprint=${FINGERPRINT}\")) | .number][0] // empty")"
+          if [ -n "$same" ]; then
+            echo "Findings unchanged since #${same}; keeping that issue and its ticks." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          url="$(gh issue create --label model-catalog \
+            --title "Model catalog report $(date -u +%F)" --body-file report.md)"
+          number="${url##*/}"
+          for old in $(gh issue list --label model-catalog --state open --limit 50 --json number \
+            --jq ".[].number | select(. != ${number})"); do
+            gh issue close "$old" --comment "Superseded by #${number}."
+          done
+          echo "Opened #${number}." | tee -a "$GITHUB_STEP_SUMMARY"
+
+  apply:
+    name: Apply model updates
+    # Runs when a reviewer edits (ticks) an open report issue, or by hand with its number.
+    if: >-
+      (github.event_name == 'issues'
+        && github.event.issue.state == 'open'
+        && contains(github.event.issue.labels.*.name, 'model-catalog')
+        && contains(github.event.issue.body, '- [x] `'))
+      || (github.event_name == 'workflow_dispatch' && inputs.issue != '')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Required reviewers on this environment are the approval gate.
+    environment: model-updates
+    concurrency:
+      # Only the latest edit of an issue waits for approval.
+      group: model-catalog-apply-${{ github.event.issue.number || inputs.issue }}
+      cancel-in-progress: true
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    env:
+      ISSUE: ${{ github.event.issue.number || inputs.issue }}
+      # Pull requests opened with the default token do not start CI; an optional
+      # fine-grained token (contents + pull requests: write) makes CI run on them.
+      PUSH_TOKEN: ${{ secrets.MODEL_CATALOG_TOKEN || github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BASE_BRANCH }}
+          fetch-depth: 0
+          token: ${{ env.PUSH_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install -r requirements-dev.txt
+
+      - name: Read the approved issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [[ "$ISSUE" =~ ^[0-9]+$ ]] || { echo "Issue must be a number." >&2; exit 1; }
+          # Read the body after approval, so the ticks and edits at approval time count.
+          gh issue view "$ISSUE" --json state,labels,body > issue.json
+          if [ "$(jq -r .state issue.json)" != "OPEN" ] || \
+             ! jq -e '.labels | map(.name) | index("model-catalog")' issue.json > /dev/null; then
+            echo "Issue #${ISSUE} is not an open model-catalog report." >&2
+            exit 1
+          fi
+          jq -r .body issue.json > issue.md
+
+      - name: Apply the ticked models
+        id: apply
+        run: |
+          python scripts/models.py apply --issue-body issue.md | tee apply.log
+          if git diff --quiet && [ -z "$(git ls-files --others --exclude-standard config frontend-react/src/config/generated)" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Nothing to apply." | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run model, credit and pricing tests
+        id: tests
+        if: steps.apply.outputs.changed == 'true'
+        continue-on-error: true
+        run: |
+          python -m pytest -q \
+            tests/test_model_catalog_tool.py \
+            tests/test_new_model_credits.py \
+            tests/test_registry_pricing_alignment.py \
+            tests/test_model_registry_capabilities.py \
+            tests/test_credit_calculator.py \
+            tests/test_model_rate_cards.py \
+            tests/test_database_pricing_model_registry.py \
+            tests/test_fastapi_contract_and_guardrails.py 2>&1 | tee pytest.log
+
+      - name: Open the pull request
+        if: steps.apply.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ env.PUSH_TOKEN }}
+          ISSUE_TOKEN: ${{ github.token }}
+          TESTS: ${{ steps.tests.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          branch="model-catalog/$(date -u +%Y%m%d)-issue-${ISSUE}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add config frontend-react/src/config/generated
+          git commit -m "Model catalog: apply report #${ISSUE}"
+          git push --force-with-lease origin "$branch"
+          {
+            echo "Applies the models ticked in #${ISSUE} ([run](${RUN_URL}))."
+            echo
+            echo "### Changes"
+            echo '```'
+            cat apply.log
+            echo '```'
+            echo
+            echo "### Model, credit and pricing tests: ${TESTS}"
+            echo '```'
+            tail -n 40 pytest.log
+            echo '```'
+            echo
+            echo "### Before merging (a person)"
+            echo "- [ ] Update tests that pin the selectable set or defaults (failures above)."
+            echo "- [ ] Provider client code the new model needs (API surface, sampling, thinking)."
+            echo "- [ ] Docs: README model lists, docs/runbooks/model-pricing.md preflight values."
+            echo "- [ ] Database pricing: run \`scripts/sync_model_pricing.py --seed-legacy\` and the"
+            echo "      preflight with this code **before** restarting the API, or startup fails."
+            echo "- [ ] Live check each new model in Ask and Compare."
+          } > pr.md
+          url="$(gh pr list --head "$branch" --state open --json url --jq '.[0].url // empty')"
+          if [ -n "$url" ]; then
+            gh pr edit "$url" --body-file pr.md
+          else
+            url="$(gh pr create --base "$BASE_BRANCH" --head "$branch" \
+              --title "Model catalog: apply report #${ISSUE}" --body-file pr.md)"
+          fi
+          GH_TOKEN="$ISSUE_TOKEN" gh issue comment "$ISSUE" --body "Opened ${url}."
+          echo "Opened ${url}." | tee -a "$GITHUB_STEP_SUMMARY"

@@ -501,7 +501,7 @@ def test_expired_candidate_cannot_be_approved(pricing_db):
         approve_candidate(db, card["id"], actor="reviewer", reason="verified")
 
 
-@pytest.mark.parametrize("model", ["deepseek-v4-flash", "deepseek-v4-pro"])
+@pytest.mark.parametrize("model", ["deepseek-flash", "deepseek-v4-pro"])
 def test_manual_schedule_is_protected_even_without_legacy_baseline(pricing_db, model):
     db, repo = pricing_db
     repo.add(
@@ -528,6 +528,25 @@ def test_manual_schedule_is_protected_even_without_legacy_baseline(pricing_db, m
     )
     assert result["changes"][0]["reason"] == "incomplete_billing_schedule"
     assert len(repo.list_cards("deepseek", model)) == 1
+
+
+def test_renamed_deepseek_flash_id_is_observation_only(pricing_db):
+    """deepseek-v4-flash became deepseek-flash; the old ID is a RETIRED tombstone."""
+
+    db, repo = pricing_db
+    row = {
+        "litellm_provider": "deepseek",
+        "input_cost_per_token": "0.00000015",
+        "output_cost_per_token": "0.0000006",
+    }
+    result = synchronize(
+        db,
+        LiteLLMPricingSource.parse(json.dumps({"deepseek-v4-flash": row}).encode()),
+        at="2026-10-14T02:00:00Z",
+        policy=auto_policy(),
+    )
+    assert result["changes"][0]["reason"] == "retired_model_observation_only"
+    assert repo.list_cards("deepseek", "deepseek-v4-flash") == []
 
 
 @pytest.mark.parametrize("operations", [0, 2, 5])
@@ -1046,7 +1065,17 @@ def test_bounded_source_history_blocks_indefinite_successor_approval(pricing_db)
 
 
 @pytest.mark.parametrize(
-    "model", ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.6", "gpt-5.6-sol-2026-07-22"]
+    "model",
+    [
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+        "gpt-5.6",
+        "gpt-5.6-sol-2026-07-22",
+        "gpt-6-luna",
+        "gpt-6.1-sol",
+        "gpt-6-astra",
+    ],
 )
 def test_openai_cache_write_ttl_and_request_retention_follow_model(model, monkeypatch):
     from api.openai_client import OpenAIClient
@@ -1065,7 +1094,12 @@ def test_openai_cache_write_ttl_and_request_retention_follow_model(model, monkey
 
 @pytest.mark.parametrize(
     "model,extended",
-    [("gpt-5.4", True), ("gpt-5.5", True), ("gpt-4o-mini", False), ("gpt-5.4-mini", False)],
+    [
+        ("gpt-5.4", True),
+        ("gpt-5.5", True),
+        ("gpt-4o-mini", False),
+        ("gpt-5.4-mini", False),
+    ],
 )
 def test_earlier_openai_models_preserve_retention_without_metered_writes(
     model, extended, monkeypatch
@@ -1346,6 +1380,66 @@ def test_source_parser_exact_mapping_and_long_context():
         ModelIdentityMap().resolve("claude", "anthropic/claude-sonnet-4-6") == "claude-sonnet-4-6"
     )
     assert ModelIdentityMap().resolve("openai", "unlisted-snapshot-2026-10-01") is None
+
+
+def test_source_parser_ignores_decisions_api_prices():
+    """GPT-6 Luna publishes Decisions API prices; Cortex never calls that API."""
+
+    result = LiteLLMPricingSource.parse(
+        json.dumps(
+            {
+                "gpt-6-luna": {
+                    "litellm_provider": "openai",
+                    "input_cost_per_token": "0.0000001",
+                    "output_cost_per_token": "0.0000005",
+                    "cache_read_input_token_cost": "0.00000001",
+                    "cache_creation_input_token_cost": "0.000000125",
+                    "input_cost_per_token_above_272k_tokens": "0.0000002",
+                    "output_cost_per_token_above_272k_tokens": "0.00000075",
+                    "input_cost_per_token_decisions": "0.0000001",
+                    "output_cost_per_token_decisions": "0.0",
+                    "cache_read_input_token_cost_decisions": "0.0000001",
+                    "input_cost_per_token_above_272k_tokens_decisions": "0.0000002",
+                }
+            }
+        ).encode()
+    )
+    entry = result.entries["gpt-6-luna"]
+    assert entry["error"] is None
+    assert not entry.get("unsupported_charge_dimensions")
+    assert entry["rates"]["tokens"]["input"] == "0.1"
+    assert entry["rates"]["tokens"]["output"] == "0.5"
+    assert entry["rates"]["bands"][0]["minimum_input_tokens"] == 272001
+
+
+def test_new_models_seed_legacy_cards_for_every_dated_rule(pricing_db):
+    """Promotional models seed both the launch card and the card that follows it."""
+
+    db, repo = pricing_db
+    seed_legacy(db)
+    for model, boundary in (
+        ("gemini-3.8-flash", "2027-01-01T00:00:00+00:00"),
+        ("gemini-4-argon", "2026-12-01T00:00:00+00:00"),
+    ):
+        cards = sorted(
+            repo.list_cards("gemini", model), key=lambda card: utc(card["effective_from"])
+        )
+        assert len(cards) == 2, model
+        assert utc(cards[0]["effective_to"]) == utc(boundary)
+        assert utc(cards[1]["effective_from"]) == utc(boundary)
+        assert cards[1]["effective_to"] is None
+    for provider, model in (
+        ("openai", "gpt-6-luna"),
+        ("openai", "gpt-6.1-sol"),
+        ("openai", "gpt-6-astra"),
+        ("claude", "claude-haiku-5-5"),
+        ("claude", "claude-sonnet-5-5"),
+        ("claude", "claude-opus-5-5"),
+        ("claude", "claude-fable-5-1"),
+        ("grok", "grok-4.7"),
+        ("deepseek", "deepseek-flash"),
+    ):
+        assert repo.list_cards(provider, model), f"{provider}:{model}"
 
 
 @pytest.mark.parametrize("mode", ["legacy", "database"])

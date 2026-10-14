@@ -18,7 +18,8 @@ This map is the quick "where do I change X?" reference for the current API-first
   LiteLLM correctness review and verification gates: `docs/LITELLM_PRICING_GUARDRAILS.md`.
   Pricing regression enforcement: `.github/workflows/ci.yml` backend job and
   `scripts/run_local_ci.py` pre-push gate (`tests/test_model_rate_cards.py`,
-  `tests/test_database_pricing_model_registry.py`).
+  `tests/test_database_pricing_model_registry.py`, plus `scripts/models.py check`
+  and the model catalog/credit suites).
 
 - Full local app runner and guarded Free/Plus/Pro/unrestricted IntelliJ profiles: `run_app.py`; effective local profile construction: `server/billing/subscription_service.py`
 - API server: `run_server.py`
@@ -58,7 +59,9 @@ This map is the quick "where do I change X?" reference for the current API-first
 - Provider catalog and defaults: `config/providers.yaml`
 - Product model catalogue, lifecycle, official evidence, legacy bootstrap rates, smart-router metadata, and consumer credit metadata: `config/model_registry.yaml`; `config/pricing.py` selects approved PostgreSQL provider rates in database mode; registry construction: `orchestrator/model_registry.py`
 - Canonical generation v3 Auto policy, explicit profiles, and operational ceiling: `config/generation_profiles.yaml`; provider/model/prompt/context resolver: `orchestrator/generation_policy.py`; reservation-affordability clamp: `server/generation_service.py`; normalized terminal status: `orchestrator/completion_status.py`
-- Subscription placement is data-driven through each registry row's `billing_class` and the plan catalogue's allowed classes. Claude Sonnet 4.6 is `advanced` (Plus/Pro), while Claude Opus 4.5 and 4.6 are `premium` (Pro); do not duplicate per-model plan lists elsewhere.
+- Subscription placement is data-driven through each registry row's `billing_class` and the plan catalogue's allowed classes; do not duplicate per-model plan lists elsewhere. New models take their credits, class and label from the credit ladder: `config/credit_ladder.yaml` (loader `tools/model_catalog/ladder.py`).
+- Model add/hide/retire tooling: `scripts/models.py` (CLI) over `tools/model_catalog/` (`report.py` LiteLLM comparison and issue rendering, `apply.py` registry/providers edits, `checks.py` registry rules, `registry_text.py` comment-preserving YAML edits, `frontend.py` generated React defaults); data: `config/known_model_ids.txt` (ID lock), `config/model_catalog_ignore.yaml` (dismissed catalog entries); generated: `frontend-react/src/config/generated/registryDefaults.ts`; workflow: `.github/workflows/model-catalog.yml`; procedure: `docs/runbooks/model-updates.md`.
+- Smart coding-route order: registry `routing_defaults.coding_preference` (loaded into `ModelCandidate.coding_preference_rank` by `orchestrator/model_registry.py`, read by `orchestrator/model_selector.py`).
 - Consumer subscription plans: `config/subscription_plans.yaml`
 - Immutable plan types, validation, and cache: `server/billing/models.py`, `server/billing/plan_catalog.py`
 - Effective account/subscription lifecycle and entitlement decisions: `server/billing/account_service.py`, `server/billing/subscription_service.py`, `server/billing/entitlement_service.py`, `server/billing/errors.py`
@@ -185,6 +188,11 @@ This map is the quick "where do I change X?" reference for the current API-first
   3. Pass the same resolved target value to `server/billing/enforcement_service.py`, provider execution, response metadata, and `db/repository.py`.
   4. Update managed-Auto/incomplete/retry behavior in React and validate `tests/test_generation_policy.py`, provider contract tests, frontend tests, and responsive E2E.
   5. Synchronize `docs/GENERATION_BUDGETS.md`, the rollout runbook, Postman, and every migration apply sequence.
+
+- Add, hide or retire a model:
+  1. Follow `docs/runbooks/model-updates.md`: run `python scripts/models.py report`, edit and apply the approved proposals (`apply`), or use the `Model catalog` workflow
+  2. Write any provider client behaviour the model needs in `api/*.py` and update tests that pin the selectable set or defaults
+  3. Validate with `python scripts/models.py check`, `tests/test_model_catalog_tool.py`, `tests/test_new_model_credits.py`, the pricing suites and the React tests; seed legacy cards and run the preflight before restarting in database pricing mode
 
 - Change subscription plan definitions or model credit economics:
   1. Update `config/subscription_plans.yaml`, `server/billing/credit_calculator.py`, and/or each model's access category, input/output multipliers, usage label, and pricing version in `config/model_registry.yaml`; Tavily research settlement uses provider credits from research metadata

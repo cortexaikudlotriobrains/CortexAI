@@ -114,23 +114,14 @@ class ModelSelector:
     def _coding_preference_rank(self, candidate: ModelCandidate, features: PromptFeatures) -> int:
         """
         Prefer the current, selectable coding-capable models for coding prompts.
-        Lower rank value is better.
+        Lower rank value is better. The order comes from
+        ``routing_defaults.coding_preference`` in config/model_registry.yaml.
         """
         if not self._is_coding_task(features):
             return 999
 
-        preferred_order = {
-            ("openai", "gpt-5.6-sol"): 0,
-            ("openai", "gpt-5.4"): 1,
-            ("claude", "claude-opus-5"): 2,
-            ("deepseek", "deepseek-v4-pro"): 3,
-            ("grok", "grok-4.5"): 4,
-            ("gemini", "gemini-3.1-pro-preview"): 5,
-            ("claude", "claude-fable-5"): 6,
-        }
-        key = (candidate.provider.lower(), candidate.model_name)
-        if key in preferred_order:
-            return preferred_order[key]
+        if candidate.coding_preference_rank is not None:
+            return candidate.coding_preference_rank
 
         tags = {t.lower() for t in candidate.tags}
         if {"coding", "reasoning"} & tags:

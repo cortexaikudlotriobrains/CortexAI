@@ -4,11 +4,11 @@ import type {
   SubscriptionPlanCode,
 } from "../types";
 
-export const DEFAULT_ASK_MODEL_KEYS_BY_PLAN: Record<SubscriptionPlanCode, string> = {
-  free: "openai:gpt-5.6-luna",
-  plus: "claude:claude-sonnet-4-6",
-  pro: "openai:gpt-5.6-terra",
-};
+// Plan defaults live in config/model_registry.yaml (ui_defaults.ask_by_plan) and are
+// generated into ./generated/registryDefaults.ts by `python scripts/models.py sync-frontend`.
+import { DEFAULT_ASK_MODEL_KEYS_BY_PLAN } from "./generated/registryDefaults";
+
+export { DEFAULT_ASK_MODEL_KEYS_BY_PLAN };
 
 export function resolveAskModelKey(
   models: ModelCatalogItem[],

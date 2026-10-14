@@ -25,6 +25,7 @@ FIELDS = {
     "reasoning": "output_cost_per_reasoning_token",
 }
 SERVICE_FIELDS = {"search_context_cost_per_query", "google_maps_grounding_cost_per_query"}
+NON_STANDARD_SUFFIXES = ("_batches", "_priority", "_flex", "_ultrafast", "_decisions")
 
 
 def service_charge(field: str, value: Any) -> Any:
@@ -156,12 +157,14 @@ class LiteLLMPricingSource:
                         supported_fields.add(field)
                 # Tier/batch fields are outside this standard-only adapter. Unknown
                 # standard billable dimensions must be reviewed, not dropped.
+                # "_decisions" prices OpenAI's separate Decisions API, which Cortex
+                # never calls, so it is a non-standard surface like Batch or Flex.
                 unknown = [
                     key
                     for key, value in row.items()
                     if "cost" in key
                     and key not in supported_fields
-                    and not key.endswith(("_batches", "_priority", "_flex", "_ultrafast"))
+                    and not key.endswith(NON_STANDARD_SUFFIXES)
                     and (value not in (None, 0, "0") or "audio" in key)
                 ]
                 if unknown:

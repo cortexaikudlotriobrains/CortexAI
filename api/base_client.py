@@ -184,6 +184,46 @@ class BaseAIClient(ABC):
     def _normalize_message_text(cls, message: dict[str, Any]) -> str:
         return cls._extract_text_from_content(message.get("content"))
 
+    @classmethod
+    def _build_image_url_messages(
+        cls,
+        normalized_messages: list[dict[str, Any]],
+        *,
+        attachments: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Attach images to the last user turn as OpenAI-compatible ``image_url`` parts."""
+
+        if not attachments:
+            return normalized_messages
+        last_user_idx = None
+        for idx, message in enumerate(normalized_messages):
+            if str(message.get("role") or "").strip().lower() == "user":
+                last_user_idx = idx
+        out: list[dict[str, Any]] = []
+        for idx, message in enumerate(normalized_messages):
+            role = str(message.get("role") or "user").strip().lower()
+            text = cls._normalize_message_text(message)
+            if idx != last_user_idx:
+                out.append({"role": role, "content": text})
+                continue
+            parts: list[dict[str, Any]] = [
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:{attachment['mime_type']};base64,{attachment['data_base64']}"
+                    },
+                }
+                for attachment in attachments
+            ]
+            if text:
+                text_block = {"type": "text", "text": text}
+                if cache_friendly_prompt_ordering_enabled():
+                    parts.append(text_block)
+                else:
+                    parts.insert(0, text_block)
+            out.append({"role": role, "content": parts or [{"type": "text", "text": ""}]})
+        return out
+
     @staticmethod
     def _normalize_inference_attachments(attachments: Any) -> list[dict[str, Any]]:
         """Normalize attachment payloads passed from API layer to provider clients."""

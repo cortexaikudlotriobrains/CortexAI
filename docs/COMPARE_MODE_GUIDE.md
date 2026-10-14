@@ -99,7 +99,7 @@ Edit `config/config.py` to customize which models are compared:
 COMPARE_TARGETS = [
     {"provider": "openai", "model": "gpt-4o-mini"},
     {"provider": "gemini", "model": "gemini-3.5-flash-lite"},
-    {"provider": "deepseek", "model": "deepseek-v4-flash"},
+    {"provider": "deepseek", "model": "deepseek-flash"},
     {"provider": "grok", "model": "grok-4-latest"},
 ]
 ```
@@ -138,7 +138,7 @@ You: What is Python?
     Latency: 289ms | Tokens: 52 | Cost: $0.000015
     Response: Python is a versatile programming language known for...
 
-[3] DEEPSEEK/deepseek-v4-flash
+[3] DEEPSEEK/deepseek-flash
     Latency: 412ms | Tokens: 38 | Cost: $0.000008
     Response: Python is an easy-to-learn programming language...
 
@@ -194,7 +194,7 @@ If some models fail, the system continues with successful responses:
 [2] GEMINI/gemini-3.5-flash-lite
     [ERROR] timeout: Request timed out after 60s
 
-[3] DEEPSEEK/deepseek-v4-flash
+[3] DEEPSEEK/deepseek-flash
     Response: Successfully completed...
 
 === Summary ===

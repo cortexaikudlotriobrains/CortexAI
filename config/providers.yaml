@@ -3,8 +3,8 @@ providers:
     label: OpenAI
     api_key_env: OPENAI_API_KEY
     default_model_env: DEFAULT_OPENAI_MODEL
-    default_model: gpt-5.6-terra
-    compare_default_model: gpt-5.6-luna
+    default_model: gpt-6.1-sol
+    compare_default_model: gpt-6-luna
     byok_supported: true
     capabilities: [chat, stream, compare, smart_routing, prompt_optimization, web_search]
     ui:
@@ -18,7 +18,7 @@ providers:
     label: Gemini
     api_key_env: GOOGLE_GEMINI_API_KEY
     default_model_env: DEFAULT_GEMINI_MODEL
-    default_model: gemini-3.6-flash
+    default_model: gemini-3.8-flash
     compare_default_model: gemini-3.5-flash-lite
     byok_supported: true
     capabilities: [chat, stream, compare, smart_routing, prompt_optimization, web_search]
@@ -33,8 +33,8 @@ providers:
     label: DeepSeek
     api_key_env: DEEPSEEK_API_KEY
     default_model_env: DEFAULT_DEEPSEEK_MODEL
-    default_model: deepseek-v4-flash
-    compare_default_model: deepseek-v4-flash
+    default_model: deepseek-flash
+    compare_default_model: deepseek-flash
     byok_supported: true
     capabilities: [chat, stream, compare, smart_routing, prompt_optimization, web_search]
     ui:
@@ -63,8 +63,8 @@ providers:
     label: Claude
     api_key_env: ANTHROPIC_API_KEY
     default_model_env: DEFAULT_CLAUDE_MODEL
-    default_model: claude-sonnet-5
-    compare_default_model: claude-sonnet-5
+    default_model: claude-sonnet-5-5
+    compare_default_model: claude-sonnet-5-5
     byok_supported: true
     capabilities: [chat, stream, compare, smart_routing, prompt_optimization, web_search]
     ui:

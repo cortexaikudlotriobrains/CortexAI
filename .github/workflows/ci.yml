@@ -130,6 +130,17 @@ jobs:
             tests/test_database_pricing_model_registry.py \
             -q
 
+      - name: Model catalog rules (lifecycle, credit ladder, defaults, ID lock)
+        run: |
+          python scripts/models.py check
+          python -m pytest \
+            tests/test_model_catalog_tool.py \
+            tests/test_new_model_credits.py \
+            tests/test_registry_pricing_alignment.py \
+            tests/test_model_registry_capabilities.py \
+            tests/test_credit_calculator.py \
+            -q
+
       - name: pip-audit (dependency vulnerabilities)
         run: pip-audit -r requirements.txt -r requirements-dev.txt
 
