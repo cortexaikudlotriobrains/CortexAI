@@ -20,7 +20,7 @@ import styles from "./UsageInsightsPage.module.css";
 
 export function UsageInsightsPage() {
   const navigate = useNavigate();
-  const { cognitoConfig, loading: authLoading, loggedIn, login, logout } = useAuth();
+  const { cognitoConfig, whoAmI, loading: authLoading, loggedIn, login, logout } = useAuth();
   const { cancel } = useChat();
   const { theme, toggleTheme } = useTheme();
   const setMode = useChatStore((s) => s.setMode);
@@ -40,7 +40,8 @@ export function UsageInsightsPage() {
     loading: usageLoading,
     error: usageError,
     reload,
-  } = useUsageSummary(usageParams);
+    hasConfiguredByok = false,
+  } = useUsageSummary(usageParams, authLoading ? undefined : whoAmI?.api_key_id);
   const authEnabled = cognitoConfig?.enabled ?? false;
   const subscriptionState = useSubscription({ authLoading, loggedIn });
   const accountSubscription = getAccountMenuSubscriptionPresentation(
@@ -247,8 +248,12 @@ export function UsageInsightsPage() {
               <span>{exportError.message}</span>
               {exportError.requestId ? <small>Support code: {exportError.requestId}</small> : null}
             </div>
-            <button type="button" onClick={() => void handleExportUsage()}>Try again</button>
-            <button type="button" onClick={() => setExportError(null)}>Dismiss</button>
+            <button type="button" onClick={() => void handleExportUsage()}>
+              Try again
+            </button>
+            <button type="button" onClick={() => setExportError(null)}>
+              Dismiss
+            </button>
           </section>
         ) : null}
         <section className={styles.body} aria-label="Usage dashboard content">
@@ -257,7 +262,11 @@ export function UsageInsightsPage() {
           ) : usageError ? (
             <UsageErrorState error={usageError} onRetry={reload} />
           ) : summary ? (
-            <UsageDashboard summary={summary} showModelEmpty={empty} />
+            <UsageDashboard
+              summary={summary}
+              showModelEmpty={empty}
+              showProviderCosts={hasConfiguredByok}
+            />
           ) : (
             <section className={styles.readyState} aria-label="Usage summary loaded" />
           )}
@@ -290,13 +299,15 @@ export function UsageInsightsPage() {
 function UsageDashboard({
   summary,
   showModelEmpty,
+  showProviderCosts,
 }: {
   summary: UsageSummary;
   showModelEmpty: boolean;
+  showProviderCosts: boolean;
 }) {
   return (
     <section className={styles.dashboard} aria-label="Usage summary loaded">
-      <KpiRow summary={summary} />
+      <KpiRow summary={summary} showProviderCosts={showProviderCosts} />
       <div className={styles.panelsRow}>
         <ModelLeaderboard summary={summary} empty={showModelEmpty} />
         <SessionModesPanel summary={summary} />
@@ -306,11 +317,21 @@ function UsageDashboard({
   );
 }
 
-function KpiRow({ summary }: { summary: UsageSummary }) {
-  const cards = buildKpiCards(summary);
+function KpiRow({
+  summary,
+  showProviderCosts,
+}: {
+  summary: UsageSummary;
+  showProviderCosts: boolean;
+}) {
+  const cards = buildKpiCards(summary, showProviderCosts);
 
   return (
-    <section className={styles.kpiGrid} aria-label="Usage key metrics">
+    <section
+      className={styles.kpiGrid}
+      aria-label="Usage key metrics"
+      data-metric-count={cards.length}
+    >
       {cards.map((card) => (
         <article className={styles.kpiCard} aria-label={card.ariaLabel} key={card.key}>
           <div className={styles.kpiHeader}>
@@ -592,7 +613,7 @@ interface KpiCardConfig {
   positiveTrend?: boolean;
 }
 
-function buildKpiCards(summary: UsageSummary): KpiCardConfig[] {
+function buildKpiCards(summary: UsageSummary, showProviderCosts: boolean): KpiCardConfig[] {
   const hasUsage = summary.totalRequests > 0 || summary.totalTokens > 0;
   const tokenValue = formatCompactNumber(summary.totalTokens);
   const tokenDelta = hasUsage ? formatPercent(summary.tokensDeltaPct) : DASH;
@@ -604,7 +625,7 @@ function buildKpiCards(summary: UsageSummary): KpiCardConfig[] {
   const costValue = hasUsage ? formatCost(summary.avgCostPerRequest, 4) : DASH;
   const spendSub = hasUsage ? `${formatCost(summary.totalSpend, 2)} total spend` : DASH;
 
-  return [
+  const cards: KpiCardConfig[] = [
     {
       key: "tokens",
       label: "TOTAL TOKENS",
@@ -667,6 +688,7 @@ function buildKpiCards(summary: UsageSummary): KpiCardConfig[] {
       ariaLabel: `AVG COST / REQ ${costValue} ${spendSub}`,
     },
   ];
+  return showProviderCosts ? cards : cards.filter((card) => card.key !== "cost");
 }
 
 function TrendIcon({ direction }: { direction: "up" | "down" }) {

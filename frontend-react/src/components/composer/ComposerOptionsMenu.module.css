@@ -58,7 +58,8 @@
 .menu {
   position: fixed;
   z-index: 1001;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   border: 1px solid var(--cx-hairline);
   background: var(--cx-surface);
   color: var(--cx-ink-900);
@@ -67,7 +68,7 @@
 .popover {
   max-height: calc(100vh - 24px);
   border-radius: 16px;
-  box-shadow: 0 22px 48px -20px rgba(11, 18, 32, .32);
+  box-shadow: 0 22px 48px -20px rgba(11, 18, 32, 0.32);
   padding: 14px 12px 12px;
   animation: popoverIn 160ms ease both;
 }
@@ -112,9 +113,142 @@
   cursor: pointer;
 }
 
+.improveRow:hover {
+  background: var(--cx-surface-2);
+}
+
+.menu button:focus-visible {
+  outline: 2px solid var(--cx-accent);
+  outline-offset: 2px;
+}
+
+.modelTile {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--cx-surface-2);
+  box-shadow: inset 0 0 0 1px var(--cx-hairline);
+}
+
+.rowCopy small b {
+  color: var(--cx-ink-900);
+  font-weight: 700;
+}
+.chevron {
+  width: 16px;
+  height: 16px;
+  color: var(--cx-ink-400);
+}
+.saved {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--cx-success);
+  font: 700 12px/1 var(--font-sans);
+  animation: backdropIn 180ms ease both;
+}
+.saved svg {
+  width: 14px;
+  height: 14px;
+}
+.backButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  margin: -4px 0 4px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--cx-ink-500);
+  cursor: pointer;
+  font: 700 12px/1 var(--font-sans);
+  padding: 0 8px 0 4px;
+}
+.backButton svg {
+  width: 16px;
+  height: 16px;
+}
+.backButton:hover {
+  background: var(--cx-surface-2);
+  color: var(--cx-accent);
+}
+.subHeader {
+  display: grid;
+  gap: 3px;
+  padding: 0 8px 8px;
+}
+.subHeader strong {
+  font: 800 14px/18px var(--font-sans);
+}
+.subHeader span {
+  font: 500 12px/17px var(--font-sans);
+  color: var(--cx-ink-500);
+}
+.sectionLabel {
+  padding: 10px 10px 4px;
+  color: var(--cx-ink-400);
+  font: 600 10px/1 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.pickRow {
+  display: flex;
+  width: 100%;
+  min-height: 50px;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--cx-ink-900);
+  cursor: pointer;
+  padding: 7px 10px;
+  text-align: left;
+  font: inherit;
+}
+.pickRow:hover {
+  background: var(--cx-surface-2);
+}
+.pickRow.selectedOption,
+.pickRow.selectedOption:hover {
+  background: var(--cx-accent-soft);
+}
+.pickRow .rowCopy {
+  flex: 1;
+}
+.providerActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--cx-ink-400);
+}
+.providerActions svg {
+  width: 16px;
+  height: 16px;
+}
+.providerActions svg:first-child:not(:last-child) {
+  color: var(--cx-accent);
+}
+.doneButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--cx-accent);
+  padding: 0 6px;
+  font: 800 15px/1 var(--font-sans);
+  cursor: pointer;
+}
+
 .improveRow[aria-disabled="true"] {
   cursor: not-allowed;
-  opacity: .62;
+  opacity: 0.62;
 }
 
 .rowIcon {
@@ -168,8 +302,8 @@
   height: 16px;
   margin-left: 3px;
   border-radius: 50%;
-  background: var(--cx-surface);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, .2);
+  background: var(--cx-feature-active-fg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
   transition: transform 180ms ease;
 }
 
@@ -223,7 +357,7 @@
 
 .reasoningOption:disabled {
   cursor: not-allowed;
-  opacity: .5;
+  opacity: 0.5;
 }
 
 .selectedOption,
@@ -258,10 +392,10 @@
   z-index: 1000;
   inset: 0;
   border: 0;
-  background: rgba(11, 18, 32, .38);
+  background: rgba(11, 18, 32, 0.38);
   cursor: default;
   padding: 0;
-  animation: backdropIn 200ms ease both;
+  animation: backdropIn 180ms ease both;
 }
 
 .sheet {
@@ -269,22 +403,23 @@
   bottom: 0;
   left: 0;
   width: 100%;
-  max-height: min(88dvh, 760px);
+  max-height: 84dvh;
   border-right: 0;
   border-bottom: 0;
   border-left: 0;
-  border-radius: 26px 26px 0 0;
-  padding: 8px 14px calc(30px + env(safe-area-inset-bottom));
+  border-radius: 22px 22px 0 0;
+  padding: 8px 16px calc(16px + env(safe-area-inset-bottom));
+  box-shadow: 0 -12px 40px -12px rgba(11, 18, 32, 0.35);
   transform: translateY(var(--sheet-drag-y, 0));
-  animation: sheetIn 200ms ease both;
+  animation: sheetIn 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .sheetHandle {
-  width: 38px;
+  width: 36px;
   height: 5px;
-  margin: 0 auto 8px;
+  margin: 0 auto 6px;
   border-radius: 999px;
-  background: var(--cx-hairline);
+  background: color-mix(in srgb, var(--cx-ink-400) 40%, var(--cx-hairline));
   cursor: grab;
   touch-action: none;
   user-select: none;
@@ -370,37 +505,6 @@
     height: 18px;
   }
 
-  .popover {
-    border-radius: 18px;
-  }
-
-  .improveRow {
-    min-height: 60px;
-  }
-
-  .rowIcon {
-    width: 34px;
-    height: 34px;
-  }
-
-  .switch {
-    width: 44px;
-    height: 26px;
-  }
-
-  .switch span {
-    width: 20px;
-    height: 20px;
-  }
-
-  .improveRow[aria-checked="true"] .switch span {
-    transform: translateX(18px);
-  }
-
-  .reasoningOption {
-    min-height: 50px;
-  }
-
   .optionChip {
     height: 36px;
     border-radius: 18px;
@@ -421,56 +525,135 @@
   }
 }
 
-@media (max-width: 767px) {
+@media (max-width: 760px) {
   .menuHeader {
-    padding: 0 12px 7px;
-    font-size: 14px;
+    min-height: 48px;
+    padding: 0;
+    gap: 12px;
   }
 
   .menuHeader span:first-child {
     font-size: 16px;
   }
 
+  .modeLabel {
+    margin-left: auto;
+    font-size: 12px;
+  }
+  .sectionLabel {
+    padding: 14px 6px 7px;
+  }
+  .card {
+    background: var(--cx-surface-2);
+    border-radius: 16px;
+    overflow: hidden;
+  }
+  .modelTile {
+    background: var(--cx-surface);
+  }
+  .card > .improveRow + .improveRow,
+  .card > .pickRow + .pickRow {
+    border-top: 1px solid var(--cx-hairline-soft);
+  }
+  .improveRow,
+  .pickRow {
+    min-height: 62px;
+    padding: 10px 14px;
+    gap: 12px;
+    border-radius: 0;
+  }
+  .improveRow:active,
+  .pickRow:active {
+    background: var(--cx-surface-3);
+  }
+
   .improveRow,
   .reasoningHeader {
-    grid-template-columns: 36px minmax(0, 1fr) auto;
+    grid-template-columns: 32px minmax(0, 1fr) auto;
   }
 
   .reasoningHeader {
-    grid-template-columns: 36px minmax(0, 1fr);
+    grid-template-columns: 32px minmax(0, 1fr);
+    padding: 0;
+    min-height: 44px;
   }
 
   .rowIcon {
-    width: 36px;
-    height: 36px;
+    width: 32px;
+    height: 32px;
   }
 
   .rowCopy strong,
   .optionCopy strong {
-    font-size: 14px;
-    line-height: 18px;
+    font-size: 15px;
+    line-height: 19px;
   }
 
   .rowCopy small,
   .optionCopy small {
     font-size: 13px;
-    line-height: 18px;
+    line-height: 17px;
   }
 
   .divider {
-    margin-top: 5px;
-    margin-bottom: 10px;
+    margin: 0;
+  }
+
+  .switch {
+    width: 50px;
+    height: 30px;
+  }
+  .switch span {
+    width: 24px;
+    height: 24px;
+    background: #fff;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.22);
+    transition: transform 220ms cubic-bezier(0.3, 1.3, 0.5, 1);
+  }
+  .improveRow[aria-checked="true"] .switch span {
+    transform: translateX(20px);
+  }
+  .reasoningBlock {
+    display: grid;
+    gap: 12px;
+    padding: 12px 14px 14px;
   }
 
   .reasoningList {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 2px;
-    margin-right: 0;
-    margin-left: 0;
+    margin: 0;
+    padding: 3px;
+    border-radius: 12px;
+    background: var(--cx-surface-3);
   }
 
   .reasoningOption {
-    min-height: 54px;
-    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 38px;
+    height: 38px;
+    border-radius: 9px;
+    padding: 0;
+    text-align: center;
+  }
+
+  .reasoningOption strong {
+    font: 700 13px/1 var(--font-sans);
+    color: var(--cx-ink-600);
+  }
+  .reasoningOption:disabled {
+    opacity: 0.4;
+  }
+  .reasoningOption.selectedOption,
+  .reasoningOption.selectedOption:hover {
+    background: var(--cx-feature-active-bg);
+    box-shadow: var(--cx-shadow-sm);
+  }
+  .reasoningOption.selectedOption strong {
+    color: var(--cx-feature-active-fg);
   }
 
   .optionCopy {
@@ -480,9 +663,40 @@
   }
 
   .note {
-    font-size: 13px;
+    margin: 10px 6px 0;
+    border: 0;
+    font-size: 12px;
     line-height: 18px;
-    padding: 12px 12px 0;
+    padding: 0;
+  }
+  .drillHeader {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+  }
+  .drillHeader strong {
+    text-align: center;
+    font: 800 16px/20px var(--font-sans);
+  }
+  .backButton {
+    width: 44px;
+    height: 44px;
+    margin: 0;
+    padding: 0;
+    justify-content: center;
+    color: var(--cx-ink-700);
+  }
+  .backButton svg {
+    width: 22px;
+    height: 22px;
+  }
+  .backButton span {
+    display: none;
+  }
+  .lead {
+    text-align: center;
+    color: var(--cx-ink-500);
+    font: 500 13px/1.5 var(--font-sans);
+    margin: 4px 6px 8px;
   }
 }
 
@@ -499,8 +713,7 @@
 
 @keyframes sheetIn {
   from {
-    opacity: 0;
-    transform: translateY(24px);
+    transform: translateY(100%);
   }
   to {
     opacity: 1;
@@ -509,8 +722,12 @@
 }
 
 @keyframes backdropIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 @keyframes chipIn {
@@ -532,6 +749,10 @@
   .backdrop,
   .optionChip {
     transition: none;
+    animation: none;
+  }
+
+  .saved {
     animation: none;
   }
 

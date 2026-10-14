@@ -203,7 +203,6 @@ const CompareTurn = memo(function CompareTurn({
         : styles.compareGridOne;
   const responsesVisible = !shouldHideResponsesForOptimization(turn);
   const hasResponseTabs = responsesVisible && turn.responses.length > 1;
-  const metricHighlights = resolveCompareMetricHighlights(turn.responses);
 
   useEffect(() => {
     if (activeResponseIndex >= turn.responses.length) {
@@ -374,7 +373,6 @@ const CompareTurn = memo(function CompareTurn({
                     optimizeEnabled={turn.optimizeEnabled ?? !!turn.optimization}
                     onRegenerate={() => void onRegenerate(turn.id, index)}
                     onRetryWithMoreRoom={() => void onRetryWithMoreRoom(turn.id, index)}
-                    compareHighlights={metricHighlights[index]}
                   />
                 </div>
               );
@@ -396,19 +394,6 @@ function nextResponseTabIndex(key: string, currentIndex: number, tabCount: numbe
   return null;
 }
 
-function resolveCompareMetricHighlights(responses: ChatTurn["responses"]) {
-  const durations = responses.map((response) =>
-    response.error || response.ui_status === "failed" || response.ui_status === "cancelled"
-      ? null
-      : responseDurationMs(response),
-  );
-  const fastestDuration = minMetric(durations);
-
-  return responses.map((_, index) => ({
-    fastest: fastestDuration !== null && durations[index] === fastestDuration,
-  }));
-}
-
 function responseSwitcherTone(providerRaw: string, fallbackColor: string) {
   const provider = providerRaw.trim().toLowerCase();
   if (provider === "claude") {
@@ -418,33 +403,6 @@ function responseSwitcherTone(providerRaw: string, fallbackColor: string) {
     return { accent: "#5b5bd6", soft: "#eef0fb" };
   }
   return { accent: fallbackColor || "#5b5bd6", soft: "#eef0f2" };
-}
-
-function responseDurationMs(response: ChatTurn["responses"][number]) {
-  const startedAtMs = parseTimestamp(response.started_at);
-  const firstVisibleAtMs = parseTimestamp(response.first_visible_at);
-  if (startedAtMs !== null && firstVisibleAtMs !== null) {
-    return Math.max(0, firstVisibleAtMs - startedAtMs);
-  }
-  const completedAtMs = parseTimestamp(response.completed_at);
-  if (startedAtMs !== null && completedAtMs !== null) {
-    return Math.max(0, completedAtMs - startedAtMs);
-  }
-  return positiveNumber(response.latency_ms);
-}
-
-function positiveNumber(value: number | null | undefined) {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
-}
-
-function minMetric(values: Array<number | null>) {
-  const usableValues = values.filter((value): value is number => value !== null);
-  return usableValues.length > 0 ? Math.min(...usableValues) : null;
-}
-
-function parseTimestamp(value: string | undefined): number | null {
-  const parsed = Date.parse(value || "");
-  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function isResponseLoading(turn: ChatTurn, response: ChatTurn["responses"][number]) {

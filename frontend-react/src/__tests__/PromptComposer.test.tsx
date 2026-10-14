@@ -28,6 +28,10 @@ describe("PromptComposer", () => {
     useChatStore.setState({
       mode: "single",
       smartMode: true,
+      lastManualModel: null,
+      composerInitialized: false,
+      compareHasSent: false,
+      comparePrefsModel: null,
       optimizeMode: false,
       askReasoningLevel: "auto",
       compareReasoningLevel: "low",
@@ -116,9 +120,7 @@ describe("PromptComposer", () => {
     expect(optionsButton.querySelector("svg")).toBeInTheDocument();
     expect(smartSwitch).toHaveAttribute("aria-describedby", smartTooltip.id);
     expect(screen.queryByRole("switch", { name: "Research mode" })).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("switch", { name: /Improve prompt/ }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: /Improve prompt/ })).not.toBeInTheDocument();
     expect(card).toContainElement(sendButton);
     expect(screen.queryByRole("combobox", { name: "Answer depth" })).not.toBeInTheDocument();
     expect(screen.queryByRole("checkbox", { name: "Compare" })).not.toBeInTheDocument();
@@ -137,6 +139,8 @@ describe("PromptComposer", () => {
 
     await user.click(optionsButton);
     expect(screen.getByRole("dialog", { name: "More options" })).toBeVisible();
+    expect(screen.queryByText("Smart Ask", { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByText("Manual Ask", { exact: true })).not.toBeInTheDocument();
     expect(screen.getByRole("switch", { name: /Improve prompt/ })).toHaveAttribute(
       "aria-checked",
       "false",
@@ -175,7 +179,9 @@ describe("PromptComposer", () => {
       "data-reasoning-level",
       "high",
     );
-    expect(screen.getByText("High", { selector: "[data-option-chip='reasoning'] span" })).toBeVisible();
+    expect(
+      screen.getByText("High", { selector: "[data-option-chip='reasoning'] span" }),
+    ).toBeVisible();
 
     await user.keyboard("{Escape}");
 
@@ -184,9 +190,12 @@ describe("PromptComposer", () => {
     expect(useChatStore.getState().smartMode).toBe(false);
     expect(useChatStore.getState().askReasoningLevel).toBe("low");
     await user.click(screen.getByRole("button", { name: "More options" }));
-    expect(
-      screen.getByRole("radio", { name: "Low — Faster, lighter analysis" }),
-    ).toHaveAttribute("aria-checked", "true");
+    expect(screen.queryByText("Manual Ask", { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByText("Smart Ask", { exact: true })).not.toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Low — Faster, lighter analysis" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
   });
 
   it("supports radio arrow keys, keeps the dialog open, and returns focus on Escape", async () => {
@@ -214,7 +223,9 @@ describe("PromptComposer", () => {
 
     await user.click(screen.getByRole("button", { name: "Reset reasoning to Auto" }));
     expect(useChatStore.getState().askReasoningLevel).toBe("auto");
-    expect(screen.queryByRole("button", { name: "Reset reasoning to Auto" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Reset reasoning to Auto" }),
+    ).not.toBeInTheDocument();
   });
 
   it("uses a modal bottom sheet with trapped focus on phone layouts", async () => {
@@ -228,7 +239,7 @@ describe("PromptComposer", () => {
     expect(dialog).toHaveAttribute("data-layout", "sheet");
     expect(dialog).toHaveAttribute("aria-modal", "true");
     await waitFor(() => {
-      expect(screen.getByRole("switch", { name: /Improve prompt/ })).toHaveFocus();
+      expect(screen.getByRole("button", { name: "Done" })).toHaveFocus();
     });
     expect(screen.getByRole("button", { name: "Dismiss options sheet" })).toBeVisible();
   });
@@ -260,9 +271,7 @@ describe("PromptComposer", () => {
     const featureControls = document.querySelector("#promptFeatureControls");
     expect(screen.queryByRole("switch", { name: "Research mode" })).not.toBeInTheDocument();
     expect(featureControls).toContainElement(optionsButton);
-    expect(
-      screen.queryByRole("switch", { name: /Improve prompt/ }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: /Improve prompt/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("checkbox", { name: "Compare" })).not.toBeInTheDocument();
 
     const textarea = screen.getByRole("textbox", { name: "Prompt input" });
@@ -291,7 +300,9 @@ describe("PromptComposer", () => {
     await user.click(screen.getByRole("button", { name: "Turn off Improve prompt" }));
 
     expect(useChatStore.getState().optimizeMode).toBe(false);
-    expect(screen.queryByRole("button", { name: "Turn off Improve prompt" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Turn off Improve prompt" }),
+    ).not.toBeInTheDocument();
   });
 
   it("auto-grows longer prompts and caps the textarea height", async () => {
@@ -376,8 +387,7 @@ function stubMobileViewport(matches: boolean) {
   vi.stubGlobal(
     "matchMedia",
     vi.fn().mockImplementation((query: string) => ({
-      matches:
-        query === "(max-width: 900px)" || query === "(max-width: 767px)" ? matches : false,
+      matches: query === "(max-width: 900px)" || query === "(max-width: 760px)" ? matches : false,
       media: query,
       onchange: null,
       addListener: vi.fn(),

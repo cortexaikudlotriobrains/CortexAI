@@ -2,6 +2,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CortexAnalysisZone } from "../components/results/CortexAnalysisZone";
+import { CortexIcon } from "../components/shared/CortexIcon";
 import { isCortexAnalysisRunStale } from "../analysis/cortexAnalysisStaleness";
 import type { ChatResponse, ChatTurn, CortexAnalysisRun } from "../types";
 
@@ -90,6 +91,11 @@ describe("CortexAnalysisZone", () => {
     const creditAmount = screen.getByText("1.234 credits estimated");
     expect(creditAmount).toBeInTheDocument();
     expect(creditAmount.parentElement?.querySelector("svg")).toBeInTheDocument();
+    const currencyIcon = render(<CortexIcon name="cost" />).container.querySelector("svg");
+    expect(creditAmount).not.toHaveTextContent("$");
+    expect(creditAmount.parentElement?.querySelector("svg")?.innerHTML).not.toBe(
+      currencyIcon?.innerHTML,
+    );
   });
 
   it("keeps a stale result readable after a response version changes", () => {

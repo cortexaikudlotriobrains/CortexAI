@@ -1,4 +1,4 @@
-import { type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type MouseEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import { PromptComposer } from "../components/composer/PromptComposer";
@@ -25,6 +25,7 @@ import { useTheme } from "../hooks/useTheme";
 import { normalizeSessionId } from "../session/activeSession";
 import { presentError } from "../errors/userFacingError";
 import { useChatStore } from "../store/chatStore";
+import { useComposerPrefsStore, COMPOSER_PREFS_KEY } from "../store/composerPrefsStore";
 import { useWorkStore } from "../store/workStore";
 import { getAccountMenuSubscriptionPresentation } from "../subscription/accountMenuPresentation";
 import type { ChatMode, HistoryThread, ModelCatalogItem } from "../types";
@@ -42,7 +43,23 @@ interface MobileHistoryDateGroup {
 export function ChatPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { cognitoConfig, loading: authLoading, loggedIn, login, logout } = useAuth();
+  const { cognitoConfig, whoAmI, loading: authLoading, loggedIn, login, logout } = useAuth();
+  useLayoutEffect(() => {
+    if (authLoading) return;
+    useComposerPrefsStore.getState().setUser(whoAmI?.user_id ?? null);
+    const chat = useChatStore.getState();
+    if (!chat.composerInitialized && !chat.sessionId && !chat.turns.length) {
+      useChatStore.setState({ smartMode: useComposerPrefsStore.getState().prefs.smartForNewChats });
+    }
+  }, [authLoading, whoAmI?.user_id]);
+  useEffect(() => {
+    const sync = (event: StorageEvent) => {
+      if (event.key === COMPOSER_PREFS_KEY || event.key === null)
+        useComposerPrefsStore.getState().reload();
+    };
+    window.addEventListener("storage", sync);
+    return () => window.removeEventListener("storage", sync);
+  }, []);
   const authEnabled = cognitoConfig?.enabled ?? false;
   const signedOut = !authLoading && authEnabled && !loggedIn;
   const workspaceReady = !authLoading && !signedOut;

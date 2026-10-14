@@ -364,7 +364,7 @@ export function Sidebar({
           title={isCollapsed ? "AI credits" : undefined}
           disabled={signedOut}
         >
-          <CortexIcon name="cost" />
+          <CortexIcon name="credits" />
           <span>AI credits</span>
         </button>
         {onNavigateModels && (

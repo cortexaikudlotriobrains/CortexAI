@@ -7,7 +7,7 @@ import {
 
 test("desktop restores Cortex Analysis below Compare responses and retains every run", async ({
   responsiveApp,
-}) => {
+}, testInfo) => {
   const { page, reload } = responsiveApp;
   await page.setViewportSize({ width: 1440, height: 900 });
   await restoreHistoryThread(page, "Architecture decision");
@@ -27,6 +27,7 @@ test("desktop restores Cortex Analysis below Compare responses and retains every
   const analysisCredits = firstTurn.getByText("1.234 credits", { exact: true });
   await expect(analysisCredits).toBeVisible();
   await expect(analysisCredits.locator("..").locator("svg")).toHaveCount(1);
+  await analysisCredits.locator("..").screenshot({ path: testInfo.outputPath("analysis-credit-usage.png") });
   await expect(
     firstTurn.getByText("Use a phased gateway rollout", { exact: false }),
   ).toBeVisible();

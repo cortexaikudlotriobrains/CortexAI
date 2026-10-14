@@ -964,6 +964,10 @@
     gap: 8px;
   }
 
+  .kpiGrid[data-metric-count="3"] > .kpiCard:last-child {
+    grid-column: 1 / -1;
+  }
+
   .kpiCard {
     border-radius: 13px;
     padding: 12px 13px;

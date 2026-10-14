@@ -183,7 +183,7 @@ test("mobile reasoning sheet stays usable at the smallest supported width", asyn
     await expect(dialog).toHaveAttribute("data-layout", "sheet");
     await expect(page.getByRole("radiogroup", { name: "Reasoning" })).toBeVisible();
     await expect(
-        page.getByRole("radio", { name: "Auto — Cortex chooses for each request" }),
+        page.getByRole("radio", { name: "Auto", exact: true }),
     ).toHaveAttribute("aria-checked", "true");
 
     const bounds = await dialog.boundingBox();
@@ -200,7 +200,7 @@ test("mobile reasoning sheet stays usable at the smallest supported width", asyn
     await expect(optionsButton).toHaveAttribute("data-reasoning-level", "max");
     await expect(optionsButton).toHaveAttribute("data-options-configured", "true");
     await expect(page.getByRole("button", { name: "Reset reasoning to Auto" })).toBeVisible();
-    await expect(page.getByText("Applied to Smart routing", { exact: true })).toBeVisible();
+    await expect(page.getByText("Applied to Smart routing. Higher reasoning may take longer and use more AI credits.", { exact: true })).toBeVisible();
     await page.getByRole("switch", { name: /Improve prompt/ }).click();
     await page.keyboard.press("Escape");
 

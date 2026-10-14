@@ -49,8 +49,6 @@
 .titleRow {
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
   margin-bottom: 13px;
 }
 
@@ -100,55 +98,6 @@
   white-space: nowrap;
 }
 
-.headerActions {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 5px;
-}
-
-.badge {
-  display: inline-flex;
-  align-items: center;
-  min-height: 24px;
-  border: 1px solid transparent;
-  border-radius: var(--cx-r-sm);
-  padding: 0 9px;
-  font: 600 10px/1 var(--font-mono);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.legacy {
-  border-color: var(--cx-hairline);
-  background: var(--cx-surface-2);
-  color: var(--cx-ink-500);
-}
-
-.fastest {
-  border-color: var(--cx-success-border);
-  background: var(--cx-success-soft);
-  color: var(--cx-success-text);
-}
-
-.raw {
-  border-color: color-mix(in srgb, var(--cx-warn-text) 18%, transparent);
-  background: var(--cx-warn-soft);
-  color: var(--cx-warn-text);
-}
-
-.advanced {
-  border-color: var(--cx-accent-border);
-  background: var(--cx-accent-soft);
-  color: var(--cx-accent);
-}
-
-.deep {
-  border-color: color-mix(in srgb, var(--response-provider-color) 20%, transparent);
-  background: var(--response-provider-soft);
-  color: var(--response-provider-color);
-}
-
 .metaRow {
   display: flex;
   flex-wrap: nowrap;
@@ -182,12 +131,6 @@
   white-space: nowrap;
 }
 
-.metricHighlight {
-  border-color: var(--cx-success-border);
-  background: var(--cx-success-soft);
-  color: var(--cx-success-text);
-}
-
 .reasoningMetric {
   font-weight: 700;
 }
@@ -214,11 +157,6 @@
   border-color: color-mix(in srgb, var(--cx-prov-d) 28%, transparent);
   background: var(--cx-prov-d-soft);
   color: var(--cx-prov-d);
-}
-
-.winnerLabel {
-  color: inherit;
-  font-weight: 700;
 }
 
 .metricText,
@@ -980,13 +918,6 @@
   border-radius: 9px;
 }
 
-.compact .badge {
-  min-height: 20px;
-  padding: 0 8px;
-  font-size: 11px;
-  line-height: 14px;
-}
-
 .compact .metaRow {
   gap: 6px;
   font-size: 11px;
@@ -1085,7 +1016,7 @@
   .titleRow,
   .compact .titleRow {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr);
     align-items: center;
     gap: 8px;
     margin-bottom: 0;
@@ -1100,10 +1031,6 @@
     height: 34px;
     flex-basis: 34px;
     border-radius: 10px;
-  }
-
-  .headerActions {
-    justify-self: end;
   }
 
   .metaRow {
@@ -1134,10 +1061,6 @@
     padding: 0 7px;
   }
 
-  .winnerLabel {
-    display: none;
-  }
-
   .titleRow h2,
   .compact .titleRow h2 {
     font-size: 14px;
@@ -1145,14 +1068,6 @@
   }
 
   .modelIdentity span {
-    font-size: 10px;
-    line-height: 13px;
-  }
-
-  .badge,
-  .compact .badge {
-    min-height: 18px;
-    padding: 0 7px;
     font-size: 10px;
     line-height: 13px;
   }

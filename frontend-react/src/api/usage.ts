@@ -10,6 +10,14 @@ export interface UsageExportParams extends UsageSummaryParams {
   groupBy?: "day" | "provider" | "model";
 }
 
+export interface UsageByokStatus {
+  providers: Array<{ provider: string; configured: boolean }>;
+}
+
+export function fetchUsageByokStatus(signal?: AbortSignal): Promise<UsageByokStatus> {
+  return get<UsageByokStatus>("/v1/byok/status", signal);
+}
+
 export async function fetchUsageSummary(
   params: UsageSummaryParams = {},
   signal?: AbortSignal,

@@ -60,6 +60,10 @@
   padding: 2px 4px 4px;
 }
 
+.composerBody.optionsOpen {
+  z-index: 4;
+}
+
 .textarea:focus,
 .textarea:focus-visible {
   outline: none;
@@ -131,7 +135,7 @@
   border: 0;
   border-radius: 12px;
   background: var(--cx-feature-active-bg);
-  box-shadow: 0 8px 18px -8px rgba(11, 18, 32, .58);
+  box-shadow: 0 8px 18px -8px rgba(11, 18, 32, 0.58);
   color: var(--cx-feature-active-fg);
   cursor: pointer;
   transition:
@@ -162,8 +166,8 @@
 }
 
 .stopButton {
-  background: #0B1220;
-  box-shadow: 0 8px 18px -8px rgba(11, 18, 32, .58);
+  background: #0b1220;
+  box-shadow: 0 8px 18px -8px rgba(11, 18, 32, 0.58);
 }
 
 .stopButton:hover:not(:disabled) {
@@ -263,7 +267,6 @@
   .composerControls {
     column-gap: 9px;
   }
-
 }
 
 @keyframes mobileModelRowIn {

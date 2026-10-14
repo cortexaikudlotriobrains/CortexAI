@@ -36,6 +36,7 @@ export const test = base.extend({
             subscriptionSource: null,
             billingEnabled: true,
             billingPlans: [],
+            byokProviders: [],
             maxFilesPerRequest: 1,
             directUploadIntentRequests: [],
             s3UploadRequests: [],
@@ -362,6 +363,9 @@ async function installResponsiveRoutes(page, state) {
         }
         if (url.pathname === "/v1/usage/summary" && method === "GET") {
             return json(route, usageSummary());
+        }
+        if (url.pathname === "/v1/byok/status" && method === "GET") {
+            return json(route, { providers: state.byokProviders });
         }
         if (url.pathname === "/v1/usage/export" && method === "GET") {
             return route.fulfill({

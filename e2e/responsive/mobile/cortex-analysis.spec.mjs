@@ -7,7 +7,7 @@ import {
 
 test("mobile keeps Cortex Analysis below the active answer without adding a model tab", async ({
   responsiveApp,
-}) => {
+}, testInfo) => {
   const { page } = responsiveApp;
   await page.setViewportSize({ width: 390, height: 844 });
   await restoreHistoryThread(page, "Architecture decision");
@@ -25,6 +25,9 @@ test("mobile keeps Cortex Analysis below the active answer without adding a mode
   await expect(tabs.getByRole("tab")).toHaveCount(2);
   await expect(tabs.getByRole("tab", { name: /Cortex/i })).toHaveCount(0);
   await expect(analysisHeading).toBeVisible();
+  const analysisCredits = firstTurn.getByText("1.234 credits", { exact: true });
+  await expect(analysisCredits).toBeVisible();
+  await analysisCredits.locator("..").screenshot({ path: testInfo.outputPath("analysis-credit-usage.png") });
 
   const positions = await firstTurn.evaluate((element) => {
     const visiblePanel = [

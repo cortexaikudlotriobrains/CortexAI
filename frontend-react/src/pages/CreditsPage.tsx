@@ -77,7 +77,7 @@ export function CreditsPage() {
 
         {!loggedIn ? (
           <section className={styles.messagePanel} aria-labelledby="credits-sign-in-title">
-            <CortexIcon name="cost" size={22} />
+            <CortexIcon name="credits" size={22} />
             <div>
               <h2 id="credits-sign-in-title">Sign in to view AI credits</h2>
               <p>Your credit balance and charge history are tied to your account.</p>
@@ -92,7 +92,7 @@ export function CreditsPage() {
 
         {loggedIn && subscriptionState.loading && !subscriptionState.entitlements ? (
           <section className={styles.messagePanel} aria-label="Loading AI credits" aria-busy="true">
-            <CortexIcon name="cost" size={22} />
+            <CortexIcon name="credits" size={22} />
             <div>
               <h2>Loading AI credits</h2>
               <p>Retrieving your current balance and billing period.</p>
@@ -102,7 +102,7 @@ export function CreditsPage() {
 
         {loggedIn && subscriptionState.error && !subscriptionState.entitlements ? (
           <section className={styles.messagePanel} role="alert">
-            <CortexIcon name="cost" size={22} />
+            <CortexIcon name="credits" size={22} />
             <div>
               <h2>AI credit balance could not load</h2>
               <p>{subscriptionState.error.message}</p>
