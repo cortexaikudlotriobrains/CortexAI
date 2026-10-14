@@ -35,6 +35,11 @@ Managed Agent session, persists provider-neutral events, resumes through SSE
 with `Last-Event-ID`, imports validated artifacts into private Cortex object
 storage, and settles only the cumulative-usage delta for the run.
 
+Work shows `Loading Work...` until its initial entitlement snapshot arrives.
+The upgrade prompt appears only when that snapshot confirms Work is unavailable
+on the effective plan. A failed access check offers Retry instead of an upgrade;
+refreshing an already loaded snapshot keeps the current workspace visible.
+
 Work is off by default. Free has no Work entitlement; Plus enables one active
 run and verified connectors; Pro raises the run/connection/budget limits and
 adds custom remote MCP. Read tools are automatic. WRITE actions require an

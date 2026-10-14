@@ -20,6 +20,12 @@ The authoritative state is split deliberately:
   URL is never a public download authority.
 - The browser is a resumable observer/controller. It owns no durable run state.
 
+The Work screen treats an unresolved entitlement snapshot as pending access:
+it shows `Loading Work...` until the first snapshot arrives, and an upgrade
+only when the server confirms `features.work_enabled=false`. If the initial
+check fails, Retry reloads subscription data. Refreshing a known snapshot does
+not replace the workspace with a loading screen or discard the current draft.
+
 ## Start-to-deliver flow
 
 1. React uploads inputs through the existing Cortex file pipeline and receives

@@ -251,6 +251,11 @@ credentials, or secret values.
   sanitized at the provider boundary; users do not need to flatten the prompt.
 - `work_not_in_plan` (403): effective plan is Free or billing snapshots have not
   updated; inspect `/v1/entitlements`.
+- The Work screen waits for its initial entitlement snapshot before showing an
+  upgrade prompt. Pending checks show `Loading Work...`; failed checks show
+  `Unable to check your Work access` with Retry. A transient request failure is
+  not evidence of a plan downgrade. Retry the check and inspect the subscription
+  requests if the failure persists.
 - `insufficient_credits` (402): choose a lower budget or wait for/reset credits.
 - `active_work_run_limit` (409): complete/cancel an existing run.
 - SSE stops around a fixed interval: compare heartbeat with CloudFront origin,

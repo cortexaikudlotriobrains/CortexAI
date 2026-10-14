@@ -3,7 +3,19 @@ import { expect, expectNoHorizontalOverflow, test } from "../fixtures/responsive
 test("mobile Work keeps the four-item navigation and compact empty composer", async ({ responsiveApp }) => {
     const { page, state } = responsiveApp;
     state.subscriptionPlan = "plus";
-    await page.goto("/work");
+    let releaseEntitlements;
+    const pendingEntitlements = new Promise(resolve => { releaseEntitlements = resolve; });
+    await page.route("**/v1/entitlements", async route => {
+        await pendingEntitlements;
+        await route.fallback();
+    });
+    try {
+        await page.goto("/work");
+        await expect(page.getByText("Loading Work...", { exact: true })).toBeVisible();
+        await expect(page.getByText("Upgrade to use Cortex Work", { exact: true })).toHaveCount(0);
+    } finally {
+        releaseEntitlements();
+    }
 
     const nav = page.getByRole("navigation", { name: "Mobile navigation" });
     await expect(nav).toBeVisible();

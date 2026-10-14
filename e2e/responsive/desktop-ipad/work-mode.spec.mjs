@@ -1,5 +1,56 @@
 import { expect, expectNoHorizontalOverflow, test } from "../fixtures/responsive-e2e.mjs";
 
+for (const plan of ["plus", "pro", "free"]) {
+    test(`Work waits for ${plan} entitlements before deciding whether to show an upgrade`, async ({ responsiveApp }) => {
+        const { page, state } = responsiveApp;
+        state.subscriptionPlan = plan;
+        await page.goto("/");
+
+        let releaseEntitlements;
+        const pendingEntitlements = new Promise(resolve => { releaseEntitlements = resolve; });
+        await page.route("**/v1/entitlements", async route => {
+            await pendingEntitlements;
+            await route.fallback();
+        });
+        try {
+            await page.getByRole("navigation", { name: "Workspace mode" }).getByRole("button", { name: "Work", exact: true }).click();
+            await expect(page.getByText("Loading Work...", { exact: true })).toBeVisible();
+            await expect(page.getByText("Upgrade to use Cortex Work", { exact: true })).toHaveCount(0);
+            await expect(page.getByRole("textbox", { name: "Work goal" })).toHaveCount(0);
+        } finally {
+            releaseEntitlements();
+        }
+
+        if (plan === "free") {
+            await expect(page.getByText("Upgrade to use Cortex Work", { exact: true })).toBeVisible();
+            await expect(page.getByRole("textbox", { name: "Work goal" })).toHaveCount(0);
+        } else {
+            await expect(page.getByRole("textbox", { name: "Work goal" })).toBeVisible();
+            await expect(page.getByText("Upgrade to use Cortex Work", { exact: true })).toHaveCount(0);
+        }
+    });
+}
+
+test("Work retries a failed entitlement check without showing an upgrade", async ({ responsiveApp }) => {
+    const { page, state } = responsiveApp;
+    state.subscriptionPlan = "pro";
+    let failEntitlements = true;
+    await page.route("**/v1/entitlements", async route => {
+        if (failEntitlements) {
+            await route.fulfill({ status: 503, contentType: "application/json", body: "{}" });
+        } else {
+            await route.fallback();
+        }
+    });
+    await page.goto("/work");
+
+    await expect(page.getByText("Unable to check your Work access", { exact: true })).toBeVisible();
+    await expect(page.getByText("Upgrade to use Cortex Work", { exact: true })).toHaveCount(0);
+    failEntitlements = false;
+    await page.getByRole("button", { name: "Retry", exact: true }).click();
+    await expect(page.getByRole("textbox", { name: "Work goal" })).toBeVisible();
+});
+
 test("desktop and iPad empty Ask, Compare, and Work composers share one vertical center", async ({ responsiveApp }) => {
     const { page, state } = responsiveApp;
     state.subscriptionPlan = "pro";

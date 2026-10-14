@@ -229,6 +229,11 @@ provider vault resources require a replacement session, the backend supplies a
 bounded PostgreSQL-backed transcript of prior visible turns with the new
 instruction.
 
+React shows `Loading Work...` while the initial entitlement snapshot is pending
+and renders the upgrade prompt only after that snapshot confirms Work is not
+enabled for the effective plan. If access cannot be checked, it offers Retry;
+an existing snapshot keeps the workspace visible during subscription refresh.
+
 Artifact listing for a terminal run performs a best-effort idempotent import
 retry before returning Cortex-owned files. Import uses the provider session ID
 recorded on that run, skips input/non-downloadable files, and isolates each
