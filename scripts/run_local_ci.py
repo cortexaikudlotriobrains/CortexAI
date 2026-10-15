@@ -84,6 +84,11 @@ BACKEND_TESTS = (
     "tests/test_component_boundaries.py",
     "tests/test_model_rate_cards.py",
     "tests/test_database_pricing_model_registry.py",
+    "tests/test_model_catalog_tool.py",
+    "tests/test_new_model_credits.py",
+    "tests/test_registry_pricing_alignment.py",
+    "tests/test_model_registry_capabilities.py",
+    "tests/test_credit_calculator.py",
 )
 
 
@@ -468,6 +473,8 @@ def run_pre_push(base_ref: str) -> None:
                 branch_paths(base_ref, diff_filter="AM"), root=snapshot
             )
             _run_python_quality(python, changed_python, cwd=snapshot)
+            # Same as ci.yml "Model catalog rules".
+            _run((str(python), "scripts/models.py", "check"), cwd=snapshot)
             _run_pytest(
                 python,
                 BACKEND_TESTS,

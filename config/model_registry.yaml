@@ -14,6 +14,46 @@ providers:
       max_attachment_bytes: 20971520
       max_attachments_per_request: 5
     models:
+      - name: "gpt-6-luna"
+        display_name: "GPT-6 Luna"
+        description: "Lowest-cost GPT-6 model for high-volume and latency-sensitive work."
+        tier: "T0"
+        billing_class: "economical"
+        input_credit_multiplier: 0.25
+        output_credit_multiplier: 1.0
+        credit_usage_label: "Very low"
+        credit_pricing_version: "2026-10-14"
+        context_limit: 1050000
+        max_output_tokens: 128000
+        reasoning_modes: ["none", "standard"]
+        default_reasoning_mode: "standard"
+        reasoning_efforts: ["none", "low", "medium", "high", "xhigh", "max"]
+        reasoning_disable_supported: true
+        reasoning_counts_against_output: true
+        tags: ["cheap", "fast", "reasoning", "general", "coding", "long_context"]
+        enabled: true
+        selectable: true
+        release_status: "generally_available"
+        source_verified_at: "2026-10-14"
+        lifecycle:
+          status: "ACTIVE"
+        pricing_rules:
+          - id: "openai-gpt-6-luna-standard-20261014"
+            processing_mode: "standard"
+            source_url: "https://developers.openai.com/api/docs/pricing"
+            source_verified_at: "2026-10-14"
+            input: 0.1
+            cached_input: 0.01
+            cache_write: 0.125
+            output: 0.5
+            long_context:
+              threshold_tokens: 272001
+              applies_to_entire_request: true
+              input: 0.2
+              cached_input: 0.02
+              cache_write: 0.25
+              output: 0.75
+
       - name: "gpt-5.6-luna"
         display_name: "GPT-5.6 Luna"
         description: "Lowest-cost GPT-5.6 model for high-volume and latency-sensitive work."
@@ -32,10 +72,12 @@ providers:
         reasoning_counts_against_output: true
         tags: ["cheap", "fast", "reasoning", "general", "coding"]
         enabled: true
-        selectable: true
+        selectable: false
         release_status: "generally_available"
         lifecycle:
           status: "ACTIVE"
+          replacement_model: "gpt-6-luna"
+          migration_reason: "Replaced in the picker by GPT-6 Luna on 2026-10-14."
         pricing_rules:
           - id: "openai-gpt-5.6-luna-standard-20260731"
             processing_mode: "standard"
@@ -139,6 +181,46 @@ providers:
             cached_input: 0.075
             output: 4.50
 
+      - name: "gpt-6.1-sol"
+        display_name: "GPT-6.1 Sol"
+        description: "Balanced GPT-6 model for production reasoning, coding, and agentic work."
+        tier: "T2"
+        billing_class: "advanced"
+        input_credit_multiplier: 3.0
+        output_credit_multiplier: 14.0
+        credit_usage_label: "High"
+        credit_pricing_version: "2026-10-14"
+        context_limit: 1050000
+        max_output_tokens: 128000
+        reasoning_modes: ["standard"]
+        default_reasoning_mode: "standard"
+        reasoning_efforts: ["low", "medium", "high", "xhigh", "max"]
+        reasoning_disable_supported: false
+        reasoning_counts_against_output: true
+        tags: ["strong", "reasoning", "coding", "agentic", "long_context"]
+        enabled: true
+        selectable: true
+        release_status: "generally_available"
+        source_verified_at: "2026-10-14"
+        lifecycle:
+          status: "ACTIVE"
+        pricing_rules:
+          - id: "openai-gpt-6.1-sol-standard-20261014"
+            processing_mode: "standard"
+            source_url: "https://developers.openai.com/api/docs/pricing"
+            source_verified_at: "2026-10-14"
+            input: 2.0
+            cached_input: 0.1
+            cache_write: 2.5
+            output: 10.0
+            long_context:
+              threshold_tokens: 272001
+              applies_to_entire_request: true
+              input: 4.0
+              cached_input: 0.2
+              cache_write: 5.0
+              output: 15.0
+
       - name: "gpt-5.6-terra"
         display_name: "GPT-5.6 Terra"
         description: "Balanced GPT-5.6 model for production reasoning, coding, and agentic work."
@@ -157,10 +239,12 @@ providers:
         reasoning_counts_against_output: true
         tags: ["strong", "reasoning", "coding", "agentic", "long_context"]
         enabled: true
-        selectable: true
+        selectable: false
         release_status: "generally_available"
         lifecycle:
           status: "ACTIVE"
+          replacement_model: "gpt-6.1-sol"
+          migration_reason: "Replaced in the picker by GPT-6.1 Sol on 2026-10-14."
         pricing_rules:
           - id: "openai-gpt-5.6-terra-standard-20260731"
             processing_mode: "standard"
@@ -212,6 +296,46 @@ providers:
               cached_input: 0.50
               output: 22.50
 
+      - name: "gpt-6-astra"
+        display_name: "GPT-6 Astra"
+        description: "OpenAI's most capable GPT-6 model for complex reasoning, coding, and agentic work."
+        tier: "T3"
+        billing_class: "premium"
+        input_credit_multiplier: 10.0
+        output_credit_multiplier: 50.0
+        credit_usage_label: "Premium"
+        credit_pricing_version: "2026-10-14"
+        context_limit: 1050000
+        max_output_tokens: 128000
+        reasoning_modes: ["standard"]
+        default_reasoning_mode: "standard"
+        reasoning_efforts: ["low", "medium", "high", "xhigh", "max"]
+        reasoning_disable_supported: false
+        reasoning_counts_against_output: true
+        tags: ["flagship", "reasoning", "coding", "agentic", "accurate", "long_context"]
+        enabled: true
+        selectable: true
+        release_status: "generally_available"
+        source_verified_at: "2026-10-14"
+        lifecycle:
+          status: "ACTIVE"
+        pricing_rules:
+          - id: "openai-gpt-6-astra-standard-20261014"
+            processing_mode: "standard"
+            source_url: "https://developers.openai.com/api/docs/pricing"
+            source_verified_at: "2026-10-14"
+            input: 10.0
+            cached_input: 1.0
+            cache_write: 12.5
+            output: 50.0
+            long_context:
+              threshold_tokens: 272001
+              applies_to_entire_request: true
+              input: 20.0
+              cached_input: 2.0
+              cache_write: 25.0
+              output: 75.0
+
       - name: "gpt-5.6-sol"
         aliases: ["gpt-5.6"]
         pricing_review:
@@ -236,10 +360,12 @@ providers:
         reasoning_counts_against_output: true
         tags: ["flagship", "reasoning", "coding", "agentic", "accurate", "long_context"]
         enabled: true
-        selectable: true
+        selectable: false
         release_status: "generally_available"
         lifecycle:
           status: "ACTIVE"
+          replacement_model: "gpt-6-astra"
+          migration_reason: "Replaced in the picker by GPT-6 Astra on 2026-10-14."
         pricing_rules:
           - id: "openai-gpt-5.6-sol-standard-20260731"
             processing_mode: "standard"
@@ -423,6 +549,53 @@ providers:
             cached_input: 0.03
             output: 2.50
 
+      - name: "gemini-3.8-flash"
+        pricing_review:
+          requires_expiry: true
+          effective_until: "2027-01-01T00:00:00Z"
+          source_url: "https://ai.google.dev/gemini-api/docs/pricing"
+          verified_at: "2026-10-14"
+          note: "Launch price through December 31, 2026; exclusive UTC boundary January 1, 2027."
+        display_name: "Gemini 3.8 Flash"
+        description: "Google's recommended fast multimodal Gemini model with built-in thinking."
+        tier: "T1"
+        billing_class: "standard"
+        input_credit_multiplier: 1.0
+        output_credit_multiplier: 4.0
+        credit_usage_label: "Standard"
+        credit_pricing_version: "2026-10-14"
+        context_limit: 1048576
+        max_output_tokens: 65536
+        reasoning_modes: ["thinking"]
+        default_reasoning_mode: "thinking"
+        reasoning_efforts: ["low", "medium", "high"]
+        reasoning_disable_supported: false
+        reasoning_counts_against_output: true
+        tags: ["fast", "reasoning", "multimodal", "general", "long_context"]
+        enabled: true
+        selectable: true
+        release_status: "generally_available"
+        source_verified_at: "2026-10-14"
+        lifecycle:
+          status: "ACTIVE"
+        pricing_rules:
+          - id: "gemini-3.8-flash-standard-20261014"
+            processing_mode: "standard"
+            effective_until: "2027-01-01T00:00:00Z"
+            source_url: "https://ai.google.dev/gemini-api/docs/pricing"
+            source_verified_at: "2026-10-14"
+            input: 0.75
+            cached_input: 0.075
+            output: 3.75
+          - id: "gemini-3.8-flash-standard-20270101"
+            processing_mode: "standard"
+            effective_from: "2027-01-01T00:00:00Z"
+            source_url: "https://ai.google.dev/gemini-api/docs/pricing"
+            source_verified_at: "2026-10-14"
+            input: 1.5
+            cached_input: 0.15
+            output: 7.5
+
       - name: "gemini-3.6-flash"
         display_name: "Gemini 3.6 Flash"
         description: "Current high-throughput Gemini model for fast reasoning and multimodal tasks."
@@ -447,9 +620,12 @@ providers:
         reasoning_counts_against_output: true
         tags: ["fast", "reasoning", "multimodal", "general", "long_context"]
         enabled: true
-        selectable: true
+        selectable: false
         release_status: "generally_available"
-        lifecycle: {status: "ACTIVE"}
+        lifecycle:
+          status: "ACTIVE"
+          replacement_model: "gemini-3.8-flash"
+          migration_reason: "Replaced in the picker by Gemini 3.8 Flash on 2026-10-14."
         pricing_rules:
           - id: "gemini-3.6-flash-standard-20260731"
             processing_mode: "standard"
@@ -457,6 +633,53 @@ providers:
             input: 1.50
             cached_input: 0.15
             output: 7.50
+
+      - name: "gemini-4-argon"
+        pricing_review:
+          requires_expiry: true
+          effective_until: "2026-12-01T00:00:00Z"
+          source_url: "https://ai.google.dev/gemini-api/docs/pricing"
+          verified_at: "2026-10-14"
+          note: "Launch price through November 30, 2026; exclusive UTC boundary December 1, 2026."
+        display_name: "Gemini 4 Argon"
+        description: "Google's flagship Gemini model for complex reasoning, coding, and large-context work."
+        tier: "T3"
+        billing_class: "advanced"
+        input_credit_multiplier: 3.0
+        output_credit_multiplier: 14.0
+        credit_usage_label: "High"
+        credit_pricing_version: "2026-10-14"
+        context_limit: 1048576
+        max_output_tokens: 65536
+        reasoning_modes: ["thinking"]
+        default_reasoning_mode: "thinking"
+        reasoning_efforts: ["low", "medium", "high"]
+        reasoning_disable_supported: false
+        reasoning_counts_against_output: true
+        tags: ["flagship", "reasoning", "coding", "long_context"]
+        enabled: true
+        selectable: true
+        release_status: "generally_available"
+        source_verified_at: "2026-10-14"
+        lifecycle:
+          status: "ACTIVE"
+        pricing_rules:
+          - id: "gemini-4-argon-standard-20261014"
+            processing_mode: "standard"
+            effective_until: "2026-12-01T00:00:00Z"
+            source_url: "https://ai.google.dev/gemini-api/docs/pricing"
+            source_verified_at: "2026-10-14"
+            input: 2.0
+            cached_input: 0.1
+            output: 10.0
+          - id: "gemini-4-argon-standard-20261201"
+            processing_mode: "standard"
+            effective_from: "2026-12-01T00:00:00Z"
+            source_url: "https://ai.google.dev/gemini-api/docs/pricing"
+            source_verified_at: "2026-10-14"
+            input: 4.0
+            cached_input: 0.2
+            output: 20.0
 
       - name: "gemini-3.1-pro-preview"
         display_name: "Gemini 3.1 Pro Preview"
@@ -476,9 +699,12 @@ providers:
         reasoning_counts_against_output: true
         tags: ["preview", "flagship", "reasoning", "coding", "long_context"]
         enabled: true
-        selectable: true
+        selectable: false
         release_status: "preview"
-        lifecycle: {status: "ACTIVE"}
+        lifecycle:
+          status: "ACTIVE"
+          replacement_model: "gemini-4-argon"
+          migration_reason: "Replaced in the picker by Gemini 4 Argon on 2026-10-14."
         pricing_rules:
           - id: "gemini-3.1-pro-preview-standard-20260731"
             processing_mode: "standard"
@@ -494,7 +720,7 @@ providers:
 
       - name: "gemini-2.5-flash-lite"
         display_name: "Gemini 2.5 Flash-Lite"
-        description: "Compatibility model scheduled for retirement."
+        description: "Compatibility model kept for existing Gemini 2.5 users."
         tier: "T0"
         billing_class: "economical"
         input_credit_multiplier: 0.25
@@ -508,10 +734,9 @@ providers:
         selectable: false
         release_status: "legacy"
         lifecycle:
-          status: "SCHEDULED_FOR_RETIREMENT"
-          retirement_date: "2026-10-16T00:00:00Z"
+          status: "DEPRECATED"
           replacement_model: "gemini-3.5-flash-lite"
-          migration_reason: "Google scheduled Gemini 2.5 Flash-Lite for shutdown."
+          migration_reason: "Google serves Gemini 2.5 Flash-Lite only to existing users and announced no shutdown date; new work should use the replacement."
         pricing_rules:
           - id: "gemini-2.5-flash-lite-standard-20260731"
             processing_mode: "standard"
@@ -521,7 +746,7 @@ providers:
 
       - name: "gemini-2.5-flash"
         display_name: "Gemini 2.5 Flash"
-        description: "Compatibility model scheduled for retirement."
+        description: "Compatibility model kept for existing Gemini 2.5 users."
         tier: "T1"
         billing_class: "standard"
         input_credit_multiplier: 1.0
@@ -535,10 +760,9 @@ providers:
         selectable: false
         release_status: "legacy"
         lifecycle:
-          status: "SCHEDULED_FOR_RETIREMENT"
-          retirement_date: "2026-10-16T00:00:00Z"
-          replacement_model: "gemini-3.6-flash"
-          migration_reason: "Google scheduled Gemini 2.5 Flash for shutdown."
+          status: "DEPRECATED"
+          replacement_model: "gemini-3.8-flash"
+          migration_reason: "Google serves Gemini 2.5 Flash only to existing users and announced no shutdown date; new work should use the replacement."
         pricing_rules:
           - id: "gemini-2.5-flash-standard-20260731"
             processing_mode: "standard"
@@ -548,7 +772,7 @@ providers:
 
       - name: "gemini-2.5-pro"
         display_name: "Gemini 2.5 Pro"
-        description: "Compatibility model scheduled for retirement."
+        description: "Compatibility model kept for existing Gemini 2.5 users."
         tier: "T3"
         billing_class: "advanced"
         input_credit_multiplier: 3.0
@@ -567,10 +791,9 @@ providers:
         selectable: false
         release_status: "legacy"
         lifecycle:
-          status: "SCHEDULED_FOR_RETIREMENT"
-          retirement_date: "2026-10-16T00:00:00Z"
-          replacement_model: "gemini-3.1-pro-preview"
-          migration_reason: "Google scheduled Gemini 2.5 Pro for shutdown."
+          status: "DEPRECATED"
+          replacement_model: "gemini-4-argon"
+          migration_reason: "Google serves Gemini 2.5 Pro only to existing users and announced no shutdown date; new work should use the replacement."
         pricing_rules:
           - id: "gemini-2.5-pro-standard-20260731"
             processing_mode: "standard"
@@ -594,10 +817,9 @@ providers:
       max_attachment_bytes: null
       max_attachments_per_request: 0
     models:
-      - name: "deepseek-v4-flash"
-        aliases: ["deepseek-flash"]
-        display_name: "DeepSeek V4 Flash"
-        description: "Fast DeepSeek V4 model with thinking controlled as a request mode."
+      - name: "deepseek-flash"
+        display_name: "DeepSeek V4.1 Flash"
+        description: "Fast DeepSeek V4.1 model with image input and thinking controlled as a request mode."
         tier: "T1"
         billing_class: "economical"
         input_credit_multiplier: 0.5
@@ -612,6 +834,10 @@ providers:
         reasoning_efforts: ["low", "high", "max"]
         reasoning_disable_supported: true
         reasoning_counts_against_output: true
+        supports_image_input: true
+        supported_attachment_mime_types: ["image/jpeg", "image/png", "image/webp", "image/gif"]
+        max_attachment_bytes: 20971520
+        max_attachments_per_request: 5
         enabled: true
         selectable: true
         release_status: "generally_available"
@@ -705,9 +931,35 @@ providers:
                 cache_write_1h: 0
                 output: 1.98
 
+      - name: "deepseek-v4-flash"
+        display_name: "DeepSeek V4 Flash"
+        description: "Deprecated DeepSeek ID; requests are served by DeepSeek V4.1 Flash."
+        tier: "T1"
+        billing_class: "economical"
+        input_credit_multiplier: 0.5
+        output_credit_multiplier: 1.5
+        credit_usage_label: "Very low"
+        credit_pricing_version: "2026-10-08"
+        context_limit: 1000000
+        max_output_tokens: 384000
+        tags: ["retired", "compatibility", "reasoning"]
+        reasoning_modes: ["none", "thinking"]
+        default_reasoning_mode: "thinking"
+        reasoning_efforts: ["low", "high", "max"]
+        reasoning_disable_supported: true
+        reasoning_counts_against_output: true
+        enabled: true
+        selectable: false
+        release_status: "retired"
+        pricing_model: "deepseek-flash"
+        lifecycle:
+          status: "RETIRED"
+          replacement_model: "deepseek-flash"
+          migration_reason: "DeepSeek deprecated deepseek-v4-flash; deepseek-flash (DeepSeek V4.1 Flash) serves its requests."
+
       - name: "deepseek-chat"
         display_name: "DeepSeek Chat"
-        description: "Retired legacy ID migrated by CortexAI to DeepSeek V4 Flash."
+        description: "Retired legacy ID migrated by CortexAI to DeepSeek V4.1 Flash."
         tier: "T1"
         billing_class: "economical"
         input_credit_multiplier: 0.5
@@ -720,16 +972,16 @@ providers:
         enabled: true
         selectable: false
         release_status: "retired"
-        pricing_model: "deepseek-v4-flash"
+        pricing_model: "deepseek-flash"
         lifecycle:
           status: "RETIRED"
           retirement_date: "2026-07-24T15:59:00Z"
-          replacement_model: "deepseek-v4-flash"
+          replacement_model: "deepseek-flash"
           migration_reason: "DeepSeek retired the legacy chat ID."
 
       - name: "deepseek-reasoner"
         display_name: "DeepSeek Reasoner"
-        description: "Retired legacy ID migrated by CortexAI to DeepSeek V4 Flash thinking mode."
+        description: "Retired legacy ID migrated by CortexAI to DeepSeek V4.1 Flash thinking mode."
         tier: "T3"
         billing_class: "economical"
         input_credit_multiplier: 0.5
@@ -744,11 +996,11 @@ providers:
         enabled: true
         selectable: false
         release_status: "retired"
-        pricing_model: "deepseek-v4-flash"
+        pricing_model: "deepseek-flash"
         lifecycle:
           status: "RETIRED"
           retirement_date: "2026-07-24T15:59:00Z"
-          replacement_model: "deepseek-v4-flash"
+          replacement_model: "deepseek-flash"
           migration_reason: "DeepSeek retired the legacy reasoner ID; thinking is now a mode."
 
   grok:
@@ -795,8 +1047,46 @@ providers:
               cached_input: 0.40
               output: 5.00
 
-      - name: "grok-4.5"
+      - name: "grok-4.7"
         aliases: ["grok-4-latest"]
+        display_name: "Grok 4.7"
+        description: "xAI's frontier Grok model for coding, agentic tasks, and knowledge work."
+        tier: "T3"
+        billing_class: "standard"
+        input_credit_multiplier: 2.0
+        output_credit_multiplier: 8.0
+        credit_usage_label: "Standard"
+        credit_pricing_version: "2026-10-14"
+        context_limit: 500000
+        max_output_tokens: 128000
+        reasoning_modes: ["low", "medium", "high", "xhigh"]
+        default_reasoning_mode: "high"
+        reasoning_efforts: ["low", "medium", "high", "xhigh"]
+        reasoning_disable_supported: false
+        reasoning_counts_against_output: true
+        tags: ["flagship", "reasoning", "agentic", "coding", "long_context"]
+        enabled: true
+        selectable: true
+        release_status: "generally_available"
+        source_verified_at: "2026-10-14"
+        lifecycle:
+          status: "ACTIVE"
+        pricing_rules:
+          - id: "grok-4.7-standard-20261014"
+            processing_mode: "standard"
+            source_url: "https://api.x.ai/v1/language-models"
+            source_verified_at: "2026-10-14"
+            input: 2.0
+            cached_input: 0.5
+            output: 6.0
+            long_context:
+              threshold_tokens: 200001
+              applies_to_entire_request: true
+              input: 4.0
+              cached_input: 1.0
+              output: 12.0
+
+      - name: "grok-4.5"
         display_name: "Grok 4.5"
         description: "Flagship Grok model with mandatory reasoning for complex agentic work."
         tier: "T3"
@@ -814,9 +1104,12 @@ providers:
         reasoning_disable_supported: false
         reasoning_counts_against_output: true
         enabled: true
-        selectable: true
+        selectable: false
         release_status: "generally_available"
-        lifecycle: {status: "ACTIVE"}
+        lifecycle:
+          status: "ACTIVE"
+          replacement_model: "grok-4.7"
+          migration_reason: "Replaced in the picker by Grok 4.7 on 2026-10-14."
         pricing_rules:
           - id: "grok-4.5-standard-20260731"
             processing_mode: "standard"
@@ -891,6 +1184,48 @@ providers:
       max_attachment_bytes: 20971520
       max_attachments_per_request: 5
     models:
+      - name: "claude-haiku-5-5"
+        display_name: "Claude Haiku 5.5"
+        description: "Fastest Claude model for high-volume work; prompts over 100K tokens cost more."
+        tier: "T1"
+        billing_class: "economical"
+        input_credit_multiplier: 0.25
+        output_credit_multiplier: 1.0
+        credit_usage_label: "Very low"
+        credit_pricing_version: "2026-10-14"
+        context_limit: 1000000
+        max_output_tokens: 128000
+        reasoning_modes: ["none", "adaptive"]
+        default_reasoning_mode: "adaptive"
+        reasoning_efforts: ["low", "medium", "high", "xhigh", "max"]
+        reasoning_disable_supported: true
+        reasoning_counts_against_output: true
+        tags: ["cheap", "fast", "general", "coding", "reasoning", "long_context"]
+        enabled: true
+        selectable: true
+        release_status: "generally_available"
+        source_verified_at: "2026-10-14"
+        lifecycle:
+          status: "ACTIVE"
+        pricing_rules:
+          - id: "claude-haiku-5-5-standard-20261014"
+            processing_mode: "standard"
+            source_url: "https://platform.claude.com/docs/en/models/haiku-5-5/overview"
+            source_verified_at: "2026-10-14"
+            input: 0.1
+            cached_input: 0.01
+            cache_write_5m: 0.125
+            cache_write_1h: 0.2
+            output: 0.5
+            long_context:
+              threshold_tokens: 100001
+              applies_to_entire_request: true
+              input: 0.5
+              cached_input: 0.05
+              cache_write_5m: 0.625
+              cache_write_1h: 1.0
+              output: 2.5
+
       - name: "claude-haiku-4-5"
         aliases: ["claude-haiku-4-5-20251001"]
         display_name: "Claude Haiku 4.5"
@@ -909,9 +1244,12 @@ providers:
         reasoning_counts_against_output: true
         tags: ["cheap", "fast", "general", "coding"]
         enabled: true
-        selectable: true
+        selectable: false
         release_status: "generally_available"
-        lifecycle: {status: "ACTIVE"}
+        lifecycle:
+          status: "ACTIVE"
+          replacement_model: "claude-haiku-5-5"
+          migration_reason: "Replaced in the picker by Claude Haiku 5.5 on 2026-10-14."
         pricing_rules:
           - id: "claude-haiku-4.5-standard-20260731"
             processing_mode: "standard"
@@ -921,15 +1259,49 @@ providers:
             cache_write_1h: 2.00
             output: 5.00
 
+      - name: "claude-sonnet-5-5"
+        display_name: "Claude Sonnet 5.5"
+        description: "Claude's best combination of speed and intelligence for coding, reasoning, and agentic work."
+        tier: "T2"
+        billing_class: "advanced"
+        input_credit_multiplier: 3.0
+        output_credit_multiplier: 14.0
+        credit_usage_label: "High"
+        credit_pricing_version: "2026-10-14"
+        context_limit: 1000000
+        max_output_tokens: 128000
+        reasoning_modes: ["adaptive"]
+        default_reasoning_mode: "adaptive"
+        reasoning_efforts: ["low", "medium", "high", "xhigh", "max"]
+        reasoning_disable_supported: false
+        reasoning_counts_against_output: true
+        tags: ["strong", "reasoning", "coding", "agentic", "long_context"]
+        enabled: true
+        selectable: true
+        release_status: "generally_available"
+        source_verified_at: "2026-10-14"
+        lifecycle:
+          status: "ACTIVE"
+        pricing_rules:
+          - id: "claude-sonnet-5-5-standard-20261014"
+            processing_mode: "standard"
+            source_url: "https://platform.claude.com/docs/en/about-claude/pricing"
+            source_verified_at: "2026-10-14"
+            input: 2.0
+            cached_input: 0.1
+            cache_write_5m: 2.5
+            cache_write_1h: 4.0
+            output: 10.0
+
       - name: "claude-sonnet-5"
         display_name: "Claude Sonnet 5"
         description: "Current balanced Claude model for coding, reasoning, and agentic workflows."
         tier: "T2"
         billing_class: "advanced"
-        input_credit_multiplier: 4.0
-        output_credit_multiplier: 18.0
+        input_credit_multiplier: 3.0
+        output_credit_multiplier: 14.0
         credit_usage_label: "High"
-        credit_pricing_version: "2026-07-31"
+        credit_pricing_version: "2026-10-14"
         context_limit: 1000000
         max_output_tokens: 128000
         reasoning_modes: ["none", "adaptive"]
@@ -939,9 +1311,12 @@ providers:
         reasoning_counts_against_output: true
         tags: ["strong", "reasoning", "coding", "agentic", "long_context"]
         enabled: true
-        selectable: true
+        selectable: false
         release_status: "generally_available"
-        lifecycle: {status: "ACTIVE"}
+        lifecycle:
+          status: "ACTIVE"
+          replacement_model: "claude-sonnet-5-5"
+          migration_reason: "Replaced in the picker by Claude Sonnet 5.5 on 2026-10-14."
         pricing_rules:
           - id: "claude-sonnet-5-promo-20260731"
             processing_mode: "standard"
@@ -955,11 +1330,58 @@ providers:
           - id: "claude-sonnet-5-standard-20260901"
             processing_mode: "standard"
             effective_from: "2026-09-01T00:00:00Z"
+            # Anthropic kept $2/$10 after the launch window; closed instead of
+            # rewritten so seeded history stays immutable.
+            effective_until: "2026-10-14T00:00:00Z"
             input: 3.00
             cached_input: 0.30
             cache_write_5m: 3.75
             cache_write_1h: 6.00
             output: 15.00
+          - id: "claude-sonnet-5-standard-20261014"
+            processing_mode: "standard"
+            effective_from: "2026-10-14T00:00:00Z"
+            source_url: "https://platform.claude.com/docs/en/about-claude/pricing"
+            source_verified_at: "2026-10-14"
+            input: 2.00
+            cached_input: 0.20
+            cache_write_5m: 2.50
+            cache_write_1h: 4.00
+            output: 10.00
+
+      - name: "claude-opus-5-5"
+        display_name: "Claude Opus 5.5"
+        description: "Claude model for long-running agentic coding and knowledge work."
+        tier: "T3"
+        billing_class: "premium"
+        input_credit_multiplier: 6.0
+        output_credit_multiplier: 30.0
+        credit_usage_label: "Premium"
+        credit_pricing_version: "2026-10-14"
+        context_limit: 1000000
+        max_output_tokens: 128000
+        reasoning_modes: ["adaptive"]
+        default_reasoning_mode: "adaptive"
+        reasoning_efforts: ["low", "medium", "high", "xhigh", "max"]
+        reasoning_disable_supported: false
+        reasoning_counts_against_output: true
+        tags: ["flagship", "reasoning", "coding", "agentic", "long_context"]
+        enabled: true
+        selectable: true
+        release_status: "generally_available"
+        source_verified_at: "2026-10-14"
+        lifecycle:
+          status: "ACTIVE"
+        pricing_rules:
+          - id: "claude-opus-5-5-standard-20261014"
+            processing_mode: "standard"
+            source_url: "https://platform.claude.com/docs/en/about-claude/pricing"
+            source_verified_at: "2026-10-14"
+            input: 4.0
+            cached_input: 0.2
+            cache_write_5m: 5.0
+            cache_write_1h: 8.0
+            output: 20.0
 
       - name: "claude-opus-5"
         display_name: "Claude Opus 5"
@@ -979,9 +1401,12 @@ providers:
         reasoning_counts_against_output: true
         tags: ["flagship", "reasoning", "coding", "agentic", "long_context"]
         enabled: true
-        selectable: true
+        selectable: false
         release_status: "generally_available"
-        lifecycle: {status: "ACTIVE"}
+        lifecycle:
+          status: "ACTIVE"
+          replacement_model: "claude-opus-5-5"
+          migration_reason: "Replaced in the picker by Claude Opus 5.5 on 2026-10-14."
         pricing_rules:
           - id: "claude-opus-5-standard-20260731"
             processing_mode: "standard"
@@ -991,6 +1416,40 @@ providers:
             cache_write_5m: 6.25
             cache_write_1h: 10.00
             output: 25.00
+
+      - name: "claude-fable-5-1"
+        display_name: "Claude Fable 5.1"
+        description: "Claude's most capable model for demanding reasoning and long-horizon agentic work."
+        tier: "T3"
+        billing_class: "premium"
+        input_credit_multiplier: 10.0
+        output_credit_multiplier: 50.0
+        credit_usage_label: "Premium"
+        credit_pricing_version: "2026-10-14"
+        context_limit: 1000000
+        max_output_tokens: 128000
+        reasoning_modes: ["adaptive"]
+        default_reasoning_mode: "adaptive"
+        reasoning_efforts: ["low", "medium", "high", "xhigh", "max"]
+        reasoning_disable_supported: false
+        reasoning_counts_against_output: true
+        tags: ["flagship", "reasoning", "coding", "agentic", "accurate", "long_context"]
+        enabled: true
+        selectable: true
+        release_status: "generally_available"
+        source_verified_at: "2026-10-14"
+        lifecycle:
+          status: "ACTIVE"
+        pricing_rules:
+          - id: "claude-fable-5-1-standard-20261014"
+            processing_mode: "standard"
+            source_url: "https://platform.claude.com/docs/en/about-claude/pricing"
+            source_verified_at: "2026-10-14"
+            input: 10.0
+            cached_input: 0.25
+            cache_write_5m: 12.5
+            cache_write_1h: 20.0
+            output: 50.0
 
       - name: "claude-fable-5"
         display_name: "Claude Fable 5"
@@ -1010,9 +1469,12 @@ providers:
         reasoning_counts_against_output: true
         tags: ["flagship", "reasoning", "coding", "agentic", "accurate", "long_context"]
         enabled: true
-        selectable: true
+        selectable: false
         release_status: "generally_available"
-        lifecycle: {status: "ACTIVE"}
+        lifecycle:
+          status: "ACTIVE"
+          replacement_model: "claude-fable-5-1"
+          migration_reason: "Replaced in the picker by Claude Fable 5.1 on 2026-10-14."
         pricing_rules:
           - id: "claude-fable-5-standard-20260731"
             processing_mode: "standard"
@@ -1041,9 +1503,12 @@ providers:
         reasoning_counts_against_output: true
         tags: ["strong", "reasoning", "coding", "agentic", "long_context"]
         enabled: true
-        selectable: true
+        selectable: false
         release_status: "generally_available"
-        lifecycle: {status: "ACTIVE"}
+        lifecycle:
+          status: "ACTIVE"
+          replacement_model: "claude-sonnet-5-5"
+          migration_reason: "Replaced in the picker by Claude Sonnet 5.5 on 2026-10-14."
         pricing_rules:
           - id: "claude-sonnet-4.6-standard-20260731"
             processing_mode: "standard"
@@ -1072,11 +1537,12 @@ providers:
         tags: ["compatibility", "reasoning", "coding"]
         enabled: true
         selectable: false
-        release_status: "generally_available"
+        release_status: "legacy"
         lifecycle:
-          status: "ACTIVE"
-          replacement_model: "claude-sonnet-5"
-          migration_reason: "Claude Sonnet 5 is the current recommended Sonnet generation."
+          status: "SCHEDULED_FOR_RETIREMENT"
+          retirement_date: "2026-11-30T00:00:00Z"
+          replacement_model: "claude-sonnet-5-5"
+          migration_reason: "Anthropic retires Claude Sonnet 4.5 on November 30, 2026; Sonnet 5.5 is the recommended replacement."
         pricing_rules:
           - id: "claude-sonnet-4.5-standard-20260731"
             processing_mode: "standard"
@@ -1104,9 +1570,12 @@ providers:
         reasoning_counts_against_output: true
         tags: ["flagship", "reasoning", "coding", "agentic", "long_context"]
         enabled: true
-        selectable: true
+        selectable: false
         release_status: "generally_available"
-        lifecycle: {status: "ACTIVE"}
+        lifecycle:
+          status: "ACTIVE"
+          replacement_model: "claude-opus-5-5"
+          migration_reason: "Replaced in the picker by Claude Opus 5.5 on 2026-10-14."
         pricing_rules:
           - id: "claude-opus-4.6-standard-20260731"
             processing_mode: "standard"
@@ -1134,9 +1603,12 @@ providers:
         reasoning_counts_against_output: true
         tags: ["flagship", "reasoning", "coding", "agentic"]
         enabled: true
-        selectable: true
+        selectable: false
         release_status: "generally_available"
-        lifecycle: {status: "ACTIVE"}
+        lifecycle:
+          status: "ACTIVE"
+          replacement_model: "claude-opus-5-5"
+          migration_reason: "Replaced in the picker by Claude Opus 5.5 on 2026-10-14."
         pricing_rules:
           - id: "claude-opus-4.5-standard-20260731"
             processing_mode: "standard"
@@ -1151,6 +1623,17 @@ routing_defaults:
   max_attempts: 3
   max_total_latency_ms: 12000
   allow_providers: ["openai", "gemini", "deepseek", "grok", "claude"]
+  # Smart routing tries these first for coding prompts, in this order. Only
+  # selectable models are allowed here; hiding a model moves its slot to the
+  # replacement (`scripts/models.py apply`).
+  coding_preference:
+    - "openai:gpt-6-astra"
+    - "openai:gpt-5.4"
+    - "claude:claude-opus-5-5"
+    - "deepseek:deepseek-v4-pro"
+    - "grok:grok-4.7"
+    - "gemini:gemini-4-argon"
+    - "claude:claude-fable-5-1"
   per_tier_timeout_ms:
     T0: 5000
     T1: 7000
@@ -1164,3 +1647,16 @@ routing_defaults:
     validator_short_complex_chars: 120
     validator_short_simple_chars: 40
     token_buffer: 200
+
+# Product defaults that name models. `scripts/models.py apply` moves an entry to the
+# replacement when its model is hidden; `scripts/models.py sync-frontend` copies them
+# to frontend-react/src/config/generated/registryDefaults.ts.
+ui_defaults:
+  ask_by_plan:
+    free: "openai:gpt-6-luna"
+    plus: "claude:claude-sonnet-5-5"
+    pro: "openai:gpt-6.1-sol"
+  compare:
+    - "openai:gpt-6-luna"
+    - "claude:claude-sonnet-5-5"
+  compare_added: "deepseek:deepseek-flash"

@@ -27,7 +27,7 @@
     },
     {
       "key": "chat_model",
-      "value": "gpt-5.6-luna"
+      "value": "gpt-6-luna"
     },
     {
       "key": "compare_provider",

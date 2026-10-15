@@ -66,7 +66,13 @@ and the operator CLI validates approval dry-runs. Optional provider-verified
 for both candidate approval and manual overrides in `pricing/sync.py`.
 For Gemini 3.6 Flash, Google's December 31, 2026 boundary is stored as
 `2027-01-01T00:00:00Z`. It leaves unbounded imports pending without creating a
-future successor card or changing legacy rates. Financial fingerprints and
+future successor card or changing legacy rates. The boundary limits only
+intervals that start before it: a regular-price successor that starts at or after
+it may be open-ended (manual override from the boundary, or a candidate approved
+after it). `select_card` also accepts a legacy seed that starts once every started
+verified card has ended, which is how a registry-declared regular price (Gemini
+3.8 Flash, Gemini 4 Argon) follows an approved launch card; legacy seeds that
+predate a verified card are still never revived. Financial fingerprints and
 approved history remain immutable. OpenAI cache-write TTL selection follows the
 served model: GPT-5.6 and later use `30m`; older models retain only their supported
 retention controls and unexpected write counts fail explicitly. CI and local

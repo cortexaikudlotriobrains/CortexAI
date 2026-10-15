@@ -7,7 +7,9 @@ service. It switches database pricing on for this process only, then:
 2. builds the complete ``ModelRegistry`` (what /v1/model-options, /v1/providers,
    /v1/history, Ask and Compare use) from approved database rate cards;
 3. checks every provider and every selectable model is still present;
-4. checks that rates missing from a card stay missing (never $0) in the catalog;
+4. checks that rates missing from a card stay missing (never $0) in the catalog,
+   for every enabled model: hidden models (``selectable: false``) still serve
+   existing threads and API callers, so they are billed too;
 5. checks operator-supplied expected rates, card IDs and long-context starts;
 6. warns about approved cards that end without an approved successor.
 
@@ -212,7 +214,7 @@ def _check_rates(report: Report, registry: Any) -> dict[tuple[str, str], dict[st
         "input   output  cached  write   write1h  until"
     )
     for candidate in sorted(
-        registry.list_selectable_models(), key=lambda c: (c.provider, c.model_name)
+        registry.list_enabled_models(), key=lambda c: (c.provider, c.model_name)
     ):
         key = (candidate.provider, candidate.model_name)
         snapshot = ModelPricing.get_pricing_snapshot(*key)
@@ -227,6 +229,7 @@ def _check_rates(report: Report, registry: Any) -> dict[tuple[str, str], dict[st
             f"{_rate(snapshot.get('cache_write')):<7} {_rate(snapshot.get('cache_write_1h')):<8} "
             f"{_rate(snapshot.get('effective_until'))}"
             + ("  STALE" if snapshot.get("pricing_stale") else "")
+            + ("" if candidate.selectable else "  hidden")
         )
         for rate_key, attribute in (
             ("input", "input_cost_per_1m"),
@@ -266,7 +269,7 @@ def _check_expectations(
         snapshot = snapshots.get((item.provider, item.model))
         label = f"{item.provider}:{item.model}"
         if snapshot is None:
-            report.fail(f"expected {label} is not a selectable model with an approved card")
+            report.fail(f"expected {label} is not an enabled model with an approved card")
             continue
         actual = (Decimal(str(snapshot["input"])), Decimal(str(snapshot["output"])))
         problems = []

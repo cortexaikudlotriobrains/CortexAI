@@ -33,14 +33,14 @@ def _first_pick(prompt: str) -> tuple[str, str, str, list[str]]:
     return tier.value, first.provider, first.model_name, metadata.get("decision_reasons", [])
 
 
-def test_simple_prompt_routes_to_t0_and_picks_gpt_5_6_luna():
+def test_simple_prompt_routes_to_t0_and_picks_gpt_6_luna():
     tier, provider, model, reasons = _first_pick(
         "Rewrite this sentence in simpler words: We should accelerate implementation to reduce timeline risk."
     )
     assert tier == "T0"
     assert "short_simple_rewrite" in reasons
     assert provider == "openai"
-    assert model == "gpt-5.6-luna"
+    assert model == "gpt-6-luna"
 
 
 def test_analysis_prompt_routes_to_t2_and_picks_gpt_5_4_mini():
@@ -54,7 +54,7 @@ def test_analysis_prompt_routes_to_t2_and_picks_gpt_5_4_mini():
     assert model == "gpt-5.4-mini"
 
 
-def test_coding_prompt_routes_to_t3_and_picks_gpt_5_6_sol():
+def test_coding_prompt_routes_to_t3_and_picks_gpt_6_astra():
     tier, provider, model, reasons = _first_pick(
         "Debug this Python traceback and provide a production-ready patch with tests. "
         "Traceback (most recent call last): File \"app.py\", line 42, in run -> KeyError: 'user_id'"
@@ -62,4 +62,5 @@ def test_coding_prompt_routes_to_t3_and_picks_gpt_5_6_sol():
     assert tier == "T3"
     assert "coding_priority_models" in reasons
     assert provider == "openai"
-    assert model == "gpt-5.6-sol"
+    # First entry of routing_defaults.coding_preference.
+    assert model == "gpt-6-astra"

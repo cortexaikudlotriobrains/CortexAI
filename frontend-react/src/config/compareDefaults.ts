@@ -1,11 +1,13 @@
 import type { ModelCatalogItem } from "../types";
 
-export const DEFAULT_COMPARE_MODEL_KEYS = [
-  "openai:gpt-5.6-luna",
-  "claude:claude-sonnet-5",
-] as const;
+// Compare defaults live in config/model_registry.yaml (ui_defaults.compare and
+// ui_defaults.compare_added); `python scripts/models.py sync-frontend` regenerates them.
+import {
+  DEFAULT_ADDED_COMPARE_MODEL_KEY,
+  DEFAULT_COMPARE_MODEL_KEYS,
+} from "./generated/registryDefaults";
 
-export const DEFAULT_ADDED_COMPARE_MODEL_KEY = "deepseek:deepseek-v4-flash";
+export { DEFAULT_ADDED_COMPARE_MODEL_KEY, DEFAULT_COMPARE_MODEL_KEYS };
 
 export function newCompareModelKeys(
   models: ModelCatalogItem[],

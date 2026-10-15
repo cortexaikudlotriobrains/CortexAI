@@ -88,13 +88,60 @@ def test_registry_separates_selectable_models_from_compatibility_entries():
         for candidate in registry.list_selectable_models()
     }
 
-    assert ("openai", "gpt-5.6-sol") in selectable
-    assert ("deepseek", "deepseek-v4-flash") in selectable
-    assert ("claude", "claude-sonnet-4-6") in selectable
-    assert ("claude", "claude-opus-4-6") in selectable
-    assert ("claude", "claude-opus-4-5") in selectable
+    assert ("openai", "gpt-6-astra") in selectable
+    assert ("deepseek", "deepseek-flash") in selectable
+    assert ("claude", "claude-sonnet-5-5") in selectable
+    assert ("claude", "claude-opus-5-5") in selectable
     assert ("openai", "gpt-5.2-codex") not in selectable
     assert ("grok", "grok-4-1-fast-reasoning") not in selectable
+    assert ("deepseek", "deepseek-v4-flash") not in selectable
+
+
+# Hidden in the 2026-10 model update: no longer offered, still callable and billed.
+HIDDEN_BY_REPLACEMENT = {
+    ("openai", "gpt-5.6-luna"): "gpt-6-luna",
+    ("openai", "gpt-5.6-terra"): "gpt-6.1-sol",
+    ("openai", "gpt-5.6-sol"): "gpt-6-astra",
+    ("claude", "claude-haiku-4-5"): "claude-haiku-5-5",
+    ("claude", "claude-sonnet-5"): "claude-sonnet-5-5",
+    ("claude", "claude-sonnet-4-6"): "claude-sonnet-5-5",
+    ("claude", "claude-opus-5"): "claude-opus-5-5",
+    ("claude", "claude-opus-4-6"): "claude-opus-5-5",
+    ("claude", "claude-opus-4-5"): "claude-opus-5-5",
+    ("claude", "claude-fable-5"): "claude-fable-5-1",
+    ("gemini", "gemini-3.6-flash"): "gemini-3.8-flash",
+    ("gemini", "gemini-3.1-pro-preview"): "gemini-4-argon",
+    ("grok", "grok-4.5"): "grok-4.7",
+}
+
+
+@pytest.mark.parametrize("key,replacement", sorted(HIDDEN_BY_REPLACEMENT.items()))
+def test_hidden_models_keep_working_and_point_to_a_selectable_replacement(key, replacement):
+    registry = ModelRegistry.from_yaml()
+    candidate = registry.find_model(*key)
+    assert candidate is not None
+    assert candidate.enabled is True
+    assert candidate.selectable is False
+    assert candidate.lifecycle_status == "ACTIVE"
+    assert candidate.input_cost_per_1m > 0
+
+    entry = _registry_entry(*key)
+    assert entry["lifecycle"]["replacement_model"] == replacement
+    successor = registry.find_model(key[0], replacement)
+    assert successor is not None and successor.selectable is True
+    # A replacement never moves a user to a more expensive subscription class.
+    order = ["economical", "standard", "advanced", "premium"]
+    assert order.index(successor.billing_class.value) <= order.index(
+        candidate.billing_class.value
+    )
+
+
+def _registry_entry(provider: str, model: str) -> dict:
+    data = yaml.safe_load(Path("config/model_registry.yaml").read_text(encoding="utf-8"))
+    for entry in data["providers"][provider]["models"]:
+        if entry["name"] == model:
+            return entry
+    raise AssertionError(f"{provider}:{model} not in the registry")
 
 
 def test_every_claude_model_declares_its_thinking_mode_explicitly():
@@ -136,12 +183,14 @@ def test_smart_routing_filters_models_by_requested_reasoning_level():
     ]
     pairs = {(candidate.provider, candidate.model_name) for candidate in candidates}
 
-    assert ("openai", "gpt-5.6-sol") in pairs
+    assert ("openai", "gpt-6-astra") in pairs
     assert ("deepseek", "deepseek-v4-pro") in pairs
     assert ("grok", "grok-4.3") in pairs
-    assert ("claude", "claude-opus-5") in pairs
-    assert ("gemini", "gemini-3.1-pro-preview") not in pairs
-    assert ("grok", "grok-4.5") not in pairs
+    assert ("grok", "grok-4.7") in pairs
+    assert ("claude", "claude-opus-5-5") in pairs
+    # Gemini thinking stops at "high"; hidden models are never routed to.
+    assert ("gemini", "gemini-4-argon") not in pairs
+    assert ("openai", "gpt-5.6-sol") not in pairs
     assert ("openai", "gpt-4o-mini") not in pairs
 
 
@@ -157,27 +206,33 @@ def test_smart_reasoning_on_excludes_models_without_reasoning_controls():
     }
 
 
-def test_active_claude_4_models_use_the_requested_subscription_classes():
+def test_current_claude_models_use_the_ladder_subscription_classes():
     registry = ModelRegistry.from_yaml()
     catalog = get_plan_catalog()
     expected = {
-        "claude-sonnet-4-6": (
+        "claude-haiku-5-5": (
+            ModelBillingClass.ECONOMICAL,
+            {"free", "plus", "pro"},
+            0.1,
+            0.5,
+        ),
+        "claude-sonnet-5-5": (
             ModelBillingClass.ADVANCED,
             {"plus", "pro"},
-            3.0,
-            15.0,
+            2.0,
+            10.0,
         ),
-        "claude-opus-4-6": (
+        "claude-opus-5-5": (
             ModelBillingClass.PREMIUM,
             {"pro"},
-            5.0,
-            25.0,
+            4.0,
+            20.0,
         ),
-        "claude-opus-4-5": (
+        "claude-fable-5-1": (
             ModelBillingClass.PREMIUM,
             {"pro"},
-            5.0,
-            25.0,
+            10.0,
+            50.0,
         ),
     }
 
