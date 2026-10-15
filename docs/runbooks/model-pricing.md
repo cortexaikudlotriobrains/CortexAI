@@ -131,9 +131,9 @@ readiness fails without one. A release that adds models (or renames one, such as
 the host and **before** the API restarts:
 
 ```bash
-sudo -u ec2-user ./venv/bin/python scripts/sync_model_pricing.py --seed-legacy --dry-run
-sudo -u ec2-user ./venv/bin/python scripts/sync_model_pricing.py --seed-legacy
-sudo -u ec2-user ./venv/bin/python scripts/preflight_database_pricing.py --min-selectable 18
+sudo /usr/bin/python3.11 scripts/sync_model_pricing.py --seed-legacy --dry-run
+sudo /usr/bin/python3.11 scripts/sync_model_pricing.py --seed-legacy
+sudo /usr/bin/python3.11 scripts/preflight_database_pricing.py --min-selectable 18
 ```
 
 Seeding writes the registry's rules for the new models as legacy cards
