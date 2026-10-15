@@ -907,6 +907,215 @@ def test_gemini_manual_promotion_preserves_verified_expiry(pricing_db, end):
         assert utc(card["effective_to"]) == utc(end)
 
 
+# Gemini 4 Argon: launch price 2/10 until 2026-12-01, then 4/20 (two dated registry rules).
+ARGON_BOUNDARY = utc("2026-12-01T00:00:00Z")
+
+
+def argon_catalog(input_rate="0.000002", output_rate="0.00001", cached="0.0000001"):
+    return LiteLLMPricingSource.parse(
+        json.dumps(
+            {
+                "gemini/gemini-4-argon": {
+                    "litellm_provider": "gemini",
+                    "input_cost_per_token": input_rate,
+                    "output_cost_per_token": output_rate,
+                    "cache_read_input_token_cost": cached,
+                }
+            }
+        ).encode()
+    )
+
+
+def argon_candidate(db, repo):
+    return (
+        db.execute(
+            select(repo.cards).where(
+                repo.cards.c.canonical_model_id == "gemini-4-argon",
+                repo.cards.c.status == "candidate",
+            )
+        )
+        .mappings()
+        .one()
+    )
+
+
+def approve_argon_promotion(db, repo, mocker):
+    """Seed, sync the launch price and approve it up to the documented boundary."""
+
+    seed_legacy(db)
+    clock = mocker.patch("pricing.sync.datetime")
+    clock.now.return_value = AT
+    result = synchronize(db, argon_catalog(), at=AT)
+    assert result["changes"][0]["reason"] == "promotional_pricing_requires_expiry"
+    candidate = argon_candidate(db, repo)
+    approve_candidate(
+        db,
+        candidate["id"],
+        actor="reviewer",
+        reason="Verified Google launch price",
+        effective_until=ARGON_BOUNDARY,
+    )
+    return clock
+
+
+def test_promotion_with_dated_registry_successor_keeps_a_card_at_the_boundary(pricing_db, mocker):
+    db, repo = pricing_db
+    approve_argon_promotion(db, repo, mocker)
+    cards = repo.list_cards("gemini", "gemini-4-argon")
+
+    launch = select_card(cards, ARGON_BOUNDARY - timedelta(microseconds=1))
+    assert launch["source"] == "LITELLM"
+    regular = select_card(cards, ARGON_BOUNDARY)
+    assert regular is not None
+    assert regular["source"] == "LEGACY_CORTEX"
+    assert utc(regular["effective_from"]) == ARGON_BOUNDARY
+    assert regular["pricing_components"]["tokens"]["input"] == "4"
+    assert select_card(cards, ARGON_BOUNDARY + timedelta(days=30))["id"] == regular["id"]
+
+
+def test_legacy_seed_that_predates_a_verified_card_is_still_not_resurrected(pricing_db, mocker):
+    db, repo = pricing_db
+    approve_argon_promotion(db, repo, mocker)
+    # The launch-price legacy seed started before the verified card: never revived.
+    cards = [
+        card
+        for card in repo.list_cards("gemini", "gemini-4-argon")
+        if not (card["source"] == "LEGACY_CORTEX" and card["effective_to"] is None)
+    ]
+    assert select_card(cards, ARGON_BOUNDARY) is None
+
+
+def test_manual_regular_price_successor_can_be_approved_before_the_boundary(pricing_db, mocker):
+    db, repo = pricing_db
+    approve_argon_promotion(db, repo, mocker)
+    card = manual_override(
+        db,
+        {
+            "provider": "gemini",
+            "model": "gemini-4-argon",
+            "processing_mode": "standard",
+            "rates": argon_catalog("0.000004", "0.00002", "0.0000002").entries[
+                "gemini/gemini-4-argon"
+            ]["rates"],
+            "effective_from": "2026-12-01T00:00:00Z",
+        },
+        actor="reviewer",
+        reason="Verified Google regular price",
+        at=AT,
+    )
+    assert card["effective_to"] is None
+    selected = select_card(repo.list_cards("gemini", "gemini-4-argon"), ARGON_BOUNDARY)
+    assert selected["id"] == card["id"]
+
+
+def test_synchronized_regular_price_successor_can_be_approved_after_the_boundary(
+    pricing_db, mocker
+):
+    db, repo = pricing_db
+    clock = approve_argon_promotion(db, repo, mocker)
+    after = ARGON_BOUNDARY + timedelta(days=1)
+    clock.now.return_value = after
+    result = synchronize(db, argon_catalog("0.000004", "0.00002", "0.0000002"), at=after)
+    change = result["changes"][0]
+    assert change["action"] == "candidate"
+    assert change["requires_expiry"] is False
+    candidate = argon_candidate(db, repo)
+    approve_candidate(db, candidate["id"], actor="reviewer", reason="Verified regular price")
+    selected = select_card(repo.list_cards("gemini", "gemini-4-argon"), after)
+    assert selected["id"] == candidate["id"]
+    assert selected["effective_to"] is None
+
+
+def test_expired_documented_promotion_accepts_a_reviewed_open_ended_successor(pricing_db, mocker):
+    """Gemini 3.6 Flash: no dated registry successor, so the reviewer approves one."""
+
+    db, repo = pricing_db
+    boundary = utc("2027-01-01T00:00:00Z")
+    clock = mocker.patch("pricing.sync.datetime")
+    clock.now.return_value = AT
+    repo.add(
+        provider="gemini",
+        model="gemini-3.6-flash",
+        source="LEGACY_CORTEX",
+        rates=rates("1.5", "7.5", "0.15"),
+        at=AT,
+        reference="legacy fixture",
+        version="v0",
+    )
+    promo = repo.add(
+        provider="gemini",
+        model="gemini-3.6-flash",
+        source="LITELLM",
+        rates=gemini_flash_proposal().entries["gemini-3.6-flash"]["rates"],
+        at=AT,
+        reference="provider evidence",
+        version="v1",
+        status="candidate",
+    )
+    approve_candidate(db, promo["id"], actor="reviewer", reason="launch", effective_until=boundary)
+    assert select_card(repo.list_cards("gemini", "gemini-3.6-flash"), boundary) is None
+
+    after = boundary + timedelta(hours=1)
+    clock.now.return_value = after
+    regular = LiteLLMPricingSource.parse(
+        json.dumps(
+            {
+                "gemini-3.6-flash": {
+                    "litellm_provider": "gemini",
+                    "input_cost_per_token": "0.0000015",
+                    "output_cost_per_token": "0.0000075",
+                    "cache_read_input_token_cost": "0.00000015",
+                }
+            }
+        ).encode()
+    )
+    result = synchronize(db, regular, at=after)
+    assert result["changes"][0]["reason"] == "expired_pricing_requires_review"
+    candidate = (
+        db.execute(
+            select(repo.cards).where(
+                repo.cards.c.canonical_model_id == "gemini-3.6-flash",
+                repo.cards.c.status == "candidate",
+            )
+        )
+        .mappings()
+        .one()
+    )
+    approve_candidate(db, candidate["id"], actor="reviewer", reason="Verified regular price")
+    selected = select_card(repo.list_cards("gemini", "gemini-3.6-flash"), after)
+    assert selected["id"] == candidate["id"]
+    assert selected["effective_to"] is None
+
+
+def test_promotion_window_guards_still_apply_before_the_boundary(pricing_db, mocker):
+    db, repo = pricing_db
+    approve_argon_promotion(db, repo, mocker)
+    regular = argon_catalog("0.000004", "0.00002", "0.0000002").entries["gemini/gemini-4-argon"][
+        "rates"
+    ]
+    with pytest.raises(ValueError, match="effective_until"):
+        manual_override(
+            db,
+            {
+                "provider": "gemini",
+                "model": "gemini-4-argon",
+                "processing_mode": "standard",
+                "rates": regular,
+                "effective_from": "2026-11-15T00:00:00Z",
+            },
+            actor="reviewer",
+            reason="starts inside the launch window",
+            at=AT,
+        )
+    # A changed LiteLLM rate during the launch window cannot run past its bounded card.
+    clock = mocker.patch("pricing.sync.datetime")
+    clock.now.return_value = AT + timedelta(days=1)
+    synchronize(db, argon_catalog("0.0000021"), at=AT + timedelta(days=1))
+    candidate = argon_candidate(db, repo)
+    with pytest.raises(ValueError, match="effective_until"):
+        approve_candidate(db, candidate["id"], actor="reviewer", reason="no end")
+
+
 @pytest.mark.parametrize("auto_activate", [False, True])
 def test_known_promotion_without_source_expiry_always_requires_review(pricing_db, auto_activate):
     db, repo = pricing_db

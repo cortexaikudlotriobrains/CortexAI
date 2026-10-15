@@ -50,8 +50,11 @@ Locally, `python scripts/models.py` does the same steps.
   reservation estimate uses the long-context band for the estimated prompt.
   `tests/test_new_model_credits.py` pins the charges.
 - **Promotions** get two dated registry rules (launch price until the provider's
-  end date, then the regular price) plus `pricing_review.requires_expiry`, so
-  seeding always leaves a card in force when the promotion ends.
+  end date, then the regular price) plus `pricing_review.requires_expiry`. In
+  database mode the regular-price seed starts at the boundary, so a card stays in
+  force when the promotion ends, also after a LiteLLM launch card is approved. A
+  reviewed open-ended successor can replace it: a manual override starting at the
+  boundary, or a LiteLLM candidate approved after it.
 - **Replace means hide, not delete.** The replaced model gets `selectable: false`
   and `lifecycle.replacement_model`; its status stays `ACTIVE` while the provider
   serves it. It keeps working and billing for existing threads, API callers and
@@ -79,7 +82,8 @@ The report lists:
 - Selectable models whose credits are below LiteLLM's price (the runtime floor
   is charging; reprice on purpose).
 - Registry check errors and warnings (for example a promotion ending within 45
-  days, or credits that predate the ladder).
+  days, or credits that predate the ladder). A new or cleared warning counts as a
+  change and opens a new issue.
 
 A new issue opens only when these findings change; otherwise last week's issue
 and its ticks stay. Older report issues are closed as superseded.
@@ -101,7 +105,10 @@ Check and edit in the YAML block before ticking:
 | `display_name`, `description` | Generated from the predecessor; rewrite when the model is positioned differently. |
 | `tier` | Smart-routing tier `T0`-`T3`. Independent of credits and plans. |
 | `credits` | Must be a ladder step. Leave it unless you are deliberately pricing above the covering step. |
-| `context_limit`, `max_output_tokens` | Use the provider's documented window. OpenAI's registry limit is the whole window (LiteLLM's `max_input_tokens` plus output); the report converts it from the predecessor. |
+| `context_limit` | Use the provider's documented window. OpenAI's registry limit is the whole window (LiteLLM's `max_input_tokens` plus output); the report converts it from the predecessor. |
+| `max_output_tokens` | The new model's own LiteLLM limit, even when lower than the predecessor's. A LiteLLM value equal to the context window (xAI rows) is not trusted; the predecessor's is kept and a note asks you to check. |
+| `attachments` | `supports_image_input`, `supported_attachment_mime_types`, `max_attachment_bytes`, `max_attachments_per_request`. Taken from the predecessor (or the provider defaults it uses); LiteLLM flags only remove types the model cannot read. Limits and new types are never invented: a vision-capable model whose predecessor took no images gets a note instead. Fields equal to the provider defaults are not written. |
+| `notes` | Points to check, also shown under the checkbox. Ignored by apply. |
 | `promo` | For a launch price: `{until: "<exclusive UTC end>", regular: {input, output, cached_input}, note: "..."}`. |
 | `reasoning` | Optional explicit `reasoning_modes`, `default_reasoning_mode`, `reasoning_efforts`, `reasoning_disable_supported`, `reasoning_counts_against_output`. Without it the predecessor's settings are adjusted with LiteLLM's flags (for example `thinking_always_on` removes `none`). Do not carry provider modes a source does not confirm. |
 | `aliases` | Moved from the hidden model when listed (for example `grok-4-latest`). |

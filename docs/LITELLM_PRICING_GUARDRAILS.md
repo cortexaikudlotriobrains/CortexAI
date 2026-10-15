@@ -18,7 +18,9 @@ identities, currently GPT-5.6 Sol (including its declared alias) and Gemini 3.6
 Flash. Sync always keeps those
 unbounded proposals under review, even when automatic activation is requested.
 Approval checks the current registry for older importer candidates and rejects
-indefinite successors to bounded source history. Operators can supply a verified
+indefinite successors to bounded source history, except a successor that starts at
+or after a documented `pricing_review.effective_until` when the bounded cards ended
+by that boundary (the provider's regular price). Operators can supply a verified
 `--effective-until`, validated on dry-run and recorded with actor/reason. Existing
 candidate ends may be shortened, never extended; financial fingerprints and
 historical cards remain unchanged. Promotional manual overrides also require an
@@ -32,7 +34,8 @@ exclusive UTC `pricing_review.effective_until` boundary `2027-01-01T00:00:00Z`.
 The shared promotional validator rejects later approval/manual ends, including
 dates retained on older candidates and approval dry-runs. Imports with no source
 expiry remain candidates even when auto-activation is requested; the metadata
-does not fill a missing source date or create a successor card. Fourteen new
+does not fill a missing source date or create a successor card. The boundary caps
+only intervals that start before it; a regular-price successor may start at it. Fourteen new
 regression cases cover automatic activation on/off with legacy and synchronized
 baselines, unbounded approval, overlong dates, manual expiry, exact boundary
 selection and retained history. Approval tests freeze the review clock before

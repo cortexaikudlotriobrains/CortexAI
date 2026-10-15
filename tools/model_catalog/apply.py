@@ -39,6 +39,46 @@ _ATTACHMENT_FIELDS = (
 )
 
 
+_IMAGE_PREFIX = "image/"
+
+
+def derive_attachments(
+    pred: dict[str, Any] | None, defaults: dict[str, Any], flags: dict[str, Any]
+) -> tuple[dict[str, Any], list[str]]:
+    """Attachment settings for a successor: the predecessor's, adjusted by LiteLLM flags.
+
+    Each field comes from the predecessor when it sets one, else from the provider
+    defaults (what the predecessor effectively uses). LiteLLM flags only remove
+    types the new model cannot read; limits and new types are never invented, so a
+    gap is returned as a review note instead.
+    """
+
+    settings: dict[str, Any] = {}
+    for field in _ATTACHMENT_FIELDS:
+        value = (pred or {}).get(field)
+        settings[field] = defaults.get(field) if value is None else value
+    types = [str(item) for item in settings.get("supported_attachment_mime_types") or []]
+    notes: list[str] = []
+    if flags.get("supports_vision") is False:
+        types = [item for item in types if not item.startswith(_IMAGE_PREFIX)]
+    if flags.get("supports_pdf_input") is False:
+        types = [item for item in types if item != "application/pdf"]
+    if flags.get("supports_vision") and not any(item.startswith(_IMAGE_PREFIX) for item in types):
+        notes.append(
+            "LiteLLM marks the model vision-capable, but the predecessor accepts no images; "
+            "add image types and limits under `attachments` once the provider client supports them."
+        )
+    settings["supported_attachment_mime_types"] = types
+    settings["supports_image_input"] = any(item.startswith(_IMAGE_PREFIX) for item in types)
+    if not types:
+        settings["max_attachments_per_request"] = 0
+    elif not settings.get("max_attachments_per_request") or not settings.get(
+        "max_attachment_bytes"
+    ):
+        notes.append("Attachment limits are missing; set them under `attachments`.")
+    return settings, notes
+
+
 _ID = re.compile(r"^[a-z][a-z0-9]*:[a-z0-9][a-z0-9.\-]*$")
 _RATE_KEYS = {"input", "output", "cached_input", "cache_write", "cache_write_1h", "reasoning"}
 _PROPOSAL_KEYS = {
@@ -66,6 +106,7 @@ _PROPOSAL_KEYS = {
     "tags",
     "aliases",
     "attachments",
+    "notes",
 }
 
 
@@ -104,8 +145,12 @@ def validate_proposal(proposal: dict[str, Any]) -> None:
                 raise ValueError(f"{proposal['id']}: {label}.{key} must be a nonnegative number")
     if set(proposal.get("reasoning") or {}) - set(_REASONING_FIELDS):
         raise ValueError(f"{proposal['id']}: unknown reasoning fields")
-    if set(proposal.get("attachments") or {}) - set(_ATTACHMENT_FIELDS):
+    attachments = proposal.get("attachments") or {}
+    if set(attachments) - set(_ATTACHMENT_FIELDS):
         raise ValueError(f"{proposal['id']}: unknown attachment fields")
+    for mime in attachments.get("supported_attachment_mime_types") or []:
+        if not re.fullmatch(r"[a-z]+/[a-z0-9.+\-]+", str(mime)):
+            raise ValueError(f"{proposal['id']}: invalid attachment type {mime!r}")
 
 
 def _split(key: str) -> tuple[str, str]:
@@ -194,7 +239,10 @@ def _derive_reasoning(pred: dict[str, Any] | None, flags: dict[str, Any]) -> dic
 
 
 def build_entry(
-    proposal: dict[str, Any], pred: dict[str, Any] | None, today: date
+    proposal: dict[str, Any],
+    pred: dict[str, Any] | None,
+    today: date,
+    defaults: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     provider, name = _split(proposal["id"])
     ladder = load_ladder()
@@ -261,6 +309,12 @@ def build_entry(
         tags.append("reasoning")
     if int(proposal.get("context_limit") or 0) >= 500_000 and "long_context" not in tags:
         tags.append("long_context")
+    defaults = defaults or {}
+    derived, _notes = derive_attachments(pred, defaults, proposal.get("flags") or {})
+    attachments = {**derived, **(proposal.get("attachments") or {})}
+    # Write the fields only when they differ from the provider defaults (house style).
+    if all(attachments.get(field) == defaults.get(field) for field in _ATTACHMENT_FIELDS):
+        attachments = {}
     entry: dict[str, Any] = {
         "name": name,
         "aliases": proposal.get("aliases") or None,
@@ -288,7 +342,7 @@ def build_entry(
         "max_output_tokens": int(proposal["max_output_tokens"]),
         **{field: reasoning.get(field) for field in _REASONING_FIELDS},
         "tags": tags,
-        **{field: (proposal.get("attachments") or {}).get(field) for field in _ATTACHMENT_FIELDS},
+        **{field: attachments.get(field) for field in _ATTACHMENT_FIELDS},
         "enabled": True,
         "selectable": True,
         "release_status": release_status,
@@ -319,14 +373,16 @@ def apply_proposals(
         validate_proposal(proposal)
     for proposal in chosen:
         provider, name = _split(proposal["id"])
-        index = model_index(yaml.safe_load(registry_text))
+        current = yaml.safe_load(registry_text)
+        index = model_index(current)
+        defaults = (current["providers"].get(provider) or {}).get("defaults") or {}
         if (provider, name) in index:
             raise ValueError(f"{proposal['id']} is already in the registry")
         replaces = proposal.get("replaces")
         pred = index.get(_split(replaces)) if replaces else None
         if replaces and pred is None:
             raise ValueError(f"{proposal['id']}: replaced model {replaces} is not in the registry")
-        entry = build_entry(proposal, pred, today)
+        entry = build_entry(proposal, pred, today, defaults)
         before = _split(replaces)[1] if replaces and _split(replaces)[0] == provider else None
         registry_text = insert_entry(registry_text, provider, render_entry(entry), before=before)
         log.append(

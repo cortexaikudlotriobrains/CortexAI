@@ -28,6 +28,7 @@ from tools.model_catalog.checks import (
     model_index,
     run_checks,
 )
+from tools.model_catalog.apply import derive_attachments
 from tools.model_catalog.ladder import load_ladder, plans_by_class
 from tools.model_catalog.registry_text import ROOT
 
@@ -152,6 +153,43 @@ def _carry_description(description: str | None, predecessor: str, name: str) -> 
     return description
 
 
+_FLAG_KEYS = (
+    "supports_vision",
+    "supports_pdf_input",
+    "supports_reasoning",
+    "thinking_always_on",
+    "supports_none_reasoning_effort",
+    "supports_minimal_reasoning_effort",
+    "supports_xhigh_reasoning_effort",
+    "supports_max_reasoning_effort",
+    "supports_web_search",
+    "deprecation_date",
+)
+
+
+def _max_output_tokens(
+    raw: dict[str, Any], pred_model: dict[str, Any] | None, notes: list[str]
+) -> int | None:
+    """The new model's own output limit from LiteLLM, else the predecessor's.
+
+    Some LiteLLM rows repeat the context window as `max_output_tokens` (xAI); a value
+    equal to `max_input_tokens` is treated as unknown rather than as an output limit.
+    """
+
+    source = int(raw.get("max_output_tokens") or 0) or None
+    inherited = int((pred_model or {}).get("max_output_tokens") or 0) or None
+    if source and source == int(raw.get("max_input_tokens") or 0):
+        if inherited:
+            notes.append(
+                f"LiteLLM's max_output_tokens ({source}) equals the context window; "
+                f"kept the predecessor's {inherited}. Check the provider's limit."
+            )
+        return inherited
+    if source and inherited and source != inherited:
+        notes.append(f"Output limit {source} from LiteLLM; the predecessor allows {inherited}.")
+    return source or inherited
+
+
 def _short(provider: str, external: str) -> str:
     prefix = next((src for src, ours in SOURCE_PROVIDERS.items() if ours == provider), provider)
     return external.removeprefix(f"{prefix}/")
@@ -274,6 +312,13 @@ def build_report(catalog: SourceCatalog, *, today: date | None = None) -> dict[s
             # Keep the predecessor's convention: OpenAI's registry limit is the whole
             # window (input + output) while LiteLLM's max_input_tokens is input only.
             context_limit += int(pred_model["context_limit"]) - int(pred_raw["max_input_tokens"])
+        flags = {key: raw[key] for key in _FLAG_KEYS if key in raw}
+        notes: list[str] = []
+        max_output_tokens = _max_output_tokens(raw, pred_model, notes)
+        attachments, attachment_notes = derive_attachments(
+            pred_model, (registry["providers"].get(provider) or {}).get("defaults") or {}, flags
+        )
+        notes += attachment_notes
         proposals.append(
             {
                 "id": f"{provider}:{name}",
@@ -302,28 +347,12 @@ def build_report(catalog: SourceCatalog, *, today: date | None = None) -> dict[s
                     _pct(_turn_cost(rates), _turn_cost(pred_rates)) if pred_rates else None
                 ),
                 "context_limit": context_limit,
-                "max_output_tokens": int(
-                    (pred_model or {}).get("max_output_tokens") or raw.get("max_output_tokens") or 0
-                )
-                or None,
+                "max_output_tokens": max_output_tokens,
                 "promo": None,
-                "flags": {
-                    key: raw[key]
-                    for key in (
-                        "supports_vision",
-                        "supports_pdf_input",
-                        "supports_reasoning",
-                        "thinking_always_on",
-                        "supports_none_reasoning_effort",
-                        "supports_minimal_reasoning_effort",
-                        "supports_xhigh_reasoning_effort",
-                        "supports_max_reasoning_effort",
-                        "supports_web_search",
-                        "deprecation_date",
-                    )
-                    if key in raw
-                },
+                "flags": flags,
+                "attachments": attachments,
                 "source_url": raw.get("source") or None,
+                **({"notes": notes} if notes else {}),
             }
         )
 
@@ -370,6 +399,7 @@ def build_report(catalog: SourceCatalog, *, today: date | None = None) -> dict[s
         "deprecations": deprecations,
         "credits_below_price": below_price,
         "errors": checks.errors,
+        "warnings": checks.warnings,
     }
     # Same findings, same fingerprint: the workflow keeps last week's issue (and any
     # ticks on it) instead of opening a duplicate.
@@ -409,7 +439,7 @@ def render_markdown(report: dict[str, Any]) -> str:
             "### New models",
             "",
             "Tick the models to add, edit the YAML block below if a field is wrong (for example",
-            "`replaces`, `description` or `promo`), then approve the waiting **Apply model updates**",
+            "`replaces`, `description`, `promo`, `attachments` or `max_output_tokens`), then approve the waiting **Apply model updates**",
             "job in Actions. Unticked models are reported again next week.",
             "",
         ]
@@ -420,6 +450,7 @@ def render_markdown(report: dict[str, Any]) -> str:
                 f"- [ ] `{item['id']}` replaces {replaces}; {change} per turn; credits "
                 f"{item['credits']} ({item['billing_class']}: {', '.join(item['plans'])})"
             )
+            lines += [f"  - Check: {note}" for note in item.get("notes") or []]
         lines += [
             "",
             PROPOSALS_START,

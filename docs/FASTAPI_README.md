@@ -1022,7 +1022,10 @@ For `gemini-3.6-flash`, Google's prices through December 31, 2026 establish
 the registry's exclusive UTC `pricing_review.effective_until` boundary
 `2027-01-01T00:00:00Z`. Approval and manual intervals cannot exceed that boundary;
 unbounded imports remain candidates even with automatic activation enabled.
-No future successor card or legacy price change is introduced. See
+No future successor card or legacy price change is introduced. The boundary
+limits only intervals that start before it; an open-ended regular-price successor
+may start at it (manual override) or after it (approved candidate), and a dated
+registry seed starting at the boundary takes over when the launch card ends. See
 [Google pricing](https://ai.google.dev/gemini-api/docs/pricing#gemini-3.6-flash).
 The backend CI and local pre-push gates include the rate-card regression suite.
 No HTTP route/request field changes. Keep database pricing disabled

@@ -392,3 +392,144 @@ def test_fingerprint_changes_only_with_the_findings(catalog, tmp_path):
     assert (
         build_report(fetch_catalog(str(path)), today=TODAY)["fingerprint"] != first["fingerprint"]
     )
+
+
+# --------------------------------------------------------------------------- successor fields
+
+
+def _successor(catalog, **changes):
+    proposal = dict(build_report(catalog, today=TODAY)["proposals"][0])
+    proposal.update(changes)
+    return proposal
+
+
+def test_vision_successor_keeps_the_predecessors_attachment_settings(catalog, config_copy):
+    """A DeepSeek Flash successor must not fall back to DeepSeek's no-attachment defaults."""
+
+    registry_path, *_ = config_copy
+    proposal = _successor(
+        catalog,
+        id="deepseek:deepseek-flash-2",
+        replaces="deepseek:deepseek-flash",
+        display_name="DeepSeek Flash 2",
+        flags={"supports_vision": True},
+        attachments=None,
+    )
+    apply_module.apply_proposals([proposal], None, today=TODAY)
+
+    new = model_index(yaml.safe_load(registry_path.read_text(encoding="utf-8")))[
+        ("deepseek", "deepseek-flash-2")
+    ]
+    assert new["supports_image_input"] is True
+    assert new["supported_attachment_mime_types"] == [
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "image/gif",
+    ]
+    assert new["max_attachment_bytes"] == 20971520
+    assert new["max_attachments_per_request"] == 5
+
+
+def test_successor_without_vision_drops_image_types_only():
+    pred = {
+        "supports_image_input": True,
+        "supported_attachment_mime_types": ["image/png", "application/pdf"],
+        "max_attachment_bytes": 1000,
+        "max_attachments_per_request": 3,
+    }
+    settings, notes = apply_module.derive_attachments(pred, {}, {"supports_vision": False})
+    assert settings == {
+        "supports_image_input": False,
+        "supported_attachment_mime_types": ["application/pdf"],
+        "max_attachment_bytes": 1000,
+        "max_attachments_per_request": 3,
+    }
+    assert notes == []
+
+
+def test_vision_flag_without_predecessor_support_is_a_review_note_not_a_guess():
+    defaults = {
+        "supports_image_input": False,
+        "supported_attachment_mime_types": [],
+        "max_attachment_bytes": None,
+        "max_attachments_per_request": 0,
+    }
+    settings, notes = apply_module.derive_attachments(None, defaults, {"supports_vision": True})
+    assert settings["supports_image_input"] is False
+    assert settings["max_attachments_per_request"] == 0
+    assert notes and "vision-capable" in notes[0]
+
+
+def test_inherited_default_attachments_are_not_written_to_the_entry(catalog, config_copy):
+    registry_path, *_ = config_copy
+    apply_module.apply_proposals(build_report(catalog, today=TODAY)["proposals"], None, today=TODAY)
+    new = model_index(yaml.safe_load(registry_path.read_text(encoding="utf-8")))[
+        ("openai", "gpt-7-luna")
+    ]
+    assert "supports_image_input" not in new
+    assert "supported_attachment_mime_types" not in new
+
+
+def _catalog_with(tmp_path, **rows):
+    path = tmp_path / "rows.json"
+    path.write_text(json.dumps(rows), encoding="utf-8")
+    return fetch_catalog(str(path))
+
+
+def test_new_models_own_output_limit_wins_over_the_predecessors(tmp_path):
+    catalog = _catalog_with(
+        tmp_path,
+        **{
+            "gpt-6-luna": _row("openai", "0.0000001", "0.0000005", max_input_tokens=922000),
+            "gpt-7-luna": _row(
+                "openai",
+                "0.00000008",
+                "0.0000004",
+                max_input_tokens=922000,
+                max_output_tokens=32768,
+            ),
+        },
+    )
+    proposal = build_report(catalog, today=TODAY)["proposals"][0]
+    assert proposal["max_output_tokens"] == 32768
+    assert any("32768" in note and "128000" in note for note in proposal["notes"])
+    assert "Check: Output limit 32768" in render_markdown(build_report(catalog, today=TODAY))
+
+
+def test_output_limit_equal_to_the_context_window_is_not_trusted(tmp_path):
+    catalog = _catalog_with(
+        tmp_path,
+        **{
+            "xai/grok-4.7": _row("xai", "0.000002", "0.000006", max_input_tokens=500000),
+            "xai/grok-4.9": _row(
+                "xai",
+                "0.000002",
+                "0.000006",
+                max_input_tokens=500000,
+                max_output_tokens=500000,
+            ),
+        },
+    )
+    proposal = build_report(catalog, today=TODAY)["proposals"][0]
+    assert proposal["id"] == "grok:grok-4.9"
+    assert proposal["max_output_tokens"] == 128000
+    assert any("equals the context window" in note for note in proposal["notes"])
+
+
+def test_a_new_warning_changes_the_fingerprint(catalog, monkeypatch):
+    from tools.model_catalog import report as report_module
+    from tools.model_catalog.checks import CheckResult
+
+    before = build_report(catalog, today=TODAY)["fingerprint"]
+    real = report_module.run_checks
+
+    def with_warning(**kwargs):
+        result = real(**kwargs)
+        return CheckResult(
+            errors=result.errors,
+            warnings=[*result.warnings, "gemini:gemini-4-argon: launch price ends soon"],
+        )
+
+    monkeypatch.setattr(report_module, "run_checks", with_warning)
+    assert build_report(catalog, today=TODAY)["fingerprint"] != before

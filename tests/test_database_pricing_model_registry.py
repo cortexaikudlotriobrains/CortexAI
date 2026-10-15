@@ -438,6 +438,48 @@ def test_card_expiry_boundaries_are_unchanged(production_rate_cards):
         CostCalculator("openai", "gpt-5.6-sol").calculate_cost(10, 10, request_at=SOL_UNTIL)
 
 
+def test_dated_registry_successor_follows_an_approved_launch_card(production_rate_cards):
+    """Gemini 4 Argon: approving LiteLLM's launch card must not leave December 1 unpriced."""
+
+    db, repo = production_rate_cards
+    boundary = utc("2026-12-01T00:00:00Z")
+    catalog = LiteLLMPricingSource.parse(
+        json.dumps(
+            {
+                "gemini/gemini-4-argon": {
+                    "litellm_provider": "gemini",
+                    "input_cost_per_token": "0.000002",
+                    "output_cost_per_token": "0.00001",
+                    "cache_read_input_token_cost": "0.0000001",
+                }
+            }
+        ).encode()
+    )
+    entry = catalog.entries["gemini/gemini-4-argon"]
+    repo.add(
+        provider="gemini",
+        model="gemini-4-argon",
+        source="LITELLM",
+        rates=entry["rates"],
+        at=APPROVED_AT,
+        until=boundary,
+        reference=catalog.reference,
+        version=catalog.version,
+        verified_at=APPROVED_AT,
+    )
+    db.commit()
+    _clear_registry_caches()
+
+    launch = ModelPricing.get_pricing_snapshot(
+        "gemini", "gemini-4-argon", at=boundary - timedelta(microseconds=1)
+    )
+    regular = ModelPricing.get_pricing_snapshot("gemini", "gemini-4-argon", at=boundary)
+    assert launch["pricing_source"] == "LITELLM" and launch["input"] == "2"
+    assert regular is not None
+    assert regular["pricing_source"] == "LEGACY_CORTEX"
+    assert regular["input"] == "4"
+
+
 def test_registry_cannot_build_once_a_card_ends_without_successor(
     production_rate_cards, monkeypatch
 ):

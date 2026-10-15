@@ -178,7 +178,17 @@ must supply or retain a verified end no later than this boundary. Approval
 dry-runs enforce the same ceiling, including dates already stored on older
 candidates. The metadata does not populate a candidate's missing source end,
 change legacy rates, or create a future successor card. Prices after the boundary
-require a separately reviewed card with verified rates and validity evidence.
+require a separately reviewed card with verified rates and validity evidence. The
+boundary limits only intervals that start before it, so that card may be
+open-ended: a manual override whose `effective_from` is the boundary (prepare it
+before the promotion ends), or a LiteLLM candidate approved after the boundary.
+
+Models added with a promotion by `scripts/models.py` (Gemini 3.8 Flash, Gemini 4
+Argon) also carry a dated regular-price registry rule starting at the boundary.
+Card selection accepts a legacy seed that starts only once every started verified
+card has ended, so that seed takes over when an approved LiteLLM launch card ends
+and the registry keeps building. A legacy seed that predates a verified card (the
+Gemini 3.6 Flash case) is still never revived.
 
 Such proposals remain candidates even with automatic activation enabled.
 `--inspect` and observations expose the review metadata. Approval also checks
