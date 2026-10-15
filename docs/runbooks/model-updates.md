@@ -148,9 +148,9 @@ Production prices from database rate cards, and startup fails if an enabled mode
 has no approved card. With the new code on the host and **before** restarting:
 
 ```bash
-sudo -u ec2-user ./venv/bin/python scripts/sync_model_pricing.py --seed-legacy --dry-run
-sudo -u ec2-user ./venv/bin/python scripts/sync_model_pricing.py --seed-legacy
-sudo -u ec2-user ./venv/bin/python scripts/preflight_database_pricing.py --min-selectable <selectable count>
+sudo /usr/bin/python3.11 scripts/sync_model_pricing.py --seed-legacy --dry-run
+sudo /usr/bin/python3.11 scripts/sync_model_pricing.py --seed-legacy
+sudo /usr/bin/python3.11 scripts/preflight_database_pricing.py --min-selectable <selectable count>
 ```
 
 Restart only after `RESULT: PASS`, then check the picker lists every provider,
