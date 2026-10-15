@@ -22,6 +22,7 @@ from pricing.identity import PROVIDERS as SOURCE_PROVIDERS
 from pricing.identity import ModelIdentityMap
 from pricing.sources import LITELLM_URL, MAX_CATALOG_BYTES, LiteLLMPricingSource
 from tools.model_catalog.checks import (
+    CLASS_RANK,
     is_selectable,
     lifecycle_status,
     load_registry,
@@ -314,6 +315,18 @@ def build_report(catalog: SourceCatalog, *, today: date | None = None) -> dict[s
             context_limit += int(pred_model["context_limit"]) - int(pred_raw["max_input_tokens"])
         flags = {key: raw[key] for key in _FLAG_KEYS if key in raw}
         notes: list[str] = []
+        replaces = f"{provider}:{predecessor}" if predecessor else None
+        if pred_model and CLASS_RANK.get(step.billing_class, 9) > CLASS_RANK.get(
+            str(pred_model.get("billing_class")), -1
+        ):
+            # A replacement must never move users to a dearer plan class
+            # (`scripts/models.py check` rejects it), so propose it alongside.
+            notes.append(
+                f"Added alongside {predecessor}, not replacing it: {step.billing_class} costs "
+                f"more than {pred_model.get('billing_class')}, and a replacement may only move "
+                "users to the same or a cheaper class. Write a description for it."
+            )
+            replaces = None
         max_output_tokens = _max_output_tokens(raw, pred_model, notes)
         attachments, attachment_notes = derive_attachments(
             pred_model, (registry["providers"].get(provider) or {}).get("defaults") or {}, flags
@@ -323,10 +336,12 @@ def build_report(catalog: SourceCatalog, *, today: date | None = None) -> dict[s
             {
                 "id": f"{provider}:{name}",
                 "litellm_id": external,
-                "replaces": f"{provider}:{predecessor}" if predecessor else None,
+                "replaces": replaces,
                 "display_name": display_name(provider, name),
                 "description": _carry_description(
-                    (pred_model or {}).get("description"), predecessor or "", name
+                    (pred_model or {}).get("description") if replaces else None,
+                    predecessor or "",
+                    name,
                 )
                 or f"{display_name(provider, name)} model.",
                 "tier": (pred_model or {}).get("tier") or "T2",
@@ -445,7 +460,11 @@ def render_markdown(report: dict[str, Any]) -> str:
         ]
         for item in proposals:
             change = item["change_per_turn"] or "new family"
-            replaces = item["replaces"] or "nothing (new family)"
+            replaces = item["replaces"] or (
+                "nothing (added alongside its family)"
+                if item["change_per_turn"]
+                else "nothing (new family)"
+            )
             lines.append(
                 f"- [ ] `{item['id']}` replaces {replaces}; {change} per turn; credits "
                 f"{item['credits']} ({item['billing_class']}: {', '.join(item['plans'])})"

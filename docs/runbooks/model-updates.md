@@ -14,10 +14,12 @@ The short version:
    YAML if needed.
 3. Ticking starts **Apply model updates**, which waits for approval in the
    `model-updates` environment. After approval it edits the registry, providers
-   and React defaults, runs the model and pricing tests and opens a pull request
-   to `develop`.
-4. A person finishes the pull request (provider code, tests that pin model
-   lists, docs), merges it, and deploys with the database-pricing steps below.
+   and React defaults and runs the pricing checks that must pass: re-seeding
+   over `develop`'s price cards (what the production deploy does), the rate-card
+   and the credit tests. If they pass it opens a pull request to `develop`; if
+   anything fails it opens none and comments on the issue with the run link.
+4. A person finishes the pull request (provider code, tests that list the
+   current models, docs), merges it, and deploys with Production Deploy.
 
 Locally, `python scripts/models.py` does the same steps.
 
@@ -101,7 +103,7 @@ Check and edit in the YAML block before ticking:
 
 | Field | What to check |
 |---|---|
-| `replaces` | The model it takes over in the picker, by position in the family (for example GPT-6 Luna replaces GPT-5.6 Luna). `null` adds without hiding. Add `also_replaces: [provider:model, ...]` to hide more. |
+| `replaces` | The model it takes over in the picker, by position in the family (for example GPT-6 Luna replaces GPT-5.6 Luna). `null` adds without hiding. Add `also_replaces: [provider:model, ...]` to hide more. A model may only replace one in the same or a dearer class; the report proposes a dearer newcomer alongside its family instead (GPT-5.5 next to GPT-5.4), and `check` rejects the opposite. |
 | `display_name`, `description` | Generated from the predecessor; rewrite when the model is positioned differently. |
 | `tier` | Smart-routing tier `T0`-`T3`. Independent of credits and plans. |
 | `credits` | Must be a ladder step. Leave it unless you are deliberately pricing above the covering step. |
@@ -135,9 +137,12 @@ workflow with that issue number.
 ## Finishing the pull request
 
 The bot's pull request contains only data: registry, providers, the ID lock and
-the generated React defaults. Before merging, a person:
+the generated React defaults. Its body shows the blocking pricing checks (with the
+re-seed summary) and the non-blocking tests that list the current models, which
+are expected to fail when the selectable set or defaults change. Before merging, a
+person:
 
-1. Fixes tests that pin the selectable set, defaults or picks (the PR body shows
+1. Fixes the tests that list the current models (the PR body shows the
    failures), for example `tests/test_database_pricing_model_registry.py`,
    `tests/test_model_registry_capabilities.py`,
    `tests/test_routing_selection_examples.py`, and adds the model to the golden
@@ -152,7 +157,11 @@ the generated React defaults. Before merging, a person:
 ## Deploying (database pricing)
 
 Production prices from database rate cards, and startup fails if an enabled model
-has no approved card. With the new code on the host and **before** restarting:
+has no approved card. Deploy with the **Production Deploy** workflow: the EC2
+controller seeds the new cards (dry run, then the write) and runs the preflight
+before the API stops, and stops the deploy if either fails. Check its seed
+summary and `RESULT: PASS`. Never seed by hand alongside a deploy. The
+controller runs the equivalent of these commands, kept here for reference:
 
 ```bash
 sudo /usr/bin/python3.11 scripts/sync_model_pricing.py --seed-legacy --dry-run
@@ -160,8 +169,9 @@ sudo /usr/bin/python3.11 scripts/sync_model_pricing.py --seed-legacy
 sudo /usr/bin/python3.11 scripts/preflight_database_pricing.py --min-selectable <selectable count>
 ```
 
-Restart only after `RESULT: PASS`, then check the picker lists every provider,
-History loads, and run one Ask and one Compare turn on each new model.
+After the deploy, check the picker lists every provider, History loads, existing
+threads on hidden models still answer, and run one Ask and one Compare turn on
+each new model.
 Production `.env` `DEFAULT_*_MODEL` values override `config/providers.yaml`;
 change any that point at a hidden model.
 

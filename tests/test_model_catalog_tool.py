@@ -533,3 +533,23 @@ def test_a_new_warning_changes_the_fingerprint(catalog, monkeypatch):
 
     monkeypatch.setattr(report_module, "run_checks", with_warning)
     assert build_report(catalog, today=TODAY)["fingerprint"] != before
+
+
+def test_dearer_successor_is_added_alongside_not_as_a_replacement(tmp_path):
+    """GPT-5.5 (premium) must not be proposed as GPT-5.4's (advanced) replacement."""
+
+    catalog = _catalog_with(
+        tmp_path,
+        **{
+            "gpt-6-luna": _row("openai", "0.0000001", "0.0000005", max_input_tokens=922000),
+            "gpt-7-luna": _row("openai", "0.000003", "0.000014", max_input_tokens=922000),
+        },
+    )
+    report = build_report(catalog, today=TODAY)
+    proposal = report["proposals"][0]
+    assert proposal["id"] == "openai:gpt-7-luna"
+    assert proposal["billing_class"] == "advanced"
+    assert proposal["replaces"] is None
+    assert proposal["description"] == "GPT-7 Luna model."
+    assert any("Added alongside gpt-6-luna" in note for note in proposal["notes"])
+    assert "replaces nothing (added alongside its family)" in render_markdown(report)

@@ -3,8 +3,11 @@ name: Model catalog
 # Weekly: compare LiteLLM's price catalog with config/model_registry.yaml and open a
 # report issue (label `model-catalog`). A reviewer ticks the models to add in that
 # issue; each edit starts the "Apply model updates" job, which waits for approval
-# in the protected `model-updates` environment, then opens a pull request against
-# develop. See docs/runbooks/model-updates.md.
+# in the protected `model-updates` environment. It applies the ticked models, runs
+# the pricing checks that must pass (re-seeding over existing price cards, rate
+# cards, credits), then opens a pull request against develop. If a blocking check
+# fails, no pull request is opened and the issue gets a comment instead.
+# See docs/runbooks/model-updates.md.
 
 on:
   schedule:
@@ -147,6 +150,9 @@ jobs:
           fi
           jq -r .body issue.json > issue.md
 
+      - name: Keep develop's registry for the reseed check
+        run: cp config/model_registry.yaml "$RUNNER_TEMP/base_registry.yaml"
+
       - name: Apply the ticked models
         id: apply
         run: |
@@ -158,7 +164,24 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Run model, credit and pricing tests
+      # Blocking: the production deploy re-seeds prices whenever the registry changes
+      # and stops if a retained card would be rewritten. Nothing here pins the current
+      # model list, so a failure means the update itself is wrong.
+      - name: Pricing checks that must pass
+        id: pricing
+        if: steps.apply.outputs.changed == 'true'
+        env:
+          MODEL_CATALOG_BASE_REGISTRY: ${{ runner.temp }}/base_registry.yaml
+        run: |
+          test -s "$MODEL_CATALOG_BASE_REGISTRY"
+          python -m pytest -q -s tests/test_model_catalog_reseed.py 2>&1 | tee pricing.log
+          python -m pytest -q \
+            tests/test_model_rate_cards.py \
+            tests/test_credit_calculator.py 2>&1 | tee -a pricing.log
+
+      # Not blocking: these tests pin today's selectable models, defaults and picks,
+      # so a model update is expected to need edits a person makes in the PR.
+      - name: Tests that list the current models
         id: tests
         if: steps.apply.outputs.changed == 'true'
         continue-on-error: true
@@ -168,8 +191,6 @@ jobs:
             tests/test_new_model_credits.py \
             tests/test_registry_pricing_alignment.py \
             tests/test_model_registry_capabilities.py \
-            tests/test_credit_calculator.py \
-            tests/test_model_rate_cards.py \
             tests/test_database_pricing_model_registry.py \
             tests/test_fastapi_contract_and_guardrails.py 2>&1 | tee pytest.log
 
@@ -184,7 +205,7 @@ jobs:
           branch="model-catalog/$(date -u +%Y%m%d)-issue-${ISSUE}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git switch -c "$branch"
+          git switch -C "$branch"
           git add config frontend-react/src/config/generated
           git commit -m "Model catalog: apply report #${ISSUE}"
           git push --force-with-lease origin "$branch"
@@ -196,17 +217,28 @@ jobs:
             cat apply.log
             echo '```'
             echo
-            echo "### Model, credit and pricing tests: ${TESTS}"
+            echo "### Pricing checks (blocking): passed"
+            echo "Re-seeding over develop's price cards, rate cards and credits."
             echo '```'
-            tail -n 40 pytest.log
+            grep -E "reseed summary|passed|failed" pricing.log | tail -n 5
+            echo '```'
+            echo
+            echo "### Tests that list the current models: ${TESTS}"
+            echo "Failures here are expected when the selectable set or defaults change."
+            echo '```'
+            if grep -q "short test summary info" pytest.log; then
+              sed -n '/short test summary info/,$p' pytest.log | tail -n 40
+            else
+              tail -n 3 pytest.log
+            fi
             echo '```'
             echo
             echo "### Before merging (a person)"
-            echo "- [ ] Update tests that pin the selectable set or defaults (failures above)."
+            echo "- [ ] Update the tests that list the current models (failures above)."
             echo "- [ ] Provider client code the new model needs (API surface, sampling, thinking)."
             echo "- [ ] Docs: README model lists, docs/runbooks/model-pricing.md preflight values."
-            echo "- [ ] Database pricing: run \`scripts/sync_model_pricing.py --seed-legacy\` and the"
-            echo "      preflight with this code **before** restarting the API, or startup fails."
+            echo "- [ ] Deploy with Production Deploy. The server seeds prices and runs the pricing"
+            echo "      preflight before the API stops; check the seed summary and RESULT: PASS."
             echo "- [ ] Live check each new model in Ask and Compare."
           } > pr.md
           url="$(gh pr list --head "$branch" --state open --json url --jq '.[0].url // empty')"
@@ -218,3 +250,20 @@ jobs:
           fi
           GH_TOKEN="$ISSUE_TOKEN" gh issue comment "$ISSUE" --body "Opened ${url}."
           echo "Opened ${url}." | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Report a stopped apply on the issue
+        if: failure() && steps.apply.outcome != 'skipped'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APPLY: ${{ steps.apply.outcome }}
+          PRICING: ${{ steps.pricing.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ "$APPLY" = "failure" ]; then
+            reason="applying the ticked models failed (a proposal edit was rejected or \`scripts/models.py check\` found an error)"
+          elif [ "$PRICING" = "failure" ]; then
+            reason="the blocking pricing checks failed (re-seeding over existing price cards, rate cards or credits)"
+          else
+            reason="a step failed before the pull request was opened"
+          fi
+          gh issue comment "$ISSUE" --body "Apply model updates stopped: ${reason}. No pull request was opened. Details: ${RUN_URL}" || true

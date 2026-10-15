@@ -131,9 +131,18 @@ jobs:
             -q
 
       - name: Model catalog rules (lifecycle, credit ladder, defaults, ID lock)
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
           python scripts/models.py check
+          # On pull requests, replay the production re-seed over the base branch's
+          # price cards (tests/test_model_catalog_reseed.py); elsewhere it is skipped.
+          if [ -n "$BASE_REF" ] && git fetch --depth=1 origin "$BASE_REF"; then
+            git show FETCH_HEAD:config/model_registry.yaml > "$RUNNER_TEMP/base_registry.yaml"
+            export MODEL_CATALOG_BASE_REGISTRY="$RUNNER_TEMP/base_registry.yaml"
+          fi
           python -m pytest \
+            tests/test_model_catalog_reseed.py \
             tests/test_model_catalog_tool.py \
             tests/test_new_model_credits.py \
             tests/test_registry_pricing_alignment.py \

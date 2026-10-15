@@ -85,6 +85,7 @@ BACKEND_TESTS = (
     "tests/test_model_rate_cards.py",
     "tests/test_database_pricing_model_registry.py",
     "tests/test_model_catalog_tool.py",
+    "tests/test_model_catalog_reseed.py",
     "tests/test_new_model_credits.py",
     "tests/test_registry_pricing_alignment.py",
     "tests/test_model_registry_capabilities.py",
