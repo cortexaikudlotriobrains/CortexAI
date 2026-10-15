@@ -104,6 +104,7 @@ Check and edit in the YAML block before ticking:
 | Field | What to check |
 |---|---|
 | `replaces` | The model it takes over in the picker, by position in the family (for example GPT-6 Luna replaces GPT-5.6 Luna). `null` adds without hiding. Add `also_replaces: [provider:model, ...]` to hide more. A model may only replace one in the same or a dearer class; the report proposes a dearer newcomer alongside its family instead (GPT-5.5 next to GPT-5.4), and `check` rejects the opposite. |
+| `based_on` | The same-provider model whose capabilities it inherits (reasoning, tags, attachment settings) and next to which it is inserted, independent of hiding. The report sets it to the newest family member even when `replaces` is `null`; without it, `replaces` is used. |
 | `display_name`, `description` | Generated from the predecessor; rewrite when the model is positioned differently. |
 | `tier` | Smart-routing tier `T0`-`T3`. Independent of credits and plans. |
 | `credits` | Must be a ladder step. Leave it unless you are deliberately pricing above the covering step. |
@@ -112,7 +113,7 @@ Check and edit in the YAML block before ticking:
 | `attachments` | `supports_image_input`, `supported_attachment_mime_types`, `max_attachment_bytes`, `max_attachments_per_request`. Taken from the predecessor (or the provider defaults it uses); LiteLLM flags only remove types the model cannot read. Limits and new types are never invented: a vision-capable model whose predecessor took no images gets a note instead. Fields equal to the provider defaults are not written. |
 | `notes` | Points to check, also shown under the checkbox. Ignored by apply. |
 | `promo` | For a launch price: `{until: "<exclusive UTC end>", regular: {input, output, cached_input}, note: "..."}`. |
-| `reasoning` | Optional explicit `reasoning_modes`, `default_reasoning_mode`, `reasoning_efforts`, `reasoning_disable_supported`, `reasoning_counts_against_output`. Without it the predecessor's settings are adjusted with LiteLLM's flags (for example `thinking_always_on` removes `none`). Do not carry provider modes a source does not confirm. |
+| `reasoning` | `reasoning_modes`, `default_reasoning_mode`, `reasoning_efforts`, `reasoning_disable_supported`, `reasoning_counts_against_output`. The report fills it from the `based_on` model adjusted with LiteLLM's flags (for example `thinking_always_on` removes `none`), so you can see and edit the controls the model gets; without reasoning modes it gets no reasoning controls and Smart routing skips it for reasoning requests. Do not carry provider modes a source does not confirm. |
 | `aliases` | Moved from the hidden model when listed (for example `grok-4-latest`). |
 | `effective_from` | Omit: the first rule applies from the start, like most registry rules. |
 

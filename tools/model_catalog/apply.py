@@ -85,6 +85,7 @@ _PROPOSAL_KEYS = {
     "id",
     "litellm_id",
     "replaces",
+    "based_on",
     "also_replaces",
     "display_name",
     "description",
@@ -122,7 +123,12 @@ def validate_proposal(proposal: dict[str, Any]) -> None:
     unknown = set(proposal) - _PROPOSAL_KEYS
     if unknown:
         raise ValueError(f"{proposal.get('id')}: unknown proposal fields {sorted(unknown)}")
-    ids = [proposal.get("id"), proposal.get("replaces"), *(proposal.get("also_replaces") or [])]
+    ids = [
+        proposal.get("id"),
+        proposal.get("replaces"),
+        proposal.get("based_on"),
+        *(proposal.get("also_replaces") or []),
+    ]
     for key in [value for value in ids if value]:
         if not _ID.match(str(key)):
             raise ValueError(f"Invalid model key {key!r}")
@@ -209,7 +215,9 @@ def _rule(
     return rule
 
 
-def _derive_reasoning(pred: dict[str, Any] | None, flags: dict[str, Any]) -> dict[str, Any]:
+def derive_reasoning(pred: dict[str, Any] | None, flags: dict[str, Any]) -> dict[str, Any]:
+    """The predecessor's reasoning settings, adjusted by LiteLLM's capability flags."""
+
     reasoning = {field: (pred or {}).get(field) for field in _REASONING_FIELDS}
     modes = list(reasoning.get("reasoning_modes") or [])
     efforts = list(reasoning.get("reasoning_efforts") or [])
@@ -295,7 +303,7 @@ def build_entry(
                 verified=verified,
             )
         )
-    reasoning = proposal.get("reasoning") or _derive_reasoning(pred, proposal.get("flags") or {})
+    reasoning = proposal.get("reasoning") or derive_reasoning(pred, proposal.get("flags") or {})
     release_status = "preview" if "preview" in name else "generally_available"
     inherited_only = {"preview", "retired", "compatibility"} - (
         {"preview"} if release_status == "preview" else set()
@@ -379,11 +387,19 @@ def apply_proposals(
         if (provider, name) in index:
             raise ValueError(f"{proposal['id']} is already in the registry")
         replaces = proposal.get("replaces")
-        pred = index.get(_split(replaces)) if replaces else None
-        if replaces and pred is None:
+        if replaces and index.get(_split(replaces)) is None:
             raise ValueError(f"{proposal['id']}: replaced model {replaces} is not in the registry")
+        # Capabilities (reasoning, tags, attachments) come from `based_on`, which is
+        # independent of hiding: a dearer newcomer is added alongside its family but
+        # still inherits from it. Without `based_on`, the replaced model is the source.
+        based_on = proposal.get("based_on") or replaces
+        pred = index.get(_split(based_on)) if based_on else None
+        if based_on and pred is None:
+            raise ValueError(f"{proposal['id']}: based_on model {based_on} is not in the registry")
+        if based_on and _split(based_on)[0] != provider:
+            raise ValueError(f"{proposal['id']}: based_on must be a {provider} model")
         entry = build_entry(proposal, pred, today, defaults)
-        before = _split(replaces)[1] if replaces and _split(replaces)[0] == provider else None
+        before = _split(based_on)[1] if based_on else None
         registry_text = insert_entry(registry_text, provider, render_entry(entry), before=before)
         log.append(
             f"Added {proposal['id']} ({entry['billing_class']}, credits {proposal['credits']})"

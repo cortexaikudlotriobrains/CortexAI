@@ -29,7 +29,7 @@ from tools.model_catalog.checks import (
     model_index,
     run_checks,
 )
-from tools.model_catalog.apply import derive_attachments
+from tools.model_catalog.apply import derive_attachments, derive_reasoning
 from tools.model_catalog.ladder import load_ladder, plans_by_class
 from tools.model_catalog.registry_text import ROOT
 
@@ -337,6 +337,7 @@ def build_report(catalog: SourceCatalog, *, today: date | None = None) -> dict[s
                 "id": f"{provider}:{name}",
                 "litellm_id": external,
                 "replaces": replaces,
+                "based_on": f"{provider}:{predecessor}" if predecessor else None,
                 "display_name": display_name(provider, name),
                 "description": _carry_description(
                     (pred_model or {}).get("description") if replaces else None,
@@ -365,6 +366,13 @@ def build_report(catalog: SourceCatalog, *, today: date | None = None) -> dict[s
                 "max_output_tokens": max_output_tokens,
                 "promo": None,
                 "flags": flags,
+                # Explicit so a reviewer sees (and can edit) the controls the model gets.
+                "reasoning": {
+                    key: value
+                    for key, value in derive_reasoning(pred_model, flags).items()
+                    if value is not None
+                }
+                or None,
                 "attachments": attachments,
                 "source_url": raw.get("source") or None,
                 **({"notes": notes} if notes else {}),
@@ -461,8 +469,8 @@ def render_markdown(report: dict[str, Any]) -> str:
         for item in proposals:
             change = item["change_per_turn"] or "new family"
             replaces = item["replaces"] or (
-                "nothing (added alongside its family)"
-                if item["change_per_turn"]
+                f"nothing (added alongside {item['based_on']})"
+                if item.get("based_on")
                 else "nothing (new family)"
             )
             lines.append(

@@ -27,6 +27,9 @@ pricing_db = _pricing_db
 
 REGISTRY = Path(__file__).resolve().parents[1] / "config" / "model_registry.yaml"
 BASE_REGISTRY = os.environ.get("MODEL_CATALOG_BASE_REGISTRY", "").strip()
+# Set where the replay is a gate (CI on pull requests, the model-catalog apply job):
+# a missing base registry then fails instead of silently skipping the replay.
+REQUIRE_REPLAY = os.environ.get("MODEL_CATALOG_REQUIRE_REPLAY", "").strip() == "1"
 
 
 def _reseed(db, monkeypatch, base: Path) -> dict[str, dict[str, int]]:
@@ -40,13 +43,15 @@ def _reseed(db, monkeypatch, base: Path) -> dict[str, dict[str, int]]:
     return {"seeded": seeded, "dry_run": dry_run, "written": written, "repeat": repeat}
 
 
-@pytest.mark.skipif(
-    not BASE_REGISTRY,
-    reason="MODEL_CATALOG_BASE_REGISTRY names the registry before the change (set by the workflow)",
-)
 def test_current_registry_reseeds_over_the_base_registry(pricing_db, monkeypatch):
+    if not BASE_REGISTRY:
+        if REQUIRE_REPLAY:
+            pytest.fail("MODEL_CATALOG_REQUIRE_REPLAY=1 but MODEL_CATALOG_BASE_REGISTRY is not set")
+        pytest.skip("MODEL_CATALOG_BASE_REGISTRY names the registry before the change")
+    base = Path(BASE_REGISTRY)
+    assert base.is_file() and base.stat().st_size > 0, f"base registry {base} is missing or empty"
     db, _ = pricing_db
-    result = _reseed(db, monkeypatch, Path(BASE_REGISTRY))
+    result = _reseed(db, monkeypatch, base)
     print(f"reseed summary: {result}")
     assert result["written"] == result["dry_run"]
     assert result["repeat"]["added"] == 0

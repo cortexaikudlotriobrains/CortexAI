@@ -411,6 +411,8 @@ def test_vision_successor_keeps_the_predecessors_attachment_settings(catalog, co
         catalog,
         id="deepseek:deepseek-flash-2",
         replaces="deepseek:deepseek-flash",
+        based_on="deepseek:deepseek-flash",
+        reasoning=None,
         display_name="DeepSeek Flash 2",
         flags={"supports_vision": True},
         attachments=None,
@@ -552,4 +554,68 @@ def test_dearer_successor_is_added_alongside_not_as_a_replacement(tmp_path):
     assert proposal["replaces"] is None
     assert proposal["description"] == "GPT-7 Luna model."
     assert any("Added alongside gpt-6-luna" in note for note in proposal["notes"])
-    assert "replaces nothing (added alongside its family)" in render_markdown(report)
+    assert proposal["based_on"] == "openai:gpt-6-luna"
+    assert "replaces nothing (added alongside openai:gpt-6-luna)" in render_markdown(report)
+
+
+def _load_applied_registry(registry_path, monkeypatch):
+    """Build the runtime ModelRegistry from an edited registry copy (legacy pricing)."""
+
+    from config import pricing as config_pricing
+    from orchestrator.model_registry import ModelRegistry
+
+    monkeypatch.setenv("MODEL_PRICING_MODE", "legacy")
+    monkeypatch.setattr(config_pricing, "_DEFAULT_CATALOG_PATH", registry_path)
+    config_pricing._load_catalog.cache_clear()
+    try:
+        return ModelRegistry.from_yaml(str(registry_path))
+    finally:
+        config_pricing._load_catalog.cache_clear()
+
+
+@pytest.mark.parametrize("price", [("0.00000008", "0.0000004"), ("0.000003", "0.000014")])
+def test_report_apply_load_keeps_reasoning_for_replacements_and_additions(
+    tmp_path, config_copy, monkeypatch, price
+):
+    """Full path for a cheaper replacement and for a dearer model added alongside."""
+
+    from orchestrator.reasoning_capabilities import normalized_reasoning_levels
+    from orchestrator.routing_types import RoutingConstraints, Tier
+
+    registry_path, *_ = config_copy
+    catalog = _catalog_with(
+        tmp_path,
+        **{
+            "gpt-6-luna": _row("openai", "0.0000001", "0.0000005", max_input_tokens=922000),
+            "gpt-7-luna": _row(
+                "openai",
+                *price,
+                max_input_tokens=922000,
+                supports_reasoning=True,
+                supports_none_reasoning_effort=True,
+                supports_max_reasoning_effort=True,
+            ),
+        },
+    )
+    proposal = build_report(catalog, today=TODAY)["proposals"][0]
+    assert proposal["based_on"] == "openai:gpt-6-luna"
+    assert proposal["reasoning"]["reasoning_modes"]
+
+    apply_module.apply_proposals([proposal], None, today=TODAY)
+    registry = _load_applied_registry(registry_path, monkeypatch)
+
+    new = registry.find_model("openai", "gpt-7-luna")
+    base = registry.find_model("openai", "gpt-6-luna")
+    assert new is not None and new.selectable is True
+    assert new.reasoning_modes == base.reasoning_modes
+    assert normalized_reasoning_levels(new) == normalized_reasoning_levels(base)
+    assert normalized_reasoning_levels(new)
+    reasoning_max = RoutingConstraints(reasoning_mode="on", reasoning_effort="max")
+    routable = {
+        candidate.model_name
+        for tier in Tier
+        for candidate in registry.get_candidates(tier, reasoning_max)
+    }
+    assert "gpt-7-luna" in routable
+    # Added alongside (dearer) keeps the family model selectable; a replacement hides it.
+    assert base.selectable is (proposal["replaces"] is None)

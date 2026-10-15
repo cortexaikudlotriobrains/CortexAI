@@ -1373,6 +1373,7 @@ It runs:
   - frontend artifact build
   - API image build metadata export
   - pinned Gitleaks CLI directory scan of the checked-out tree
+  - model catalog rules: `scripts/models.py check` and, on pull requests, a replay of the production price re-seed over the base branch's registry (`tests/test_model_catalog_reseed.py`); a base branch that cannot be fetched fails the step instead of skipping the replay
 
 Install the repository's [local Git gates](.codex/ci-commit-gate.md) once per
 clone so checks run automatically:
