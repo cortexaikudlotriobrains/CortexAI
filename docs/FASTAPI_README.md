@@ -1003,6 +1003,13 @@ Last updated: 2026-07-29
 
 ## Provider rate-card runtime
 
+Legacy service seeding accepts older web-search and Managed Agent runtime cards
+whose only component difference is extra zero cache-token fields. The stored
+fingerprint must verify, and the original ID, fingerprint and components remain
+unchanged. Actual price changes still stop seeding and require an audited new
+version; missing cache rates on model cards remain unknown. See the
+[pricing runbook](runbooks/model-pricing.md) for deployment recovery.
+
 Imported/manual cards preserve missing versus explicitly zero cache rates. A
 used dimension without a valid rate raises `PRICING_UNKNOWN`; long-context
 snapshots never inherit optional base cache rates. GPT-5.6 and later OpenAI cache

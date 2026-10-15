@@ -898,6 +898,9 @@ registry, and the catalog reports a rate missing from an approved card as `null`
 operator/scheduled command. Manual overrides, effective-dated history,
 suspicious-change review and exact Decimal calculation evidence are retained.
 Model enablement/lifecycle and subscription credit policy remain separate.
+Repeat legacy seeding preserves older service cards with unused zero cache fields;
+actual price changes still require an audited new version. Model cards continue
+to distinguish a missing cache rate from an explicit zero.
 See [architecture](docs/MODEL_PRICING_ARCHITECTURE.md) and
 [pricing operations](docs/runbooks/model-pricing.md) for configuration,
 approval/dry-run commands, failure behavior and limitations.

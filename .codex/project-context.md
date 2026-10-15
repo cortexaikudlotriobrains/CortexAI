@@ -19,6 +19,8 @@ npm run --prefix frontend-react build
 
 ## Core Invariants
 
+- Legacy service seed compatibility is limited to `LEGACY_CORTEX` web-search and managed-runtime cards with extra unused zero cache-token fields and a valid retained fingerprint. Preserve their IDs, components and fingerprints; only declared interval closure is allowed. Other component differences still require an audited new rate version. Never generalize this exception to missing cache prices on model cards.
+
 - Cortex grant access is operator-only through `scripts/manage_subscription_grant.py` and `server/billing/grant_service.py`; no grant HTTP route. Preserve guarded local override > valid enabled Stripe paid state > valid Cortex grant > Free. `BILLING_ENABLED` controls Stripe availability only. Grants use monthly anchored periods with `subscription_grant_id`, immutable usage history, account locks and one open grant per account. Deploy `20260905_add_subscription_grants.sql` with drained API/workers; the changed partial usage-period index requires the matching application build. See `docs/runbooks/subscription-grants.md`.
 
 - `DATABASE_URL` is required for startup and should point to PostgreSQL.
