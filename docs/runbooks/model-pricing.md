@@ -107,7 +107,7 @@ against the API unit's `ExecStart`, for example `Production runs through run_ser
 cd /home/ec2-user/cortex_8_21
 git log -1 --oneline                       # deployed commit includes the fix
 sudo grep '^MODEL_PRICING_MODE=' .env     # production uses database; preflight leaves it unchanged
-sudo -u ec2-user ./venv/bin/python scripts/preflight_database_pricing.py \
+sudo /usr/bin/python3.11 scripts/preflight_database_pricing.py \
   --min-selectable 18 \
   --expect claude:claude-haiku-4-5=1/5@6884812d-54ab-49ec-9313-b64cf2c825ae \
   --expect claude:claude-sonnet-5=2/10@7ea64bd6-380d-4d6e-9d60-9b0831eb3ae1 \
