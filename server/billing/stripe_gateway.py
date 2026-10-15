@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import re
 from collections.abc import Mapping
@@ -181,6 +183,28 @@ def _plain_mapping(response: Any) -> Mapping[str, Any] | None:
     return None
 
 
+def provider_failure_details(error: BaseException) -> dict[str, Any]:
+    """Return log-safe diagnostics for the Stripe SDK error behind a provider failure."""
+    cause = error.__cause__ or error
+    details: dict[str, Any] = {"provider_error_type": type(cause).__name__}
+    for attribute in ("http_status", "code", "request_id"):
+        value = getattr(cause, attribute, None)
+        if value is not None:
+            details[f"provider_{attribute}"] = value
+    provider_error = getattr(cause, "error", None)
+    message = getattr(provider_error, "message", None) or getattr(cause, "user_message", None)
+    if not message and cause is not error:
+        message = str(cause)
+    if message:
+        details["provider_message"] = str(message)[:500]
+    return details
+
+
+def _params_fingerprint(params: Mapping[str, Any]) -> str:
+    encoded = json.dumps(params, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()[:16]
+
+
 def _validated_hosted_url(response: Any, *, expected_host: str) -> str:
     value = str(_response_value(response, "url") or "").strip()
     parsed = urlsplit(value)
@@ -356,6 +380,16 @@ class StripeGateway:
             "cancel_url": self.config.checkout_cancel_url,
             "client_reference_id": str(billing_account_id),
             "metadata": metadata,
+            "ui_mode": "hosted_page",
+            "origin_context": "web",
+            "submit_type": "auto",
+            "billing_address_collection": "auto",
+            "phone_number_collection": {"enabled": False},
+            "automatic_tax": {"enabled": False},
+            # Dashboard-managed promotion codes; a code that makes the total $0
+            # completes Checkout without collecting a payment method.
+            "allow_promotion_codes": True,
+            "payment_method_collection": "if_required",
             "subscription_data": {
                 "metadata": {
                     "cortex_billing_account_id": str(billing_account_id),
@@ -363,10 +397,14 @@ class StripeGateway:
                 }
             },
         }
+        # Stripe rejects a reused idempotency key whose parameters differ, and replays a
+        # cached 4xx for 24h; scoping the key to the exact parameters lets a corrected
+        # Customer, Price, or redirect URL take effect immediately.
+        scoped_idempotency_key = f"{idempotency_key}-{_params_fingerprint(params)}"
         try:
             response = await self._stripe_client().v1.checkout.sessions.create_async(
                 params,
-                options=self._options(idempotency_key=idempotency_key),
+                options=self._options(idempotency_key=scoped_idempotency_key),
             )
         except (BillingConfigurationError, BillingProviderError):
             raise
