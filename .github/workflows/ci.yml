@@ -131,9 +131,26 @@ jobs:
             -q
 
       - name: Model catalog rules (lifecycle, credit ladder, defaults, ID lock)
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
           python scripts/models.py check
+          # On pull requests, replay the production re-seed over the base branch's
+          # price cards (tests/test_model_catalog_reseed.py). The base registry is
+          # required there: a failed fetch fails this step instead of skipping the
+          # replay. Pushes have no base and only run the replay's self-tests.
+          if [ -n "$BASE_REF" ]; then
+            git fetch --depth=1 origin "$BASE_REF" \
+              || { echo "::error::Cannot fetch base branch $BASE_REF for the reseed replay"; exit 1; }
+            git show FETCH_HEAD:config/model_registry.yaml > "$RUNNER_TEMP/base_registry.yaml" \
+              || { echo "::error::Cannot read config/model_registry.yaml from $BASE_REF"; exit 1; }
+            test -s "$RUNNER_TEMP/base_registry.yaml" \
+              || { echo "::error::Base registry from $BASE_REF is empty"; exit 1; }
+            export MODEL_CATALOG_BASE_REGISTRY="$RUNNER_TEMP/base_registry.yaml"
+            export MODEL_CATALOG_REQUIRE_REPLAY=1
+          fi
           python -m pytest \
+            tests/test_model_catalog_reseed.py \
             tests/test_model_catalog_tool.py \
             tests/test_new_model_credits.py \
             tests/test_registry_pricing_alignment.py \

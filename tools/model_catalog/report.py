@@ -22,13 +22,14 @@ from pricing.identity import PROVIDERS as SOURCE_PROVIDERS
 from pricing.identity import ModelIdentityMap
 from pricing.sources import LITELLM_URL, MAX_CATALOG_BYTES, LiteLLMPricingSource
 from tools.model_catalog.checks import (
+    CLASS_RANK,
     is_selectable,
     lifecycle_status,
     load_registry,
     model_index,
     run_checks,
 )
-from tools.model_catalog.apply import derive_attachments
+from tools.model_catalog.apply import derive_attachments, derive_reasoning
 from tools.model_catalog.ladder import load_ladder, plans_by_class
 from tools.model_catalog.registry_text import ROOT
 
@@ -314,6 +315,18 @@ def build_report(catalog: SourceCatalog, *, today: date | None = None) -> dict[s
             context_limit += int(pred_model["context_limit"]) - int(pred_raw["max_input_tokens"])
         flags = {key: raw[key] for key in _FLAG_KEYS if key in raw}
         notes: list[str] = []
+        replaces = f"{provider}:{predecessor}" if predecessor else None
+        if pred_model and CLASS_RANK.get(step.billing_class, 9) > CLASS_RANK.get(
+            str(pred_model.get("billing_class")), -1
+        ):
+            # A replacement must never move users to a dearer plan class
+            # (`scripts/models.py check` rejects it), so propose it alongside.
+            notes.append(
+                f"Added alongside {predecessor}, not replacing it: {step.billing_class} costs "
+                f"more than {pred_model.get('billing_class')}, and a replacement may only move "
+                "users to the same or a cheaper class. Write a description for it."
+            )
+            replaces = None
         max_output_tokens = _max_output_tokens(raw, pred_model, notes)
         attachments, attachment_notes = derive_attachments(
             pred_model, (registry["providers"].get(provider) or {}).get("defaults") or {}, flags
@@ -323,10 +336,13 @@ def build_report(catalog: SourceCatalog, *, today: date | None = None) -> dict[s
             {
                 "id": f"{provider}:{name}",
                 "litellm_id": external,
-                "replaces": f"{provider}:{predecessor}" if predecessor else None,
+                "replaces": replaces,
+                "based_on": f"{provider}:{predecessor}" if predecessor else None,
                 "display_name": display_name(provider, name),
                 "description": _carry_description(
-                    (pred_model or {}).get("description"), predecessor or "", name
+                    (pred_model or {}).get("description") if replaces else None,
+                    predecessor or "",
+                    name,
                 )
                 or f"{display_name(provider, name)} model.",
                 "tier": (pred_model or {}).get("tier") or "T2",
@@ -350,6 +366,13 @@ def build_report(catalog: SourceCatalog, *, today: date | None = None) -> dict[s
                 "max_output_tokens": max_output_tokens,
                 "promo": None,
                 "flags": flags,
+                # Explicit so a reviewer sees (and can edit) the controls the model gets.
+                "reasoning": {
+                    key: value
+                    for key, value in derive_reasoning(pred_model, flags).items()
+                    if value is not None
+                }
+                or None,
                 "attachments": attachments,
                 "source_url": raw.get("source") or None,
                 **({"notes": notes} if notes else {}),
@@ -445,7 +468,11 @@ def render_markdown(report: dict[str, Any]) -> str:
         ]
         for item in proposals:
             change = item["change_per_turn"] or "new family"
-            replaces = item["replaces"] or "nothing (new family)"
+            replaces = item["replaces"] or (
+                f"nothing (added alongside {item['based_on']})"
+                if item.get("based_on")
+                else "nothing (new family)"
+            )
             lines.append(
                 f"- [ ] `{item['id']}` replaces {replaces}; {change} per turn; credits "
                 f"{item['credits']} ({item['billing_class']}: {', '.join(item['plans'])})"

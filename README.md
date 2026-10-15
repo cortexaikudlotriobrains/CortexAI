@@ -1373,6 +1373,7 @@ It runs:
   - frontend artifact build
   - API image build metadata export
   - pinned Gitleaks CLI directory scan of the checked-out tree
+  - model catalog rules: `scripts/models.py check` and, on pull requests, a replay of the production price re-seed over the base branch's registry (`tests/test_model_catalog_reseed.py`); a base branch that cannot be fetched fails the step instead of skipping the replay
 
 Install the repository's [local Git gates](.codex/ci-commit-gate.md) once per
 clone so checks run automatically:
@@ -1392,7 +1393,7 @@ Actions; set
 
 - `.github/workflows/model-catalog.yml`:
   - weekly LiteLLM-vs-registry report issue (label `model-catalog`); a new issue only when the findings change
-  - ticking models edits the issue and starts **Apply model updates**, which waits for approval in the `model-updates` environment, applies the ticked models with `scripts/models.py`, runs the model/credit/pricing tests and opens a PR to `develop`
+  - ticking models edits the issue and starts **Apply model updates**, which waits for approval in the `model-updates` environment, applies the ticked models with `scripts/models.py`, runs blocking pricing checks (re-seeding over `develop`'s price cards as the production deploy does, rate cards, credits) and opens a PR to `develop`; tests that list the current models run non-blocking and are reported in the PR; a failed blocking check opens no PR and comments on the issue
   - optional secret `MODEL_CATALOG_TOKEN` (fine-grained: contents and pull requests write) so CI runs on that PR; see [model updates](docs/runbooks/model-updates.md)
 - `.github/workflows/incident-regression-38.yml`:
   - targeted backend regression pack for routing/guardrail mismatches (38 tests)
