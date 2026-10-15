@@ -261,6 +261,44 @@ providers:
               cache_write: 5.00
               output: 18.00
 
+      - name: "gpt-5.5"
+        display_name: "GPT-5.5"
+        description: "GPT-5.5 model."
+        tier: "T3"
+        billing_class: "premium"
+        input_credit_multiplier: 6.0
+        output_credit_multiplier: 30.0
+        credit_usage_label: "Premium"
+        credit_pricing_version: "2026-10-15"
+        context_limit: 1050000
+        max_output_tokens: 128000
+        reasoning_modes: ["none", "standard"]
+        default_reasoning_mode: "none"
+        reasoning_efforts: ["none", "low", "medium", "high", "xhigh"]
+        reasoning_disable_supported: true
+        reasoning_counts_against_output: true
+        tags: ["flagship", "reasoning", "coding", "accurate", "long_context"]
+        enabled: true
+        selectable: true
+        release_status: "generally_available"
+        source_verified_at: "2026-10-15"
+        lifecycle:
+          status: "ACTIVE"
+        pricing_rules:
+          - id: "openai-gpt-5.5-standard-20261015"
+            processing_mode: "standard"
+            source_url: "https://developers.openai.com/api/docs/pricing"
+            source_verified_at: "2026-10-15"
+            input: 5.0
+            cached_input: 0.5
+            output: 30.0
+            long_context:
+              threshold_tokens: 272001
+              applies_to_entire_request: true
+              input: 10.0
+              cached_input: 1.0
+              output: 45.0
+
       - name: "gpt-5.4"
         display_name: "GPT-5.4"
         description: "Previous-generation flagship retained as a stable production option."
