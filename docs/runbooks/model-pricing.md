@@ -101,12 +101,12 @@ service's log files. It:
 Exit status `0` (`RESULT: PASS`, warnings allowed) means database mode can be
 enabled; `1` means keep legacy mode. On the EC2 host, from the deployed
 application directory, after the fix is deployed (confirm the interpreter
-against the API unit's `ExecStart`, for example `sudo systemctl cat cortexai`):
+against the API unit's `ExecStart`, for example `Production runs through run_server.py using /usr/bin/python3.11; no virtual environment is used.`):
 
 ```bash
 cd /home/ec2-user/cortex_8_21
 git log -1 --oneline                       # deployed commit includes the fix
-grep '^MODEL_PRICING_MODE=' .env           # expect legacy; the preflight does not change it
+grep '^MODEL_PRICING_MODE=' .env           # production currently uses database; preflight leaves this unchanged.; the preflight does not change it
 sudo -u ec2-user ./venv/bin/python scripts/preflight_database_pricing.py \
   --min-selectable 18 \
   --expect claude:claude-haiku-4-5=1/5@6884812d-54ab-49ec-9313-b64cf2c825ae \
