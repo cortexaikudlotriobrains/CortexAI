@@ -61,6 +61,21 @@ The CLI loads the repository `.env`; explicit process environment values win.
 Seeding a newer registry version may close an old open seed interval at its
 declared end and add the new version; approved monetary fields and existing
 response/ledger snapshots remain unchanged.
+Older legacy `__web_search__` and `__managed_runtime__` cards may contain explicit
+zero `cached_input`, `cache_write`, and `cache_write_1h` token rates that newer
+service seeds omit. Seeding accepts that representation only when the stored
+fingerprint verifies and every other component matches. It retains the original
+card ID, fingerprint and components; a declared interval end may still close an
+old version. This exception does not apply to model token pricing or imported
+and manual cards: missing cache prices remain unknown.
+
+If seeding raises `Legacy seed differs from retained history`, the error identifies
+the provider, model, mode, start and card ID. Do not delete history or change its
+fingerprint to force deployment. Compare the retained and proposed components;
+a real rate change requires an audited new version. After upgrading to the
+service-card compatibility fix, repeat the seed dry-run, seed and read-only
+preflight before restarting the API.
+
 Migration SQL targets
 `public`, like existing migrations. Scheduling is external: invoke the command
 approximately every six hours through the deployment's scheduler. No startup

@@ -329,6 +329,33 @@ def run_sync(
         raise
 
 
+def _matches_legacy_seed(model: str, rates: dict[str, Any], retained: dict[str, Any]) -> bool:
+    stored = retained["pricing_components"]
+    if fingerprint(stored) != retained["fingerprint"]:
+        return False
+    expected = fingerprint(rates)
+    if retained["fingerprint"] == expected:
+        return True
+    # Older service seeds explicitly stored unused cache dimensions as zero.
+    # Compare that representation without rewriting the approved card or making
+    # missing cache prices equivalent to zero on actual model rate cards.
+    if model not in {"__web_search__", "__managed_runtime__"} or rates["tokens"] != {
+        "input": "0",
+        "output": "0",
+    }:
+        return False
+    extra = set(stored["tokens"]) - set(rates["tokens"])
+    if not extra or not extra <= {"cached_input", "cache_write", "cache_write_1h"}:
+        return False
+    if any(amount(stored["tokens"][key]) != 0 for key in extra):
+        return False
+    comparable = {
+        **stored,
+        "tokens": {key: value for key, value in stored["tokens"].items() if key not in extra},
+    }
+    return fingerprint(comparable) == expected
+
+
 def seed_legacy(db: Session, *, dry_run: bool = False) -> dict[str, int]:
     from tools.web.provider_metadata import web_search_seed_versions
     from server.work.billing import MANAGED_RUNTIME_USD_PER_HOUR
@@ -443,9 +470,11 @@ def seed_legacy(db: Session, *, dry_run: bool = False) -> dict[str, int]:
             None,
         )
         if seeded:
-            if seeded["fingerprint"] != fingerprint(row["rates"]):
+            if not _matches_legacy_seed(row["model"], row["rates"], seeded):
                 raise ValueError(
-                    "Legacy seed differs from retained history; use an audited new rate version"
+                    "Legacy seed differs from retained history; use an audited new rate version "
+                    f"({row['provider']}:{row['model']}, mode={row.get('mode', 'standard')}, "
+                    f"effective_from={row['at']}, card_id={seeded['id']})"
                 )
             if row.get("until") and (
                 seeded["effective_to"] is None or utc(seeded["effective_to"]) != utc(row["until"])

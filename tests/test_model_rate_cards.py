@@ -25,7 +25,7 @@ from sqlalchemy.orm import sessionmaker
 
 from config.model_pricing import load_pricing_policy
 from config.pricing import ModelPricing, RegistryPricing
-from db.pricing_repository import PricingRepository
+from db.pricing_repository import PricingRepository, fingerprint
 from models.unified_response import TokenUsage, UnifiedResponse
 from pricing.engine import calculate
 from pricing.identity import ModelIdentityMap
@@ -1837,6 +1837,141 @@ def test_seed_versions_deepseek_web_search_without_rewriting_history(pricing_db)
     assert search_cost("2026-10-08T12:00:00Z") == Decimal("0.01")
     assert search_cost("2026-10-09T00:00:00Z") == Decimal("0.016")
     assert seed_legacy(db)["added"] == 0
+
+
+@pytest.mark.parametrize(
+    "provider,model,units",
+    [
+        ("openai", "__web_search__", {"web_search_count": "0.01"}),
+        ("claude", "__web_search__", {"web_search_count": "0.01"}),
+        ("gemini", "__web_search__", {"web_search_count": "0.014"}),
+        ("grok", "__web_search__", {"web_search_count": "0.005"}),
+        ("deepseek", "__web_search__", {"web_search_count": "0.01"}),
+        ("claude", "__managed_runtime__", {"active_seconds": str(Decimal("0.08") / 3600)}),
+    ],
+)
+@pytest.mark.parametrize(
+    "cache_keys",
+    [
+        ("cached_input",),
+        ("cache_write", "cache_write_1h"),
+        ("cached_input", "cache_write", "cache_write_1h"),
+    ],
+)
+def test_seed_preserves_older_zero_cache_service_cards(
+    pricing_db, provider, model, units, cache_keys
+):
+    db, repo = pricing_db
+    old = repo.add(
+        provider=provider,
+        model=model,
+        source="LEGACY_CORTEX",
+        rates=validate_rates(
+            {
+                "tokens": {"input": "0", "output": "0", **dict.fromkeys(cache_keys, "0")},
+                "units": units,
+            }
+        ),
+        at="1970-01-01T00:00:00Z",
+        reference="retained-production-service-card",
+        version="old",
+    )
+    before = repo.list_cards(provider, model)[0]
+    if provider == "openai" and len(cache_keys) == 3:
+        # Exact payload and fingerprint reported by the production diagnostic.
+        assert before["fingerprint"] == (
+            "24b2e3af147e7dbd3176f4db331351d4f8c08de6938598ec9340544537e96668"
+        )
+    preview = seed_legacy(db, dry_run=True)
+    assert preview["unchanged"] == 1
+    assert repo.list_cards(provider, model) == [before]
+    assert seed_legacy(db) == preview
+    retained = next(card for card in repo.list_cards(provider, model) if card["id"] == old["id"])
+    expected = dict(before)
+    if provider == "deepseek":
+        expected["effective_to"] = utc("2026-10-09T00:00:00Z").replace(tzinfo=None)
+    assert retained == expected
+    assert seed_legacy(db)["added"] == 0
+    unit = next(iter(units))
+    assert calculate(NormalizedLLMUsage(units={unit: 1}), snapshot(retained)).total == Decimal(
+        units[unit]
+    )
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "unit_price",
+        "input",
+        "output",
+        "cached_input",
+        "cache_write",
+        "cache_write_1h",
+        "reasoning",
+        "bands",
+        "fingerprint",
+        "proposed_fingerprint",
+    ],
+)
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_seed_still_rejects_changed_service_prices(pricing_db, change, dry_run):
+    db, repo = pricing_db
+    values = {
+        "tokens": {
+            "input": "0",
+            "output": "0",
+            "cached_input": "0",
+            "cache_write": "0",
+            "cache_write_1h": "0",
+        },
+        "units": {"web_search_count": "0.01"},
+    }
+    if change in {"unit_price", "proposed_fingerprint"}:
+        values["units"]["web_search_count"] = "0.02"
+    elif change == "bands":
+        values["bands"] = [{"minimum_input_tokens": 100, "tokens": {"input": "0"}}]
+    elif change != "fingerprint":
+        values["tokens"][change] = "0" if change == "reasoning" else "0.1"
+    old = repo.add(
+        provider="openai",
+        model="__web_search__",
+        source="LEGACY_CORTEX",
+        rates=validate_rates(values),
+        at="1970-01-01T00:00:00Z",
+        reference="fixture",
+        version="old",
+    )
+    if change == "fingerprint":
+        db.execute(
+            repo.cards.update().where(repo.cards.c.id == old["id"]).values(fingerprint="bad")
+        )
+    elif change == "proposed_fingerprint":
+        proposed = validate_rates(
+            {"tokens": {"input": "0", "output": "0"}, "units": {"web_search_count": "0.01"}}
+        )
+        db.execute(
+            repo.cards.update()
+            .where(repo.cards.c.id == old["id"])
+            .values(fingerprint=fingerprint(proposed))
+        )
+    before = repo.list_cards("openai", "__web_search__")[0]
+    with pytest.raises(ValueError, match=r"Legacy seed differs.*openai:__web_search__.*card_id="):
+        seed_legacy(db, dry_run=dry_run)
+    assert repo.list_cards("openai", "__web_search__") == [before]
+
+
+def test_seed_does_not_treat_missing_model_cache_price_as_zero(pricing_db):
+    db, repo = pricing_db
+    seed_legacy(db)
+    card = repo.list_cards("openai", "gpt-4o-mini")[0]
+    changed = {**card["pricing_components"], "tokens": {"input": "0.15", "output": "0.6"}}
+    db.execute(
+        repo.cards.update()
+        .where(repo.cards.c.id == card["id"])
+        .values(pricing_components=changed, fingerprint=fingerprint(changed))
+    )
+    with pytest.raises(ValueError, match=r"Legacy seed differs.*openai:gpt-4o-mini"):
+        seed_legacy(db, dry_run=True)
 
 
 @pytest.mark.parametrize("payload", [b"[]", b"{}", b'{"x":NaN}', b'{"x":{},"x":{}}', b"malformed"])
