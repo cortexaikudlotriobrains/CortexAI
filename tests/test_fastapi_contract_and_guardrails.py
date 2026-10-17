@@ -667,13 +667,15 @@ def test_model_options_remain_complete_when_rich_catalog_is_disabled(client, mon
     assert all("reasoning_controllable" in item for item in body["models"])
 
     by_pair = {(item["provider"], item["model"]): item for item in body["models"]}
-    assert by_pair[("openai", "gpt-5.6-sol")]["reasoning_levels"] == [
+    assert by_pair[("openai", "gpt-6-astra")]["reasoning_levels"] == [
         "low",
         "medium",
         "high",
         "max",
     ]
-    assert by_pair[("openai", "gpt-5.6-sol")]["default_reasoning_level"] == "low"
+    assert by_pair[("openai", "gpt-6-astra")]["default_reasoning_level"] == "low"
+    # Hidden models keep working but are not offered to the pickers.
+    assert ("openai", "gpt-5.6-sol") not in by_pair
     assert by_pair[("openai", "gpt-4o-mini")]["reasoning_controllable"] is False
 
 
@@ -768,9 +770,11 @@ def test_models_catalog_lists_enabled_models_by_default(client):
     claude_by_model = {
         item["model"]: item for item in body["models"] if item["provider"] == "claude"
     }
-    assert claude_by_model["claude-sonnet-4-6"]["billing_class"] == "advanced"
-    assert claude_by_model["claude-opus-4-6"]["billing_class"] == "premium"
-    assert claude_by_model["claude-opus-4-5"]["billing_class"] == "premium"
+    assert claude_by_model["claude-haiku-5-5"]["billing_class"] == "economical"
+    assert claude_by_model["claude-sonnet-5-5"]["billing_class"] == "advanced"
+    assert claude_by_model["claude-opus-5-5"]["billing_class"] == "premium"
+    assert claude_by_model["claude-fable-5-1"]["billing_class"] == "premium"
+    assert "claude-sonnet-4-6" not in claude_by_model
 
 
 def test_models_catalog_filters_by_provider_case_insensitive(client):

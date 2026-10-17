@@ -38,17 +38,22 @@ def select_card(cards: list[dict[str, Any]], at: Any) -> dict[str, Any] | None:
     )
     # Once a verified source layer has started, its expiry must not resurrect
     # unverified legacy rates. A reviewer must supply an applicable successor.
-    if (
-        selected
-        and selected["source"] == "LEGACY_CORTEX"
-        and any(
-            card["status"] == "approved"
+    # The exception is a legacy card that starts only when every started verified
+    # card has ended: a dated registry successor, such as the regular price the
+    # registry declares for the day a documented launch promotion ends.
+    if selected and selected["source"] == "LEGACY_CORTEX":
+        verified = [
+            card
+            for card in cards
+            if card["status"] == "approved"
             and card["source"] != "LEGACY_CORTEX"
             and utc(card["effective_from"]) <= timestamp
-            for card in cards
-        )
-    ):
-        return None
+        ]
+        if verified and (
+            any(card.get("effective_to") is None for card in verified)
+            or utc(selected["effective_from"]) < max(utc(card["effective_to"]) for card in verified)
+        ):
+            return None
     return selected
 
 

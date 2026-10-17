@@ -69,14 +69,27 @@ def requires_schedule(cards: list[dict[str, Any]], record: dict[str, Any], at: A
     )
 
 
-def requires_expiry(record: dict[str, Any]) -> bool:
-    """Provider-verified promotional identity; never infer dates from rates."""
-    return bool(record.get("pricing_review", {}).get("requires_expiry"))
+def requires_expiry(record: dict[str, Any], at: Any = None) -> bool:
+    """Provider-verified promotional identity; never infer dates from rates.
+
+    With a documented ``effective_until`` the promotion governs only intervals that
+    start before that boundary. An interval starting at or after it is the regular
+    price that follows the promotion: it is reviewed like any other card instead of
+    being forced to end inside a promotion that is already over. Without ``at`` (or
+    without a documented boundary) the identity always requires an expiry.
+    """
+    review = record.get("pricing_review", {})
+    if not review.get("requires_expiry"):
+        return False
+    boundary = review.get("effective_until")
+    return not (boundary and at is not None and utc(at) >= utc(boundary))
 
 
-def validate_promotional_expiry(record: dict[str, Any], until: datetime | None) -> None:
+def validate_promotional_expiry(
+    record: dict[str, Any], until: datetime | None, effective_from: Any = None
+) -> None:
     """Keep operator intervals within a provider-verified promotional boundary."""
-    if not requires_expiry(record):
+    if not requires_expiry(record, effective_from):
         return
     if until is None:
         raise ValueError("Promotional pricing requires a verified effective_until")
@@ -182,7 +195,7 @@ def synchronize(
             )
             continue
         rates = valid[0]["rates"]
-        expiry_required = requires_expiry(identities.models[entry_provider, canonical])
+        expiry_required = requires_expiry(identities.models[entry_provider, canonical], timestamp)
         cards = repo.list_cards(entry_provider, canonical)
         external_card = select_card(
             [card for card in cards if card["source"] == "LITELLM"], timestamp
@@ -316,6 +329,33 @@ def run_sync(
         raise
 
 
+def _matches_legacy_seed(model: str, rates: dict[str, Any], retained: dict[str, Any]) -> bool:
+    stored = retained["pricing_components"]
+    if fingerprint(stored) != retained["fingerprint"]:
+        return False
+    expected = fingerprint(rates)
+    if retained["fingerprint"] == expected:
+        return True
+    # Older service seeds explicitly stored unused cache dimensions as zero.
+    # Compare that representation without rewriting the approved card or making
+    # missing cache prices equivalent to zero on actual model rate cards.
+    if model not in {"__web_search__", "__managed_runtime__"} or rates["tokens"] != {
+        "input": "0",
+        "output": "0",
+    }:
+        return False
+    extra = set(stored["tokens"]) - set(rates["tokens"])
+    if not extra or not extra <= {"cached_input", "cache_write", "cache_write_1h"}:
+        return False
+    if any(amount(stored["tokens"][key]) != 0 for key in extra):
+        return False
+    comparable = {
+        **stored,
+        "tokens": {key: value for key, value in stored["tokens"].items() if key not in extra},
+    }
+    return fingerprint(comparable) == expected
+
+
 def seed_legacy(db: Session, *, dry_run: bool = False) -> dict[str, int]:
     from tools.web.provider_metadata import web_search_seed_versions
     from server.work.billing import MANAGED_RUNTIME_USD_PER_HOUR
@@ -430,9 +470,11 @@ def seed_legacy(db: Session, *, dry_run: bool = False) -> dict[str, int]:
             None,
         )
         if seeded:
-            if seeded["fingerprint"] != fingerprint(row["rates"]):
+            if not _matches_legacy_seed(row["model"], row["rates"], seeded):
                 raise ValueError(
-                    "Legacy seed differs from retained history; use an audited new rate version"
+                    "Legacy seed differs from retained history; use an audited new rate version "
+                    f"({row['provider']}:{row['model']}, mode={row.get('mode', 'standard')}, "
+                    f"effective_from={row['at']}, card_id={seeded['id']})"
                 )
             if row.get("until") and (
                 seeded["effective_to"] is None or utc(seeded["effective_to"]) != utc(row["until"])
@@ -464,7 +506,7 @@ def manual_override(
     identities = ModelIdentityMap()
     canonical = identities.resolve(data["provider"], data["model"]) or data["model"]
     record = identities.models.get((data["provider"], canonical), {})
-    validate_promotional_expiry(record, until)
+    validate_promotional_expiry(record, until, effective_from)
     if requires_schedule(cards, record, effective_from) and "schedule" not in rates:
         raise ValueError("Manual price omits the active billing schedule")
     previous = select_card(
@@ -559,17 +601,28 @@ def approve_candidate(
             raise ValueError("Pricing interval must end after effective_from")
         if candidate["effective_to"] and until > utc(candidate["effective_to"]):
             raise ValueError("Candidate pricing interval cannot be extended")
-    validate_promotional_expiry(record, until)
+    validate_promotional_expiry(record, until, effective_from)
     validate_rates(candidate["pricing_components"])
     approved = repo.list_cards(
         candidate["provider"], candidate["canonical_model_id"], candidate["processing_mode"]
     )
+    # LiteLLM rates carry no validity evidence, so an open-ended card normally may
+    # not follow bounded source history. A documented promotion boundary is that
+    # evidence: an open-ended card starting at or after it is the regular price,
+    # and bounded cards that ended by the boundary do not block it.
+    boundary = record.get("pricing_review", {}).get("effective_until")
+    after_promotion = bool(boundary) and effective_from >= utc(boundary)
     if until is None and (
-        requires_expiry(record)
-        or candidate["review_reason"]
-        in {"bounded_pricing_requires_review", "expired_pricing_requires_review"}
+        requires_expiry(record, effective_from)
+        or (
+            not after_promotion
+            and candidate["review_reason"]
+            in {"bounded_pricing_requires_review", "expired_pricing_requires_review"}
+        )
         or any(
-            card["source"] == candidate["source"] and card["effective_to"] is not None
+            card["source"] == candidate["source"]
+            and card["effective_to"] is not None
+            and not (after_promotion and utc(card["effective_to"]) <= utc(boundary))
             for card in approved
         )
     ):

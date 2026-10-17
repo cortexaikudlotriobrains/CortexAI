@@ -347,9 +347,13 @@ COGNITO_SSL_VERIFY=true            # set false to skip TLS verification for Cogn
 ## Model catalogue, lifecycle, and pricing
 
 - `config/model_registry.yaml` owns selectable models, compatibility aliases, lifecycle state, context limits, official provider evidence, smart-routing metadata, and consumer credit metadata. Its token-price rules are the legacy bootstrap/rollback source.
+- Adding, hiding and retiring models is one standard procedure, [model updates](docs/runbooks/model-updates.md). The weekly `Model catalog` workflow compares LiteLLM's current prices with the registry and opens a report issue (label `model-catalog`); ticking models in it and approving the `model-updates` environment opens a pull request. Locally, `python scripts/models.py report`, `apply` and `check` do the same steps; CI runs `check`.
+- Credits for a new model come from the credit ladder in `config/credit_ladder.yaml`: the cheapest step whose input/output credits per token are at or above LiteLLM's current standard USD per 1M tokens (a promotional price while it lasts). The step also sets the billing class, which decides the plans (Free: economical/standard; Plus: + advanced; Pro: + premium), and the usage label. Long-context bands and ended promotions are covered by the runtime provider-rate floor.
+- A replaced model is hidden, not removed: `selectable: false` plus `lifecycle.replacement_model`. It keeps serving and billing existing threads and API callers, and defaults move off it. Model IDs and aliases are never removed or reused (`config/known_model_ids.txt`). Smart coding routing follows `routing_defaults.coding_preference`, and the React defaults and offline catalogue are generated from `ui_defaults` into `frontend-react/src/config/generated/registryDefaults.ts`.
 - With `MODEL_PRICING_MODE=database`, `config/pricing.py` and smart-routing registry construction select locally persisted versioned provider rate cards. Routine price updates use the pricing sync/operator commands; inference never fetches external pricing. The default `legacy` mode supports staged migration. See [pricing operations](docs/runbooks/model-pricing.md).
 - Imported/manual rates retain missing optional cache prices; used dimensions without an applicable price fail with `PRICING_UNKNOWN`. Context tiers require explicit cache rates instead of inheriting base prices. Retired source identities remain observations, audio-priced imports require normalized modality partitions, and search charges stay on independent service cards. Expired verified cards never resurrect legacy prices, and sync cannot extend bounded promotions without review. Operator JSON supports `effective_from`/`effective_until`; see the [LiteLLM guardrails review](docs/LITELLM_PRICING_GUARDRAILS.md) before approving prices or enabling database mode.
-- Known promotional identities use registry `pricing_review.requires_expiry`: sync cannot auto-activate them, and approval requires a verified `--effective-until` (manual overrides use JSON `effective_until`). Approval dry-runs enforce the same guards; no provider expiry or successor price is guessed. OpenAI cache writes use `30m` only for GPT-5.6 and later; older models retain supported retention controls and unexpected write counters fail explicitly. Backend CI and the local pre-push gate run the full rate-card regression suite.
+- Known promotional identities use registry `pricing_review.requires_expiry`: sync cannot auto-activate them, and approval requires a verified `--effective-until` (manual overrides use JSON `effective_until`). Approval dry-runs enforce the same guards; no provider expiry or successor price is guessed. OpenAI cache writes use `30m` only for GPT-5.6 and later (GPT-6 included), and those models use the Responses API; older models retain supported retention controls and unexpected write counters fail explicitly. Backend CI and the local pre-push gate run the full rate-card regression suite.
+  Gemini 3.8 Flash (launch price through December 31, 2026) and Gemini 4 Argon (through November 30, 2026) carry two dated registry rules each, so a card stays in force when the promotion ends, even after the LiteLLM launch card is approved: the regular-price seed starts exactly at the boundary. A documented `pricing_review.effective_until` limits only intervals that start before it. A regular-price successor starting at or after the boundary is allowed open-ended: a manual override with `effective_from` set to the boundary (can be prepared in advance), or a LiteLLM candidate approved after the boundary. A dated legacy seed that starts once every verified card has ended (the regular-price rule a registry declares for a promotion's end) is selected; older legacy seeds are still never revived.
   Google documents `gemini-3.6-flash` promotional prices through December 31, 2026. Registry `pricing_review.effective_until` records the exclusive UTC boundary `2027-01-01T00:00:00Z`; approvals, manual overrides and dry-runs cannot exceed it. Unbounded imports remain candidates, and no successor card is created. See [Google pricing](https://ai.google.dev/gemini-api/docs/pricing#gemini-3.6-flash).
 - Consumer plan definitions use `config/subscription_plans.yaml` and are validated at API startup by `server/billing/plan_catalog.py`.
 - Provider metadata/defaults/allowlists use `config/providers.yaml` via `config/provider_catalog.py`.
@@ -363,7 +367,7 @@ COGNITO_SSL_VERIFY=true            # set false to skip TLS verification for Cogn
 - When billing is enabled, startup validates the Stripe secret key, webhook signing secret, every paid plan's configured Price ID, all backend redirect URLs, and any explicit API version. The client can submit only `plan_code` and `billing_period`; extra Price, amount, currency, Customer, or redirect fields are rejected. `POST /v1/billing/webhook` verifies the exact raw body and `Stripe-Signature`, stores provider event IDs idempotently, synchronizes Checkout/subscription/invoice lifecycle events, rejects stale snapshots, applies payment grace and cancellation policy, and creates each paid usage period once. Verified webhook state is authoritative for Stripe access; Cortex grants provide an independent fallback.
 - DB-mode Ask, Compare, Optimize, Cortex Analysis, and attachment-backed generation use one short reserve/settle/release lifecycle. A preflight estimate reserves AI credits before provider work; settlement charges each successful model by actual input/output tokens and configured multipliers, then releases the unused estimate. If actual usage is higher, settlement atomically supplements the reservation when capacity exists; otherwise it bills only the authorized amount, never makes the wallet negative, and records the unbilled difference as a reconciliation adjustment without discarding the answer. Every resulting model, research, tool, and adjustment ledger item carries the privacy-policy-sanitized initial user query in metadata; metadata-only storage omits it. React submissions also carry a display-only `credit_activity_id`, shared by Prompt Optimizer and the following Ask/Compare request, so ledger presentation can group one user action without changing authorization or settlement. Ask reserves up to three web-search operations for its selected provider; Compare reserves that cap independently for every target. Settlement charges reported operations up to the three-operation product cap: OpenAI 10,000 Cortex credits, Claude 10,000, Gemini 14,000, Grok 5,000, and DeepSeek's Tavily-backed search 16,000 per operation, in addition to model tokens. DeepSeek's rate represents one Tavily Advanced Search: two Tavily credits at 8,000 Cortex credits each (USD 0.008 pay-as-you-go per Tavily credit). Unused capacity is released. Cortex Analysis reuses the sources already attached to Compare responses and performs no second search. Improve Prompt reserves every configured provider attempt. Smart Routing ranks plan-allowed candidates, removes unaffordable candidates, reserves the first appropriate affordable candidate using materialized input plus the clamped output ceiling, and requires supplemental authorization before a more expensive fallback. No percentage buffer is added.
 - Ask and Compare resolve consumer-credit multipliers from each successful response's canonical requested model, while retaining provider-returned served and pricing identities for audit and provider-cost calculation. The same canonical identity drives each response card's AI-credit value and the aggregate Compare total, keeping inline statistics reconciled with the credit ledger when a provider returns a versioned served-model snapshot. A versioned provider snapshot ID therefore cannot suppress sibling Compare ledger rows. If finalization still fails, the route immediately releases and unregisters the reservation so the heartbeat worker cannot keep credits indefinitely reserved.
-- The canonical catalogue and official source evidence were refreshed on `2026-07-31`.
+- The canonical catalogue and official source evidence were refreshed on `2026-07-31`; the 2026-10-14 model update added GPT-6 Luna, GPT-6.1 Sol, GPT-6 Astra, Claude Haiku 5.5, Sonnet 5.5, Opus 5.5, Fable 5.1, Gemini 3.8 Flash, Gemini 4 Argon and Grok 4.7 (each with its own `source_verified_at`), hid the models they replace, renamed `deepseek-v4-flash` to `deepseek-flash`, scheduled Claude Sonnet 4.5's retirement for 2026-11-30, and moved Claude Sonnet 5 to its $2/$10 price with 3/14 credits.
 - The selectable catalogue contains 21 models. Claude Sonnet 4.6 is an `advanced` model available to Plus and Pro; Claude Opus 4.5 and Opus 4.6 are `premium` models available to Pro. The three models remain `ACTIVE` in Anthropic's lifecycle table. Current standard API rates are $3 input/$15 output per million tokens for Sonnet 4.6 and $5 input/$25 output for both Opus versions; cache prices are retained in the same registry records.
 - Validation command:
 ```bash
@@ -689,7 +693,7 @@ The React consumer plan surfaces are `/pricing` and `/account/billing`. Pricing 
 
 Backend APIs, PostgreSQL counters, ledger entries, reservations, and React state keep AI credits in raw integer metering units. Customer-facing React surfaces divide those values by 1,000 through `frontend-react/src/utils/aiCredits.ts`, so the Free/Plus/Pro monthly allowances display as 100/1,000/3,000 AI credits while their server values remain 100,000/1,000,000/3,000,000. The same presentation rule applies to balances, plan/billing meters, response and Compare usage, itemized activity, insufficient-credit messages, and Work budgets. Outgoing request payloads remain in raw units; the formatter never changes billing authority or arithmetic.
 
-Composer and catalogue gating is explanatory UX over the same backend authority. Manual Ask/Compare pickers always use live active rows from `/v1/model-options`; the standalone Models screen and rich `/v1/models` catalogue remain unavailable until `ENABLE_MODELS_CATALOG=true`. Ask waits for effective `/v1/entitlements` and live model options before initializing its manual selection. Smart off restores the chat manual choice or resolves the saved Smart-off model; unset, locked, or unavailable saved IDs fall back to `openai:gpt-5.6-luna` for Free, `claude:claude-sonnet-4-6` for Plus, or `openai:gpt-5.6-terra` for Pro. Compare also waits for effective entitlements before filling empty initial model slots, then chooses defaults only from billing classes allowed by the current plan. Saved model resolution changes initial selections; toggling either Smart control applies the same transition to the current Ask chat and saves the new-chat setting. The available model offering remains visible, and valid existing/manual selections are preserved. Free/Plus users see a Pro action instead of silently adding a third Compare target. Improve, file count/size, AI-credit balance, and CSV export use the current `/v1/entitlements` snapshot for preflight messaging, while automatic search and every other request remain enforced and reserved by the backend. When an active Ask or Compare stream settles, the chat shell reloads that snapshot so the displayed balance and Improve allowance stay current without a page refresh or route change.
+Composer and catalogue gating is explanatory UX over the same backend authority. Manual Ask/Compare pickers always use live active rows from `/v1/model-options`; the standalone Models screen and rich `/v1/models` catalogue remain unavailable until `ENABLE_MODELS_CATALOG=true`. Ask waits for effective `/v1/entitlements` and live model options before initializing its manual selection. Smart off restores the chat manual choice or resolves the saved Smart-off model; unset, locked, or unavailable saved IDs fall back to the registry `ui_defaults.ask_by_plan` model: `openai:gpt-6-luna` for Free, `claude:claude-sonnet-5-5` for Plus, or `openai:gpt-6.1-sol` for Pro. Compare also waits for effective entitlements before filling empty initial model slots, then chooses defaults only from billing classes allowed by the current plan. Saved model resolution changes initial selections; toggling either Smart control applies the same transition to the current Ask chat and saves the new-chat setting. The available model offering remains visible, and valid existing/manual selections are preserved. Free/Plus users see a Pro action instead of silently adding a third Compare target. Improve, file count/size, AI-credit balance, and CSV export use the current `/v1/entitlements` snapshot for preflight messaging, while automatic search and every other request remain enforced and reserved by the backend. When an active Ask or Compare stream settles, the chat shell reloads that snapshot so the displayed balance and Improve allowance stay current without a page refresh or route change.
 
 Structured subscription denials open an accessible contextual dialog and keep the current prompt and attachments editable. Once a submission passes client-side checks, the composer clears immediately while the optimistic user bubble and any Improve status remain visible; if optimization is cancelled or the request is rejected before the stream is accepted, React restores the cleared draft and attachments. An HTTP `model_not_in_plan`, `feature_not_in_plan`, `insufficient_credits`, or `subscription_payment_required` response also removes the optimistic placeholder and restores no client-side authority. Existing premium history is never filtered or deleted after downgrade. The dedicated AI credits page renders the unified balance/reset date and recent itemized credit activity, while Usage & insights stays focused on provider-usage analytics and export; both layouts remain responsive on narrow screens. Response cards display actual AI credits, and Compare also displays the aggregate total.
 
@@ -837,7 +841,7 @@ Current guardrail behavior:
   - Gemini: images + PDF (inline data)
   - Claude: images + PDF (base64 document/image blocks)
   - Grok: images only
-  - DeepSeek: binary attachments unsupported; text-materialized attachments are accepted
+  - DeepSeek: `deepseek-flash` accepts JPEG/PNG/WebP/GIF images (sent as `image_url` parts); PDFs and other binaries need text materialization; `deepseek-v4-pro` accepts text-materialized attachments only
 
 Attachment metadata semantics:
 - `uploaded_files.ingestion_meta` is **file-level** metadata (ingestion requirement/state, extraction stats, etc.).
@@ -876,7 +880,7 @@ Prompt optimization (`/v1/optimize`):
 
 - Ask and Compare accept `generation.profile` (`auto`, `quick`, `balanced`, `deep`, or `extended`) or an explicit `generation.max_output_tokens`. Auto is the React default: normal economical/standard calls receive 4K, advanced reasoning models such as GPT-5.6 Terra and Claude Sonnet receive 8K, premium Opus/Fable models receive 12K, and clearly complex or explicitly detailed tasks receive 12K. Auto never selects 32K; Extended is API-explicit or a retry.
 - `generation.reasoning` accepts provider-neutral `mode` (`auto|off|on`) and effort (`auto|minimal|low|medium|high|xhigh|max`). The browser presents the stable public scale `Auto|Low|Medium|High|Maximum`; Maximum maps to native `max` or `xhigh`, and Low maps to native `low` or `minimal`. The resolver validates the selected model and translates the request for its provider adapter.
-- Claude thinking is model-specific: Claude 4.6 and supported Claude 5 models use registry-declared adaptive thinking, while the manual-budget-only Claude 4.5 family defaults to normal generation and rejects explicit reasoning-on before provider work. The Claude adapter omits custom `temperature` whenever Anthropic requires default sampling, including all adaptive-thinking requests and Claude 5 requests.
+- Claude thinking is model-specific: Claude 4.6 and supported Claude 5 models use registry-declared adaptive thinking (Sonnet 5.5, Opus 5.5 and Fable 5.1 always think and cannot turn it off; Haiku 5.5 defaults to adaptive and can), while the manual-budget-only Claude 4.5 family defaults to normal generation and rejects explicit reasoning-on before provider work. The Claude adapter omits custom `temperature` whenever Anthropic requires default sampling, including all adaptive-thinking requests and Claude 5 requests.
 - React does not expose output-token profiles or a live hold estimate, but it does expose model reasoning effort. Smart defaults to Auto; a manual Smart effort filters routing candidates, manual Ask defaults to the selected model's lowest supported effort, and Compare exposes the intersection supported by every target. API callers that omit both `generation` and `max_tokens` retain the `quick`/1K compatibility default. Supplying `generation` together with legacy `max_tokens`, or asking for an unsafe or unsupported combination, returns `422 invalid_generation_budget`.
 - The same resolved per-model ceiling drives provider execution and the maximum temporary AI-credit hold. `POST /v1/billing/estimate-generation` returns that hold without reserving it; successful settlement charges actual usage and releases the unused amount.
 - Responses expose `completion_status`, `stop_cause`, `routing_mode`, `generation_budget`, and `retry_with_more_room`. `routing_mode` preserves the authoritative Smart-versus-explicit execution path in live and history contracts; the Smart response card combines it with `generation_budget.effective_reasoning_effort` rather than trusting the request-time preview. Length-limited responses preserve partial text as `incomplete`; Auto 4K/8K calls retry at Deep/12K, Auto 12K calls retry at Extended/32K, and every retry is a new call that may use more credits.
@@ -898,6 +902,9 @@ registry, and the catalog reports a rate missing from an approved card as `null`
 operator/scheduled command. Manual overrides, effective-dated history,
 suspicious-change review and exact Decimal calculation evidence are retained.
 Model enablement/lifecycle and subscription credit policy remain separate.
+Repeat legacy seeding preserves older service cards with unused zero cache fields;
+actual price changes still require an audited new version. Model cards continue
+to distinguish a missing cache rate from an explicit zero.
 See [architecture](docs/MODEL_PRICING_ARCHITECTURE.md) and
 [pricing operations](docs/runbooks/model-pricing.md) for configuration,
 approval/dry-run commands, failure behavior and limitations.
@@ -946,7 +953,7 @@ For Compare (`/v1/compare`, `/v1/compare/stream`) requests:
 - The Ask and Compare browser composers do not expose a Web control. They always submit `web_mode=auto`; users can still state “search the web” or “without browsing” in the prompt, and API clients can send `required|off` directly.
 - Frontend Compare selectors support per-model removal with compact circular controls attached to each selector. Remove controls show only when three models are active; removing any slot compacts the remaining two models, preserving the API's two-target minimum. Request payloads include only active selected models.
 - Frontend Compare response cards hide per-card action label text in side-by-side layouts and keep compact copy/feedback icons; inline citation pills carry source previews, while success/error counts and aggregate AI-credit usage remain in the summary bar without token totals.
-- Frontend Compare selectors appear as removable model chips in the unified composer. React prefers `openai:gpt-5.6-luna` and `claude:claude-sonnet-5` for the initial two targets, and Add Model prefers `deepseek:deepseek-v4-flash`; unavailable preferences fall back to distinct selectable catalogue models. Request payloads include only active selected models.
+- Frontend Compare selectors appear as removable model chips in the unified composer. React prefers `openai:gpt-6-luna` and `claude:claude-sonnet-5-5` for the initial two targets, and Add Model prefers `deepseek:deepseek-flash` (registry `ui_defaults`); unavailable preferences fall back to distinct selectable catalogue models. Request payloads include only active selected models.
 - React manual Ask and Compare model controls share one accessible provider-first picker. It opens on provider names, logos, and model counts, then shows only the active provider's readable model-family labels, exact API IDs, credit-use hints, plan locks, and active state. Fine-pointer desktop layouts use an immediate adjacent hover preview that stays open while the pointer moves between provider and model panels, switches as another provider is hovered, and closes after the pointer leaves the picker; click and Right/Left Arrow remain keyboard-accessible fallbacks. Touch/mobile layouts use a compact tap-to-drill-down flow with Back. The body portal stays viewport-contained, Compare adds duplicate-option disabling and removal rules through the shared component API, and hidden native selects remain synchronized for browser automation compatibility.
 - Frontend Compare response cards use side-by-side model columns with a packed per-card metric strip for response-start duration and AI-credit usage on desktop; mobile exposes the same metrics directly in the compact header and phone-sized Compare switches between model responses with the frosted sticky model switcher. Token usage remains in the response contract and React state for persistence and reporting but is not rendered on result cards. Loading cards show live elapsed time plus `Queued`, `Refining prompt`, `Connecting to model`, `Generating response`, or `Finalizing`; each live card freezes its timer independently when its first renderable response content reaches the UI, and failed cards show elapsed failure time.
 
@@ -1376,6 +1383,7 @@ It runs:
   - frontend artifact build
   - API image build metadata export
   - pinned Gitleaks CLI directory scan of the checked-out tree
+  - model catalog rules: `scripts/models.py check` and, on pull requests, a replay of the production price re-seed over the base branch's registry (`tests/test_model_catalog_reseed.py`); a base branch that cannot be fetched fails the step instead of skipping the replay
 
 Install the repository's [local Git gates](.codex/ci-commit-gate.md) once per
 clone so checks run automatically:
@@ -1393,6 +1401,10 @@ CLI or daemon is unavailable, the hook defers only the API image build to GitHub
 Actions; set
 `CORTEX_CI_REQUIRE_DOCKER=1` when local Docker availability must be mandatory.
 
+- `.github/workflows/model-catalog.yml`:
+  - weekly LiteLLM-vs-registry report issue (label `model-catalog`); a new issue only when the findings change
+  - ticking models edits the issue and starts **Apply model updates**, which waits for approval in the `model-updates` environment, applies the ticked models with `scripts/models.py`, runs blocking pricing checks (re-seeding over `develop`'s price cards as the production deploy does, rate cards, credits) and opens a PR to `develop`; tests that list the current models run non-blocking and are reported in the PR; a failed blocking check opens no PR and comments on the issue
+  - optional secret `MODEL_CATALOG_TOKEN` (fine-grained: contents and pull requests write) so CI runs on that PR; see [model updates](docs/runbooks/model-updates.md)
 - `.github/workflows/incident-regression-38.yml`:
   - targeted backend regression pack for routing/guardrail mismatches (38 tests)
   - no live provider keys required
@@ -1535,6 +1547,7 @@ OpenAIProject/
       ci.yml
       incident-regression-38.yml
       live-e2e.yml
+      model-catalog.yml
 
   api/
     base_client.py
@@ -1549,6 +1562,9 @@ OpenAIProject/
   config/
     __init__.py
     config.py
+    credit_ladder.yaml
+    known_model_ids.txt
+    model_catalog_ignore.yaml
     model_registry.yaml
     provider_catalog.py
     providers.yaml
@@ -1644,6 +1660,7 @@ OpenAIProject/
     db_mode_smoke.py
     e2e_b2b_checklist.py
     generate_proof_pack.py
+    models.py
     onboard_tenant.py
     release_gate.py
     run_playwright_mcp.py
@@ -1695,6 +1712,13 @@ OpenAIProject/
   tools/
     create_api_key.py
     register_dev_key.py
+    model_catalog/
+      apply.py
+      checks.py
+      frontend.py
+      ladder.py
+      registry_text.py
+      report.py
     web/
       __init__.py
       cache.py
@@ -1798,9 +1822,10 @@ OpenAIProject/
 - Change Stripe hosted-session behavior: `server/billing/stripe_gateway.py`, `server/billing/session_service.py`, `server/routes/billing.py`, strict billing schemas, `.env.example`, `docs/runbooks/stripe-billing.md`, Postman, and `tests/test_stripe_billing.py`. Never move Price, amount, Customer, or redirect authority into the client.
 - Change Stripe webhook lifecycle behavior: `server/billing/webhook_service.py`, `server/billing/stripe_gateway.py`, `db/billing_repository.py`, `server/billing/subscription_service.py`, `server/routes/billing.py`, billing response schemas, runbooks, Postman, and `tests/test_stripe_webhooks.py`. Preserve raw-body verification, provider-event idempotency, stale-event protection, server-owned Price mapping, and conservative plan resolution.
 - Add/adjust guardrails: `server/rate_limit.py`, `server/circuit_breaker.py`, privacy policy in `server/privacy.py`.
-- Update CI/workflow behavior: `.github/workflows/ci.yml`, `.github/workflows/live-e2e.yml`, `.github/workflows/incident-regression-38.yml`.
+- Update CI/workflow behavior: `.github/workflows/ci.yml`, `.github/workflows/live-e2e.yml`, `.github/workflows/incident-regression-38.yml`, `.github/workflows/model-catalog.yml`.
+- Add, hide or retire a model, or change its credits: follow [model updates](docs/runbooks/model-updates.md) (`scripts/models.py`, `config/model_registry.yaml`, `config/credit_ladder.yaml`, `config/providers.yaml`, generated React defaults), never delete a model ID.
 - Add tenant/dev tooling scripts: `scripts/` (runtime checks/reporting) and `tools/` (operator/dev helpers).
 - Add tests: put new tests in `tests/` (mirror by feature area) and run `python -m pytest -q` + `python scripts/release_gate.py`.
 - Update API docs and examples after behavior changes: `README.md` and `docs/postman/CortexAI_B2B.postman_collection.json`.
 
-Last updated: 2026-07-29
+Last updated: 2026-10-14

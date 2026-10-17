@@ -1,0 +1,18 @@
+# Catalog entries the weekly model report should stop proposing.
+#
+# `python scripts/models.py report` skips these IDs and only counts them. Add an
+# entry with the reason (and a source when it is a fact about the provider) when a
+# proposal is wrong for good; leave it out when the answer is only "not yet".
+version: 1
+ignored:
+  # Version numbers sort 4.20 above 4.7, but Grok 4.20 reached the API on
+  # 2026-03-10, before Grok 4.3 (2026-04-30), 4.5 and 4.7.
+  - id: "grok:grok-4.20"
+    reason: "Older than Grok 4.3; not a successor despite the higher version number."
+    source: "https://presenc.ai/research/xai-grok-model-lineage-2026"
+  - id: "grok:grok-4.20-reasoning"
+    reason: "Older than Grok 4.3; not a successor despite the higher version number."
+    source: "https://presenc.ai/research/xai-grok-model-lineage-2026"
+  - id: "grok:grok-4.20-non-reasoning"
+    reason: "Older than Grok 4.3; not a successor despite the higher version number."
+    source: "https://presenc.ai/research/xai-grok-model-lineage-2026"

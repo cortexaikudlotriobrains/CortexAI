@@ -119,7 +119,7 @@ If `FRONTEND_DIR` is unset, `server/app.py` serves `frontend-react/dist`. Set th
 - React posts non-sensitive lifecycle diagnostics to `/v1/client-diagnostics`; backend logs them as `frontend.diagnostic` events so production refresh reports can be separated into reload/navigation, tab discard, back/forward cache restore, long main-thread task, or frontend error cases.
 - React attachment UX reads `directAttachmentUploads` and `legacyAttachmentUploads` from `/runtime-config.js`, which mirror the backend rollout flags. In direct mode it validates the complete selection locally from server entitlements, renders immediate per-file Preparing/Uploading/Processing/Ready state, authorizes metadata through `POST /v1/files/upload-intents`, sends bytes to S3 with header-free `XMLHttpRequest` forms, and calls `POST /v1/files/{file_id}/complete` only after S3 succeeds. Two transfers run concurrently; failures and retries are per-file, polling is bounded, removal aborts and deletes, and Ask/Compare Send is blocked until all selected files are Cortex-verified `ready`. With direct mode off, the same queue UI temporarily uses multipart `POST /v1/files/upload-batch` while `ATTACHMENTS_LEGACY_PROXY_UPLOAD_ENABLED=true`. Upload/storage remains free.
 - React Ask and Compare omit a Web toggle and submit `routing.web_mode=auto`; prompt intent or an API-level override controls search. Compare streams `/v1/compare/stream` events into per-model response columns.
-- React Ask always loads active selectable models from authenticated `/v1/model-options`, independently of `ENABLE_MODELS_CATALOG`, and waits for its response plus `/v1/entitlements` before initializing its manual model. Turning Smart routing off restores the chat-scoped manual choice or the saved Smart-off model. When the saved model is unset, unavailable, or locked, the plan fallback applies: Free uses `openai:gpt-5.6-luna`, Plus uses `claude:claude-sonnet-4-6`, and Pro uses `openai:gpt-5.6-terra`. Valid existing/manual selections remain unchanged.
+- React Ask always loads active selectable models from authenticated `/v1/model-options`, independently of `ENABLE_MODELS_CATALOG`, and waits for its response plus `/v1/entitlements` before initializing its manual model. Turning Smart routing off restores the chat-scoped manual choice or the saved Smart-off model. When the saved model is unset, unavailable, or locked, the plan fallback from registry `ui_defaults.ask_by_plan` applies: Free uses `openai:gpt-6-luna`, Plus uses `claude:claude-sonnet-5-5`, and Pro uses `openai:gpt-6.1-sol`. Valid existing/manual selections remain unchanged.
 - React Analyze opens Cortex Analysis by default, including when returning from Ask, and retains separate Model responses and Sources views. It uses the original response-card presentation: equal-height desktop columns (three models in one row above 1180px; two columns at 901–1180px), stacked tall cards at 761–900px, and the original horizontal provider tabs at 760px and below. Desktop/tablet response bodies scroll independently; phone provider tabs select one natural-height answer, stick during reading and support keyboard navigation. Original response metadata/actions, code/table containment and composer clearance remain intact. The original Cortex fonts, shell palette, logos, sidebar preference and composer are preserved; the shared shell keeps its 900px mobile breakpoint.
 - Analyze model bylines and passage headers reuse provider logos. The contributor/status/credits strip above the result tabs is omitted. The Cortex Analysis tab/takeaway use layers, with sparkles for the synthesis header. An optional answer headline/introduction leads into the lavender takeaway (`#f1eefc` light, `#2d2845` dark), then titled consequential differences with **See both passages**, the responsive quotation grid, and the Sources link/count. This is scoped to results; the shared shell/composer and original fonts remain intact.
 - Model headers and action footers remain fixed inside each desktop/tablet Compare card while only the answer body scrolls. The transcript reserves bottom breathing room above the persistent composer so the input area does not compress the reading workspace.
@@ -131,7 +131,7 @@ If `FRONTEND_DIR` is unset, `server/app.py` serves `frontend-react/dist`. Set th
 - The empty React Work workspace keeps its differently shaped goal surface on the same desktop/tablet center line while retaining the `Start a task` introduction and editable example prompts above it. Mobile keeps the compact Work introduction, aligns `Start a task` to the same one-quarter viewport line as Ask and Compare, and docks the goal composer immediately above the fixed navigation.
 - On mobile answer screens, the follow-up composer rests as a docked pill above the fixed Ask/Compare/History navigation. Tapping the pill opens the bottom-sheet composer, focuses its textarea, and places the cursor at the end of any draft so typing can begin without a second tap. Attachment chips grow upward without narrowing the textarea or displacing the send action. Answer transcripts reserve enough bottom scroll clearance for response copy, regenerate, and feedback actions to remain reachable above the dock.
 - Mobile uses a persistent square-pen header action to start a new session from Ask, Compare, or History. The action cancels active generation, clears the current thread, returns to chat, and preserves the selected mode; the History panel does not render a separate New chat button.
-- Frontend Compare selectors keep at least two active models and send only active selected models in compare requests. Initial empty slots wait for `/v1/entitlements` and use only `/v1/model-options` rows whose billing class is allowed by the effective plan. New sessions put the resolved Smart-off model first, then `claude:claude-sonnet-5` (or `openai:gpt-5.6-luna` if the first model is Sonnet 5), falling back to distinct eligible models. Slot 1 follows preference changes only until the first Compare send. Add Model prefers `deepseek:deepseek-v4-flash`. Remove controls appear with three active models and compact whichever two remain after any slot is removed.
+- Frontend Compare selectors keep at least two active models and send only active selected models in compare requests. Initial empty slots wait for `/v1/entitlements` and use only `/v1/model-options` rows whose billing class is allowed by the effective plan. New sessions put the resolved Smart-off model first, then `claude:claude-sonnet-5-5` (or `openai:gpt-6-luna` if the first model is Sonnet 5.5), falling back to distinct eligible models. Slot 1 follows preference changes only until the first Compare send. Add Model prefers `deepseek:deepseek-flash`. These defaults come from registry `ui_defaults` through the generated `frontend-react/src/config/generated/registryDefaults.ts`. Remove controls appear with three active models and compact whichever two remain after any slot is removed.
 - React manual Ask and Compare controls render through the same accessible provider-first model picker. It opens with provider logos and model counts. On fine-pointer desktop layouts, hovering a provider immediately reveals its readable model labels, exact IDs, credit-use hints, locks, and active state in an adjacent panel; the preview remains stable while crossing panels, switches on another provider hover, and dismisses shortly after leaving the picker. Click plus Right/Left Arrow remain accessible fallbacks. Touch/mobile layouts use a compact tap-to-model drill-down with Back. The viewport-positioned body portal prevents Compare's horizontally scrollable model row from clipping either layout. Compare supplies duplicate-selection prevention and removal behavior; synchronized hidden native selects preserve existing Playwright selectors and `selectOption` flows.
 - Frontend response cards use restrained model headings, compact Markdown paragraph/list spacing, compact footers, and a packed mono metric strip for response-start duration and AI-credit usage. AI-credit displays and navigation use a neutral credit icon without currency symbols, including response cards, Cortex Analysis, and the AI credits page. Ask and Compare headers retain the model name and exact model ID without decorative category badges or fastest-response labels and highlighting. Completed successful Smart Ask cards append the normalized effective `Low|Medium|High|Max reasoning` effort with an accessible level-specific color; manual Ask, Compare, failed/loading cards, and Work omit it. Compare success/error counts and aggregate AI-credit usage remain in the summary bar without token totals.
 - The React Smart Ask chip provides an accessible explanatory tooltip and a theme-aware enabled state. More options is exposed as a dialog trigger; Improve is a labelled switch and Reasoning is a keyboard-operable radiogroup whose unsupported levels remain disabled with explanations. The options surface omits allowance counts, supports outside-click and Escape dismissal with focus restoration, and announces setting changes through a polite live region.
@@ -337,7 +337,7 @@ any S3 write:
     {"filename": "report.pdf", "mime_type": "application/pdf", "size_bytes": 48123}
   ],
   "provider": "openai",
-  "model": "gpt-5.6-luna"
+  "model": "gpt-6-luna"
 }
 ```
 
@@ -588,7 +588,7 @@ Notes:
 - Ask and Compare can reuse the same `session_id`; session continuity is shared across both modes.
 - `generation.profile` is `auto|quick|balanced|deep|extended`. Auto selects 4K for normal economical/standard calls, 8K for advanced reasoning models, and 12K for premium or deterministically complex/detailed tasks. Explicit Quick/Balanced/Deep/Extended use 1K/4K/12K/32K before model/context/affordability limits. `generation.max_output_tokens` is the mutually exclusive custom alternative. `generation` cannot be combined with legacy `max_tokens`.
 - Omitted API requests use Quick/1K. React sends Auto output capacity explicitly and exposes `Auto|Low|Medium|High|Maximum` reasoning, but no output-token profile or live hold estimate. Smart defaults Auto and uses a manual effort as a routing constraint; manual Ask defaults to the model's lowest supported level; Compare permits only levels shared by every target. Requested answer detail still belongs in the prompt. Unsafe explicit ceilings and unsupported reasoning combinations return `422 invalid_generation_budget`.
-- Claude reasoning controls follow the selected model's registry declaration. Claude 4.6 and supported Claude 5 models use adaptive thinking; the manual-budget-only Claude 4.5 family defaults to normal generation and returns `422 invalid_generation_budget` for explicit reasoning-on. Claude custom temperature is omitted when Anthropic requires default sampling, including adaptive-thinking and Claude 5 requests.
+- Claude reasoning controls follow the selected model's registry declaration. Claude 4.6 and supported Claude 5 models use adaptive thinking (Sonnet 5.5, Opus 5.5 and Fable 5.1 cannot turn thinking off, so reasoning-off is not offered for them); the manual-budget-only Claude 4.5 family defaults to normal generation and returns `422 invalid_generation_budget` for explicit reasoning-on. Claude custom temperature is omitted when Anthropic requires default sampling, including adaptive-thinking and Claude 5 requests.
 - If `session_id` is omitted in DB mode, the backend may resolve the user's most recent active session.
 - The browser UI avoids that fallback on explicit fresh login by marking `cortex_fresh_login_pending`, consuming the backend `fresh_login=1` callback marker, clearing the stored active thread id, and sending `new_session=true` for the first turn after sign-in.
 
@@ -721,7 +721,7 @@ Notes:
 {
   "prompt": "string (required)",
   "targets": [
-    {"provider": "openai", "model": "gpt-5.6-luna"},
+    {"provider": "openai", "model": "gpt-6-luna"},
     {"provider": "gemini", "model": "gemini-3.5-flash-lite"}
   ],
   "routing": {
@@ -1062,6 +1062,13 @@ Last updated: 2026-07-29
 
 ## Provider rate-card runtime
 
+Legacy service seeding accepts older web-search and Managed Agent runtime cards
+whose only component difference is extra zero cache-token fields. The stored
+fingerprint must verify, and the original ID, fingerprint and components remain
+unchanged. Actual price changes still stop seeding and require an audited new
+version; missing cache rates on model cards remain unknown. See the
+[pricing runbook](runbooks/model-pricing.md) for deployment recovery.
+
 Imported/manual cards preserve missing versus explicitly zero cache rates. A
 used dimension without a valid rate raises `PRICING_UNKNOWN`; long-context
 snapshots never inherit optional base cache rates. GPT-5.6 and later OpenAI cache
@@ -1081,7 +1088,10 @@ For `gemini-3.6-flash`, Google's prices through December 31, 2026 establish
 the registry's exclusive UTC `pricing_review.effective_until` boundary
 `2027-01-01T00:00:00Z`. Approval and manual intervals cannot exceed that boundary;
 unbounded imports remain candidates even with automatic activation enabled.
-No future successor card or legacy price change is introduced. See
+No future successor card or legacy price change is introduced. The boundary
+limits only intervals that start before it; an open-ended regular-price successor
+may start at it (manual override) or after it (approved candidate), and a dated
+registry seed starting at the boundary takes over when the launch card ends. See
 [Google pricing](https://ai.google.dev/gemini-api/docs/pricing#gemini-3.6-flash).
 The backend CI and local pre-push gates include the rate-card regression suite.
 No HTTP route/request field changes. Keep database pricing disabled

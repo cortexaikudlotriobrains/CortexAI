@@ -111,13 +111,23 @@ class DeepSeekClient(BaseAIClient):
                 normalized_messages,
                 attachments,
             )
-            if binary_attachments:
+            # deepseek-flash (V4.1 Flash) reads JPEG, PNG, GIF and WebP images.
+            # The registry's image capability flag decides which DeepSeek models
+            # receive images; PDFs and other binaries stay text-extracted only.
+            unsupported = sorted(
+                {
+                    str(attachment["mime_type"])
+                    for attachment in binary_attachments
+                    if not str(attachment["mime_type"]).startswith("image/")
+                }
+            )
+            if unsupported:
                 error = NormalizedError(
                     code="bad_request",
                     message=(
-                        "DeepSeek models in this gateway do not support binary attachment inputs. "
-                        "Use an image/PDF-capable model (OpenAI/Gemini/Claude/Grok), or send "
-                        "text-extracted attachments."
+                        "DeepSeek accepts image attachments only. Unsupported MIME types: "
+                        + ", ".join(unsupported)
+                        + ". Send text-extracted attachments or use a PDF-capable model."
                     ),
                     provider="deepseek",
                     retryable=False,
@@ -131,7 +141,9 @@ class DeepSeekClient(BaseAIClient):
 
             request_payload = {
                 "model": model,
-                "messages": normalized_messages,
+                "messages": self._build_image_url_messages(
+                    normalized_messages, attachments=binary_attachments
+                ),
                 "max_tokens": max_tokens,
             }
             thinking_enabled = reasoning_mode not in {"none", "off", "disabled"}

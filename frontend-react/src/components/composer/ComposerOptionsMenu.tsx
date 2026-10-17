@@ -12,6 +12,7 @@ import {
 import { createPortal } from "react-dom";
 import type { ModelCatalogItem, ReasoningLevel } from "../../types";
 import { getModelPresentation } from "../../config/modelPresentation";
+import { DEFAULT_ASK_MODEL_KEYS_BY_PLAN } from "../../config/askDefaults";
 import { ProviderLogo } from "../shared/ProviderLogo";
 import { PlanBadge } from "../subscription/PlanBadge";
 import { CortexIcon } from "../shared/CortexIcon";
@@ -117,9 +118,10 @@ export function ComposerOptionsMenu({
   const offModel = models?.find((model) => modelKey(model) === smartOffModel);
   const current = models?.find((model) => modelKey(model) === currentModel);
   const activeGroup = groups.find((group) => group.provider === view);
+  const [fallbackProvider, fallbackModel] = DEFAULT_ASK_MODEL_KEYS_BY_PLAN.free.split(":");
   const offMeta = getModelPresentation(
-    offModel?.provider ?? smartOffModel?.split(":")[0] ?? "openai",
-    offModel?.model ?? smartOffModel?.split(":")[1] ?? "gpt-5.6-luna",
+    offModel?.provider ?? smartOffModel?.split(":")[0] ?? fallbackProvider,
+    offModel?.model ?? smartOffModel?.split(":")[1] ?? fallbackModel,
   );
   const offLabel = offModel?.display_name || offMeta.label;
   const showSmartOff = Boolean(models && smartOffModel && onSmartOffModelChange);

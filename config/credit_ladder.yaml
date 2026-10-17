@@ -1,0 +1,31 @@
+# Customer AI-credit price points for selectable models.
+#
+# A step is a pair of registry multipliers (raw credit units per token, which is
+# also displayed credits per 1K tokens). New models take the lowest step that
+# covers their current LiteLLM provider price on both input and output; the step
+# also fixes the billing class (plan access) and the picker label.
+#
+# The runtime floor in server/billing/credit_calculator.py still raises any
+# multiplier that falls below the provider rate a request actually used, such
+# as a long-context band or a price that rises after a launch promotion.
+version: 1
+price_source: "litellm_current"  # Decided 2026-10-14: launch promotions included.
+
+steps:
+  - {id: "E1", input: 0.25, output: 1, billing_class: "economical", label: "Very low"}
+  - {id: "E2", input: 0.5, output: 2, billing_class: "economical", label: "Very low"}
+  - {id: "S1", input: 1, output: 4, billing_class: "standard", label: "Standard"}
+  - {id: "S2", input: 2, output: 8, billing_class: "standard", label: "Standard"}
+  - {id: "A1", input: 3, output: 14, billing_class: "advanced", label: "High"}
+  - {id: "A2", input: 4, output: 18, billing_class: "advanced", label: "High"}
+  - {id: "P1", input: 6, output: 30, billing_class: "premium", label: "Premium"}
+  - {id: "P2", input: 10, output: 50, billing_class: "premium", label: "Premium"}
+
+# Selectable models priced before the ladder existed. They keep their reviewed
+# multipliers until someone reprices them on purpose; `scripts/models.py check`
+# reports them as warnings instead of errors.
+legacy_exceptions:
+  - "gemini:gemini-3.5-flash-lite"
+  - "deepseek:deepseek-flash"
+  - "deepseek:deepseek-v4-pro"
+  - "grok:grok-4.3"

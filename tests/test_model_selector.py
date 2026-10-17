@@ -85,6 +85,8 @@ def test_respects_max_cost_constraint_when_possible():
 
 
 def test_coding_prefers_latest_frontier_coding_order():
+    """The rank comes from routing_defaults.coding_preference, not from cost or tags."""
+
     selector = ModelSelector()
     features = _features(has_code=True, intent="code")
     candidates = [
@@ -97,6 +99,7 @@ def test_coding_prefers_latest_frontier_coding_order():
             context_limit=1_000_000,
             tags=["flagship", "reasoning", "coding", "accurate", "long_context"],
             enabled=True,
+            coding_preference_rank=1,
         ),
         ModelCandidate(
             provider="deepseek",
@@ -107,36 +110,40 @@ def test_coding_prefers_latest_frontier_coding_order():
             context_limit=1_000_000,
             tags=["reasoning", "coding", "cheap", "long_context"],
             enabled=True,
+            coding_preference_rank=3,
         ),
         ModelCandidate(
             provider="openai",
-            model_name="gpt-5.6-sol",
+            model_name="gpt-6-astra",
             tier=Tier.T3,
-            input_cost_per_1m=5.00,
-            output_cost_per_1m=30.00,
+            input_cost_per_1m=10.00,
+            output_cost_per_1m=50.00,
             context_limit=1_050_000,
             tags=["strong", "reasoning", "coding", "production_code", "long_context"],
             enabled=True,
+            coding_preference_rank=0,
         ),
         ModelCandidate(
             provider="grok",
-            model_name="grok-4.5",
+            model_name="grok-4.7",
             tier=Tier.T3,
             input_cost_per_1m=2.00,
             output_cost_per_1m=6.00,
             context_limit=2_000_000,
             tags=["strong", "reasoning", "coding", "accurate", "long_context"],
             enabled=True,
+            coding_preference_rank=4,
         ),
         ModelCandidate(
             provider="claude",
-            model_name="claude-opus-5",
+            model_name="claude-opus-5-5",
             tier=Tier.T3,
-            input_cost_per_1m=5.00,
-            output_cost_per_1m=25.00,
+            input_cost_per_1m=4.00,
+            output_cost_per_1m=20.00,
             context_limit=1_000_000,
             tags=["flagship", "reasoning", "coding", "accurate", "long_context"],
             enabled=True,
+            coding_preference_rank=2,
         ),
     ]
 
@@ -144,8 +151,33 @@ def test_coding_prefers_latest_frontier_coding_order():
     ordered = [result.primary_candidate, *result.fallback_candidates]
     ordered_names = [candidate.model_name for candidate in ordered]
 
-    assert ordered_names[0] == "gpt-5.6-sol"
-    assert ordered_names[1] == "gpt-5.4"
-    assert ordered_names[2] == "claude-opus-5"
-    assert ordered_names[3] == "deepseek-v4-pro"
-    assert ordered_names[4] == "grok-4.5"
+    assert ordered_names[:5] == [
+        "gpt-6-astra",
+        "gpt-5.4",
+        "claude-opus-5-5",
+        "deepseek-v4-pro",
+        "grok-4.7",
+    ]
+
+
+def test_registry_ranks_coding_models_from_routing_defaults():
+    from pathlib import Path
+
+    import yaml
+
+    from orchestrator.model_registry import ModelRegistry
+
+    registry = ModelRegistry.from_yaml()
+    data = yaml.safe_load(Path("config/model_registry.yaml").read_text(encoding="utf-8"))
+    order = data["routing_defaults"]["coding_preference"]
+    assert order, "routing_defaults.coding_preference must list the coding order"
+
+    for rank, key in enumerate(order):
+        provider, model = key.split(":", 1)
+        candidate = registry.find_model(provider, model)
+        assert candidate is not None, key
+        assert candidate.selectable is True, key
+        assert candidate.coding_preference_rank == rank, key
+
+    unranked = registry.find_model("openai", "gpt-4o-mini")
+    assert unranked is not None and unranked.coding_preference_rank is None

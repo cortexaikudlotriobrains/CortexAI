@@ -1,3 +1,5 @@
+from datetime import date
+
 from config.pricing import ModelPricing
 from config.provider_catalog import get_provider_catalog
 from orchestrator.model_registry import ModelRegistry
@@ -49,6 +51,12 @@ def test_unknown_model_pricing_uses_flagged_conservative_fallback():
     assert costs["pricing_rule_applied"] == "conservative-fallback:openai"
 
 
+def _verified_on_a_past_date(value: str | None) -> bool:
+    """Models are re-verified on different review dates; each must be a real, past date."""
+
+    return bool(value) and date.fromisoformat(str(value)) <= date.today()
+
+
 def test_provider_defaults_and_compare_defaults_are_current_selectable_models():
     registry = ModelRegistry.from_yaml()
 
@@ -60,7 +68,7 @@ def test_provider_defaults_and_compare_defaults_are_current_selectable_models():
             assert candidate.selectable is True
             assert candidate.lifecycle_status == "ACTIVE"
             assert candidate.pricing_source_url
-            assert candidate.source_verified_at == "2026-07-31"
+            assert _verified_on_a_past_date(candidate.source_verified_at)
 
 
 def test_every_selectable_model_has_official_evidence_and_nonzero_rates():
@@ -72,4 +80,4 @@ def test_every_selectable_model_has_official_evidence_and_nonzero_rates():
         assert candidate.pricing_rule_id
         assert candidate.pricing_source_url and candidate.pricing_source_url.startswith("https://")
         assert candidate.lifecycle_source_url and candidate.lifecycle_source_url.startswith("https://")
-        assert candidate.source_verified_at == "2026-07-31"
+        assert _verified_on_a_past_date(candidate.source_verified_at), candidate.model_name

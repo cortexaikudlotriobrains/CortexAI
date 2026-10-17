@@ -34,5 +34,13 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./src/test-setup.ts"],
+    // Behaviour tests run against a frozen model catalog so registry updates do not
+    // rewrite them; src/__tests__/generatedDefaults.test.ts checks the real file.
+    alias: [
+      {
+        find: /^\.\/generated\/registryDefaults$/,
+        replacement: "/src/__tests__/fixtures/registryDefaults.fixture.ts",
+      },
+    ],
   },
 });

@@ -3,10 +3,12 @@ import {
     test,
 } from "../fixtures/responsive-e2e.mjs";
 
+// Plan defaults come from config/model_registry.yaml ui_defaults.ask_by_plan through
+// frontend-react/src/config/generated/registryDefaults.ts.
 for (const expectation of [
-    { planCode: "free", expectedKey: "openai:gpt-5.6-luna" },
-    { planCode: "plus", expectedKey: "claude:claude-sonnet-4-6" },
-    { planCode: "pro", expectedKey: "openai:gpt-5.6-terra" },
+    { planCode: "free", expectedKey: "openai:gpt-6-luna" },
+    { planCode: "plus", expectedKey: "claude:claude-sonnet-5-5" },
+    { planCode: "pro", expectedKey: "openai:gpt-6.1-sol" },
 ]) {
     test(`${expectation.planCode} Ask shows its plan default after Smart is turned off`, async ({
         responsiveApp,
@@ -37,19 +39,19 @@ function withAskDefaultModels(models) {
     return [
         {
             ...openai,
-            model: "gpt-5.6-luna",
+            model: "gpt-6-luna",
             billing_class: "economical",
             access_category: "economical",
         },
         {
             ...claude,
-            model: "claude-sonnet-4-6",
+            model: "claude-sonnet-5-5",
             billing_class: "advanced",
             access_category: "advanced",
         },
         {
             ...openai,
-            model: "gpt-5.6-terra",
+            model: "gpt-6.1-sol",
             billing_class: "advanced",
             access_category: "advanced",
         },

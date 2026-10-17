@@ -166,6 +166,45 @@ class TestProviderContractCompliance:
         assert payload["max_output_tokens"] == 8192
         assert payload["reasoning"] == {"effort": "medium"}
 
+    @pytest.mark.parametrize(
+        "model,responses_api",
+        [
+            ("gpt-6-luna", True),
+            ("gpt-6.1-sol", True),
+            ("gpt-6-astra", True),
+            ("gpt-5.6-terra", True),
+            ("gpt-5.2-codex", True),
+            ("gpt-5.4", False),
+            ("gpt-4o-mini", False),
+        ],
+    )
+    def test_openai_uses_responses_api_from_gpt_5_6(self, model, responses_api):
+        assert OpenAIClient._should_use_responses_api_for_model(model) is responses_api
+
+    @patch("openai.OpenAI")
+    def test_openai_gpt6_sends_reasoning_through_responses_api(self, mock_openai):
+        mock_response = Mock()
+        mock_response.output_text = "Reasoned answer"
+        mock_response.usage = Mock(input_tokens=7, output_tokens=11, total_tokens=18)
+        mock_response.status = "completed"
+        mock_response.finish_reason = None
+        mock_openai.return_value.responses.create.return_value = mock_response
+
+        client = OpenAIClient(api_key="test-key", model_name="gpt-6.1-sol")
+        response = client.get_completion(
+            "Test prompt",
+            max_tokens=4096,
+            reasoning_mode="standard",
+            reasoning_effort="high",
+        )
+
+        assert response.is_success
+        mock_openai.return_value.chat.completions.create.assert_not_called()
+        payload = mock_openai.return_value.responses.create.call_args.kwargs
+        assert payload["model"] == "gpt-6.1-sol"
+        assert payload["max_output_tokens"] == 4096
+        assert payload["reasoning"] == {"effort": "high"}
+
     @patch("openai.OpenAI")
     def test_openai_defaults_to_2048_max_tokens_when_not_provided(self, mock_openai):
         """OpenAI chat path should use the repository default output cap when caller omits max_tokens."""
@@ -635,8 +674,33 @@ class TestProviderContractCompliance:
         assert "temperature" not in second_payload
 
     @patch("openai.OpenAI")
-    def test_deepseek_rejects_binary_attachments(self, mock_openai):
-        client = DeepSeekClient(api_key="test-key", model_name="deepseek-chat")
+    def test_deepseek_rejects_non_image_binary_attachments(self, mock_openai):
+        client = DeepSeekClient(api_key="test-key", model_name="deepseek-flash")
+        response = client.get_completion(
+            "describe this",
+            attachments=[
+                {
+                    "file_id": "f1",
+                    "filename": "report.pdf",
+                    "mime_type": "application/pdf",
+                    "data_base64": "JVBERi0xLjQK",
+                }
+            ],
+        )
+
+        assert response.is_error
+        assert response.error.code == "bad_request"
+        assert "application/pdf" in response.error.message
+        mock_openai.return_value.chat.completions.create.assert_not_called()
+
+    @patch("openai.OpenAI")
+    def test_deepseek_sends_images_as_image_url_parts(self, mock_openai):
+        mock_response = Mock()
+        mock_response.choices = [Mock(message=Mock(content="A cat"), finish_reason="stop")]
+        mock_response.usage = Mock(prompt_tokens=10, completion_tokens=20, total_tokens=30)
+        mock_openai.return_value.chat.completions.create.return_value = mock_response
+
+        client = DeepSeekClient(api_key="test-key", model_name="deepseek-flash")
         response = client.get_completion(
             "describe this",
             attachments=[
@@ -649,9 +713,24 @@ class TestProviderContractCompliance:
             ],
         )
 
-        assert response.is_error
-        assert response.error.code == "bad_request"
-        mock_openai.return_value.chat.completions.create.assert_not_called()
+        assert response.is_success
+        payload = mock_openai.return_value.chat.completions.create.call_args.kwargs
+        user_turn = payload["messages"][-1]
+        assert user_turn["role"] == "user"
+        parts = {part["type"]: part for part in user_turn["content"]}
+        assert parts["text"]["text"] == "describe this"
+        assert parts["image_url"]["image_url"]["url"] == (
+            "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB"
+        )
+
+    def test_only_deepseek_flash_advertises_image_input(self):
+        registry = ModelRegistry.from_yaml()
+        flash = registry.find_model("deepseek", "deepseek-flash")
+        pro = registry.find_model("deepseek", "deepseek-v4-pro")
+        assert flash is not None and flash.supports_image_input is True
+        assert set(flash.supported_attachment_mime_types) >= {"image/png", "image/jpeg"}
+        assert "application/pdf" not in flash.supported_attachment_mime_types
+        assert pro is not None and pro.supports_image_input is False
 
     @patch("openai.OpenAI")
     def test_deepseek_accepts_text_materialized_attachments(self, mock_openai):

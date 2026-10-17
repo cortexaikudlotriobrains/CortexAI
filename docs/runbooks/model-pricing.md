@@ -61,6 +61,21 @@ The CLI loads the repository `.env`; explicit process environment values win.
 Seeding a newer registry version may close an old open seed interval at its
 declared end and add the new version; approved monetary fields and existing
 response/ledger snapshots remain unchanged.
+Older legacy `__web_search__` and `__managed_runtime__` cards may contain explicit
+zero `cached_input`, `cache_write`, and `cache_write_1h` token rates that newer
+service seeds omit. Seeding accepts that representation only when the stored
+fingerprint verifies and every other component matches. It retains the original
+card ID, fingerprint and components; a declared interval end may still close an
+old version. This exception does not apply to model token pricing or imported
+and manual cards: missing cache prices remain unknown.
+
+If seeding raises `Legacy seed differs from retained history`, the error identifies
+the provider, model, mode, start and card ID. Do not delete history or change its
+fingerprint to force deployment. Compare the retained and proposed components;
+a real rate change requires an audited new version. After upgrading to the
+service-card compatibility fix, repeat the seed dry-run, seed and read-only
+preflight before restarting the API.
+
 Migration SQL targets
 `public`, like existing migrations. Scheduling is external: invoke the command
 approximately every six hours through the deployment's scheduler. No startup
@@ -89,23 +104,26 @@ service's log files. It:
    selectable models with the registry configuration;
 3. requires every provider (`openai`, `claude`, `gemini`, `grok`, `deepseek`)
    to have a selectable model;
-4. prints each selectable model's card source, card ID, input, output, cache-read,
-   cache-write and one-hour cache-write rates (`-` = not on the card) and fails
-   if the catalog shows a rate the card does not have, or a different one;
-5. checks the `--expect` rates/card IDs and `--long-context` start you pass;
+4. prints each enabled model's card source, card ID, input, output, cache-read,
+   cache-write and one-hour cache-write rates (`-` = not on the card; `hidden`
+   marks models taken out of the picker that still serve and bill existing
+   threads) and fails if the catalog shows a rate the card does not have, or a
+   different one;
+5. checks the `--expect` rates/card IDs and `--long-context` start you pass
+   (any enabled model, hidden or not);
 6. warns about cards ending within 45 days with no approved successor.
 
 Exit status `0` (`RESULT: PASS`, warnings allowed) means database mode can be
 enabled; `1` means keep legacy mode. On the EC2 host, from the deployed
 application directory, after the fix is deployed (confirm the interpreter
-against the API unit's `ExecStart`, for example `sudo systemctl cat cortexai`):
+against the API unit's `ExecStart`, for example `Production runs through run_server.py using /usr/bin/python3.11; no virtual environment is used.`):
 
 ```bash
 cd /home/ec2-user/cortex_8_21
 git log -1 --oneline                       # deployed commit includes the fix
-grep '^MODEL_PRICING_MODE=' .env           # expect legacy; the preflight does not change it
-sudo -u ec2-user ./venv/bin/python scripts/preflight_database_pricing.py \
-  --min-selectable 21 \
+sudo grep '^MODEL_PRICING_MODE=' .env     # production uses database; preflight leaves it unchanged
+sudo /usr/bin/python3.11 scripts/preflight_database_pricing.py \
+  --min-selectable 18 \
   --expect claude:claude-haiku-4-5=1/5@6884812d-54ab-49ec-9313-b64cf2c825ae \
   --expect claude:claude-sonnet-5=2/10@7ea64bd6-380d-4d6e-9d60-9b0831eb3ae1 \
   --expect gemini:gemini-3.6-flash=0.75/3.75@f6021121-63be-40e5-b434-9cdaa12251ef \
@@ -115,7 +133,29 @@ echo "preflight exit status: $?"
 ```
 
 Expect `-` in the `write` and `write1h` columns for `gemini-3.6-flash` (absent,
-not $0) and a warning that the `gpt-5.6-sol` card ends `2026-11-21T00:00:00Z`.
+not $0) and a warning that the `gpt-5.6-sol` card ends `2026-11-21T00:00:00Z`
+(the retired `gpt-5.2-codex` ID prices through the same card, so it is listed
+too). Since the 2026-10-14 model update 18 models are selectable; the four
+`--expect` models above are hidden but still enabled and billed.
+
+### Releases that add or rename models
+
+In database mode every enabled model needs an approved card, and startup
+readiness fails without one. A release that adds models (or renames one, such as
+`deepseek-v4-flash` to `deepseek-flash`) therefore needs, with the new code on
+the host and **before** the API restarts:
+
+```bash
+sudo /usr/bin/python3.11 scripts/sync_model_pricing.py --seed-legacy --dry-run
+sudo /usr/bin/python3.11 scripts/sync_model_pricing.py --seed-legacy
+sudo /usr/bin/python3.11 scripts/preflight_database_pricing.py --min-selectable 18
+```
+
+Seeding writes the registry's rules for the new models as legacy cards
+(promotional models get both dated cards, so no gap opens when the promotion
+ends) and closes changed legacy intervals, such as Claude Sonnet 5's old
+$3/$15 rule at `2026-10-14T00:00:00Z`; approved LiteLLM cards keep priority.
+Restart only after `RESULT: PASS`. See [model updates](model-updates.md).
 An enabled model with no applicable card stops the whole registry from building,
 so Ask, Compare, the catalog and startup fail for every provider at that moment.
 Approve a reviewed successor card before each `effective_until`, then rerun the
@@ -153,7 +193,17 @@ must supply or retain a verified end no later than this boundary. Approval
 dry-runs enforce the same ceiling, including dates already stored on older
 candidates. The metadata does not populate a candidate's missing source end,
 change legacy rates, or create a future successor card. Prices after the boundary
-require a separately reviewed card with verified rates and validity evidence.
+require a separately reviewed card with verified rates and validity evidence. The
+boundary limits only intervals that start before it, so that card may be
+open-ended: a manual override whose `effective_from` is the boundary (prepare it
+before the promotion ends), or a LiteLLM candidate approved after the boundary.
+
+Models added with a promotion by `scripts/models.py` (Gemini 3.8 Flash, Gemini 4
+Argon) also carry a dated regular-price registry rule starting at the boundary.
+Card selection accepts a legacy seed that starts only once every started verified
+card has ended, so that seed takes over when an approved LiteLLM launch card ends
+and the registry keeps building. A legacy seed that predates a verified card (the
+Gemini 3.6 Flash case) is still never revived.
 
 Such proposals remain candidates even with automatic activation enabled.
 `--inspect` and observations expose the review metadata. Approval also checks
