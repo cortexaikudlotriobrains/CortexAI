@@ -217,7 +217,7 @@ describe("UsageInsightsPage states", () => {
     expect(screen.getByRole("heading", { name: "Session modes" })).toBeInTheDocument();
     expect(screen.getByText("How sessions split across modes")).toBeInTheDocument();
     expect(screen.getByText("Ask only")).toBeInTheDocument();
-    expect(screen.getByText("Compare only")).toBeInTheDocument();
+    expect(screen.getByText("Analyze only")).toBeInTheDocument();
     expect(screen.getByText("Mixed")).toBeInTheDocument();
     expect(screen.getByText("168")).toBeInTheDocument();
     expect(screen.getByText("96")).toBeInTheDocument();
@@ -226,7 +226,7 @@ describe("UsageInsightsPage states", () => {
     expect(screen.getByText("15%")).toBeInTheDocument();
     expect(
       screen.getByRole("img", {
-        name: "Session modes: Ask only 168 sessions, 54%; Compare only 96 sessions, 31%; Mixed 48 sessions, 15%",
+        name: "Session modes: Ask only 168 sessions, 54%; Analyze only 96 sessions, 31%; Mixed 48 sessions, 15%",
       }),
     ).toBeInTheDocument();
     expect(screen.getByText("48 sessions switched modes")).toBeInTheDocument();
@@ -376,7 +376,7 @@ describe("UsageInsightsPage states", () => {
     expect(screen.getByText("No model activity yet for this period")).toBeInTheDocument();
     expect(
       screen.getByRole("img", {
-        name: "Session modes: Ask only 0 sessions, 0%; Compare only 0 sessions, 0%; Mixed 0 sessions, 0%",
+        name: "Session modes: Ask only 0 sessions, 0%; Analyze only 0 sessions, 0%; Mixed 0 sessions, 0%",
       }),
     ).toBeInTheDocument();
     expect(screen.getByText("0 total \u00b7 ~0/day")).toBeInTheDocument();

@@ -311,6 +311,9 @@ export async function submitComparePrompt(page, prompt, config, targetCount = 2)
     await page.locator("#promptInput").fill(prompt);
     await page.locator("#submitBtn").click();
     await expect(page.locator(`#response-text-${indices[0]}`)).toBeAttached({ timeout: 10_000 });
+    const comparison = page.locator('article[aria-label="Model comparison"]').last();
+    await expect(comparison.getByRole("tab", { name: "Analysis", exact: true })).toHaveAttribute("aria-selected", "true");
+    await comparison.getByRole("tab", { name: /^Model responses/ }).click();
     const stream = await waitForTextGrowth(page, indices, {
         firstContentTimeoutMs: config.timeouts.firstContentMs,
         completeTimeoutMs: config.timeouts.compareMs,

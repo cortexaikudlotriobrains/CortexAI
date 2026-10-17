@@ -53,7 +53,7 @@ test("Smart menu updates the current chat and new chats, independently of the co
     await page.getByRole("button", { name: "More options", exact: true }).click();
     await expect(page.getByRole("button", { name: /When Smart is off/ })).toContainText("DeepSeek V4 Flash");
     await page.keyboard.press("Escape");
-    await mode(page, "Compare");
+    await mode(page, "Analyze");
     await expect(page.locator("#compareModel1")).toHaveValue(flash);
     await page.getByRole("button", { name: "More options", exact: true }).click();
     await expect(page.getByRole("switch", { name: /Smart in new chats/ })).toHaveCount(0);

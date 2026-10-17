@@ -29,6 +29,8 @@ export const test = base.extend({
         const state = {
             history: responsiveHistoryEntries(),
             analysisRuns: responsiveAnalysisRuns(),
+            analysisRequests: [],
+            analysisStates: new Map(),
             uploadedFiles: new Map(),
             models: [...MODELS],
             modelsCatalogEnabled: true,
@@ -89,15 +91,23 @@ export async function openMobilePanel(page, name) {
         .click();
 }
 
-export async function restoreHistoryThread(page, title) {
+export async function restoreHistoryThread(page, title, { view = "analysis" } = {}) {
     const desktopHistory = page.locator("aside[aria-label='Primary navigation']");
     if (await desktopHistory.isVisible()) {
+        const expand = desktopHistory.getByRole("button", { name: "Expand sidebar" });
+        if (await expand.isVisible()) {
+            await expand.click();
+        }
         await page.getByRole("button", { name: new RegExp(title, "i") }).first().click();
     } else {
         await openMobilePanel(page, "History");
         await page.getByRole("button", { name: new RegExp(title, "i") }).first().click();
     }
     await expect(page.locator('section[aria-label="Chat transcript"]')).toBeVisible();
+    if (view === "responses") {
+        for (const tab of await page.getByRole("tab", { name: /^Model responses/ }).all()) await tab.click();
+        await page.locator('section[aria-label="Chat transcript"]').evaluate(element => { element.scrollTop = 0; });
+    }
 }
 
 export async function expectNoHorizontalOverflow(page) {
@@ -402,8 +412,20 @@ async function installResponsiveRoutes(page, state) {
                 ),
             );
         }
+        if (url.pathname === "/v1/billing/estimate-generation" && method === "POST") {
+            return json(route, { targets: [], estimated_max_ai_credits: 12340,
+                analysis_ai_credits: 1234, remaining_ai_credits: 100000, can_authorize: true });
+        }
+        const stateMatch = url.pathname.match(/^\/v1\/compare\/([^/]+)\/analysis-state$/);
+        if (stateMatch && method === "GET") {
+            if (state.analysisStates.has(stateMatch[1])) return json(route, state.analysisStates.get(stateMatch[1]));
+            const run = state.analysisRuns.find(item => item.requestGroupId === stateMatch[1]);
+            return json(route, { state: run ? "complete" : "idle", automatic: !!run,
+                analysisId: run?.analysisId, estimatedAiCredits: 1234 });
+        }
         const analysisMatch = url.pathname.match(/^\/v1\/compare\/([^/]+)\/analysis$/);
         if (analysisMatch && method === "POST") {
+            state.analysisRequests.push(url.pathname);
             const requestGroupId = decodeURIComponent(analysisMatch[1]);
             const sourceRows = state.history.filter(
                 entry => entry.request_group_id === requestGroupId && !entry.error_message,
@@ -591,6 +613,19 @@ function makeResponsiveAnalysisRun({
         requestGroupId,
         sessionId,
         model: "gpt-5.4-mini",
+        structuredResult: { schemaVersion: 2,
+            headline: "Roll out in phases.\nKeep recovery observable.",
+            introduction: "Start with a bounded rollout, explicit provider fallbacks and tested recovery checks. Keep each model's assumptions visible before widening the deployment.",
+            takeaway: "Use a phased gateway rollout with explicit provider fallbacks and observable recovery checks.",
+            passages: sourceRows.map(entry => ({ requestId: entry.request_id,
+                responseVersion: entry.response_version || 1, provider: entry.provider,
+                model: entry.model, quote: entry.response.split("\n\n")[0].slice(0, 300) })),
+            points: [], differences: [{ title: "Where the rollout estimate stops.",
+                text: "The answers use different assumptions about the rollout scope. Resolve those assumptions before applying one estimate across the full migration.",
+                positions: sourceRows.slice(0, 2).map(entry => ({ text: entry.provider === "openai" ? "First response's scope." : "Second response's scope.",
+                    evidence: [{ requestId: entry.request_id, responseVersion: entry.response_version || 1,
+                        provider: entry.provider, model: entry.model, quote: entry.response.split("\n\n")[0].slice(0, 300) }] })) }],
+            limitations: [], linkedSources: [] },
         recommendedAnswer:
             "Use a phased gateway rollout with explicit provider fallbacks and observable recovery checks.",
         agreements: [
@@ -620,6 +655,7 @@ function makeResponsiveAnalysisRun({
             requestId: entry.request_id,
             responseVersion: entry.response_version,
             responseName: entry.provider === "openai" ? "ChatGPT" : "Claude",
+            provider: entry.provider, model: entry.model, content: entry.response, webSources: [],
         })),
         combinedResponseCount: sourceRows.length,
         failedResponseCount: 0,

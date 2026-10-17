@@ -14,7 +14,7 @@ CACHE_AWARE_CREDIT_POLICY_VERSION = "cache-aware-v1"
 CORTEX_PROMPT_STRUCTURE_VERSION = "cortex-prompt-v2"
 CONTEXT_SUMMARY_POLICY_VERSION = "context-summary-v1"
 OPTIMIZER_PROMPT_VERSION = "optimizer-prompt-v1"
-CORTEX_ANALYSIS_POLICY_VERSION = "cortex-analysis-v1"
+CORTEX_ANALYSIS_POLICY_VERSION = "cortex-analysis-v2-editorial"
 
 
 def env_flag(name: str, *, default: bool = False) -> bool:

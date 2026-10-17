@@ -8,7 +8,7 @@ import {
 
 test("mobile Compare opens the visible model picker and updates its selection", async ({ responsiveApp }) => {
     const { page } = responsiveApp;
-    await openMobilePanel(page, "Compare");
+    await openMobilePanel(page, "Analyze");
 
     const connector = page.getByTestId("compare-connector");
     await expect(connector).toHaveCount(1);
@@ -75,7 +75,7 @@ test("mobile Compare adds and removes a third model without page overflow", asyn
     const { page, state, reload } = responsiveApp;
     state.subscriptionPlan = "pro";
     await reload();
-    await openMobilePanel(page, "Compare");
+    await openMobilePanel(page, "Analyze");
 
     await page.getByRole("button", { name: "Add model to comparison" }).click();
     await expect(page.locator("#compareModel3Wrap")).toBeVisible();
@@ -102,7 +102,7 @@ test("mobile Compare adds and removes a third model without page overflow", asyn
 test("small mobile keeps the Compare connector inside the model scroller", async ({ responsiveApp }) => {
     const { page } = responsiveApp;
     await page.setViewportSize({ width: 320, height: 568 });
-    await openMobilePanel(page, "Compare");
+    await openMobilePanel(page, "Analyze");
 
     const metrics = await page.evaluate(() => {
         const first = document.querySelector("#compareModel1Wrap")?.getBoundingClientRect();
@@ -148,14 +148,14 @@ test("mobile History search restores a grouped Compare session", async ({ respon
     await expect(headers.locator('[id^="response-stats-"]')).toHaveCount(6);
     await expect(page.locator("#promptInput")).toHaveAttribute(
         "placeholder",
-        "Ask once and compare model responses",
+        "What would you like to understand?",
     );
     await expectNoHorizontalOverflow(page);
 });
 
 test("mobile Compare stacks Markdown table rows with visible column labels", async ({ responsiveApp }) => {
     const { page } = responsiveApp;
-    await restoreHistoryThread(page, "Compare deployment options table");
+    await restoreHistoryThread(page, "Compare deployment options table", { view: "responses" });
 
     const responseTabs = page.getByRole("tablist", { name: "Compare model responses" });
     await expect(responseTabs).toBeVisible();
@@ -230,13 +230,13 @@ test("mobile Compare stacks Markdown table rows with visible column labels", asy
 
 test("mobile multi-turn Compare switches one natural-height response card at a time", async ({ responsiveApp }) => {
     const { page } = responsiveApp;
-    await restoreHistoryThread(page, "Architecture decision");
+    await restoreHistoryThread(page, "Architecture decision", { view: "responses" });
 
     const firstTurn = page.locator('article[aria-label="Model comparison"]').first();
     const tabs = firstTurn.getByRole("tablist", { name: "Compare model responses" });
     const gptTab = tabs.getByRole("tab", { name: "GPT-5.1" });
     const claudeTab = tabs.getByRole("tab", { name: "Claude Sonnet" });
-    const panels = firstTurn.locator('[role="tabpanel"]');
+    const panels = firstTurn.locator('[data-response-panel]');
 
     await expect(panels).toHaveCount(2);
     await expect(gptTab).toHaveAttribute("aria-selected", "true");
@@ -245,9 +245,11 @@ test("mobile multi-turn Compare switches one natural-height response card at a t
     const initialActiveTabLeft = await gptTab.evaluate(
         element => element.getBoundingClientRect().left,
     );
-    await page.locator('section[aria-label="Chat transcript"]').evaluate(element => {
-        element.scrollTop = 260;
-        element.dispatchEvent(new Event("scroll", { bubbles: true }));
+    await tabs.evaluate(element => {
+        const transcript = element.closest('section[aria-label="Chat transcript"]');
+        // Scroll past the provider row regardless of the navigation/header height.
+        transcript.scrollTop += element.getBoundingClientRect().top - transcript.getBoundingClientRect().top + 32;
+        transcript.dispatchEvent(new Event("scroll", { bubbles: true }));
     });
     await expect
         .poll(async () => tabs.evaluate(element => element.className))
@@ -320,7 +322,7 @@ test("mobile multi-turn Compare switches one natural-height response card at a t
 
 test("mobile Compare response actions stay above the docked follow-up composer", async ({ responsiveApp }) => {
     const { page } = responsiveApp;
-    await restoreHistoryThread(page, "Architecture decision");
+    await restoreHistoryThread(page, "Architecture decision", { view: "responses" });
 
     await expectResponseActionsClearDock(page);
     await expectNoHorizontalOverflow(page);

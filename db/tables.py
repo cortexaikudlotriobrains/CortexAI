@@ -62,6 +62,7 @@ TABLE_NAMES = [
     "credit_transactions",
     "billing_webhook_events",
     "cortex_analysis_runs",
+    "compare_analysis_intents",
     "prompt_optimization_cache",
     "research_reuse_cache",
     "cache_reuse_events",

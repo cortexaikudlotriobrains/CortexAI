@@ -150,9 +150,23 @@ async def estimate_generation(
         raise billing_database_required_http_exception()
     request_id = str(getattr(request.state, "request_id", "") or uuid4())
     _SESSION_AUTH_GUARD.require(auth=auth, request_id=request_id)
+    from server.utils import validate_and_trim_context
+    payload.context = validate_and_trim_context(payload.context)
+    context_messages = [item.model_dump() for item in payload.context.conversation_history] if payload.context and payload.context.conversation_history else []
+    estimation_input = "\n".join([payload.prompt, *(item["content"] for item in context_messages)])
     registry = ModelRegistry.from_yaml()
     target_estimates: list[GenerationEstimateTargetDTO] = []
     total = ADVANCED_WEB_SEARCH_CREDITS if payload.research_enabled else 0
+    if payload.include_native_search:
+        from config.web_search import load_native_web_search_config
+        from tools.web.native_policy import resolve_web_search_policy
+        from server.billing.web_search_billing import web_search_reservation_override
+        config = load_native_web_search_config()
+        policy = resolve_web_search_policy(payload.prompt, requested_mode="on" if payload.research_enabled else "auto", max_operations=config.max_operations)
+        search_override = web_search_reservation_override((target.provider for target in payload.targets),
+            native_enabled=bool(config.enabled and config.compare_enabled), search_enabled=policy.enabled,
+            per_target=True)
+        total = search_override if search_override is not None else (ADVANCED_WEB_SEARCH_CREDITS if policy.enabled else 0)
     for target in payload.targets:
         candidate = registry.find_model(target.provider, target.model)
         if candidate is None or not candidate.enabled:
@@ -168,12 +182,12 @@ async def estimate_generation(
             model=target.model,
             generation=target.generation or payload.generation,
             legacy_max_tokens=None,
-            input_text=payload.prompt,
+            input_text=estimation_input,
             registry=registry,
         )
         estimate = estimate_model_credits(
             candidate,
-            input_text=payload.prompt,
+            input_text=estimation_input,
             max_output_tokens=budget.effective_max_output_tokens,
         )
         total += estimate.charge.total_credits
@@ -187,11 +201,23 @@ async def estimate_generation(
             )
         )
 
+    analysis_credits = 0
+    if payload.include_analysis:
+        from server import analysis_jobs, cortex_analysis
+        analysis_jobs.preflight()
+        candidate = registry.find_model("openai", cortex_analysis.configured_analysis_model())
+        context = [item.model_dump() for item in payload.context.conversation_history] if payload.context and payload.context.conversation_history else []
+        analysis_credits = estimate_model_credits(candidate,
+            input_text=analysis_jobs.initial_reservation_input(payload.prompt, context,
+                [item.effective_max_output_tokens for item in target_estimates]),
+            max_output_tokens=cortex_analysis.analysis_output_tokens()).charge.total_credits
+        total += analysis_credits
     with _db_uow() as db_session:
         identity = _resolve_identity(auth=auth, request_id=request_id, db_session=db_session)
         effective = resolve_effective_subscription(db_session, identity.user_id)
         remaining = load_allowance_usage(db_session, effective)["ai_credits"].remaining
     return GenerationEstimateResponseDTO(
+        analysis_ai_credits=analysis_credits,
         targets=target_estimates,
         estimated_max_ai_credits=total,
         remaining_ai_credits=remaining,

@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { ApiClientError } from "../api/client";
+import { ApiClientError, post } from "../api/client";
 import { streamChat } from "../api/chat";
 import { streamCompare } from "../api/compare";
 import { fetchHistory } from "../api/history";
@@ -315,9 +315,13 @@ export function useChat() {
   );
 
   const cancel = useCallback(() => {
+    const state = useChatStore.getState();
+    const active = state.turns.find((turn) => turn.id === state.activeTurnId);
+    if (active?.mode === "compare" && active.requestGroupId && state.streaming) {
+      void post(`/v1/compare/${encodeURIComponent(active.requestGroupId)}/cancel`, {}).catch(() => {});
+    }
     activeAbortController?.abort();
     activeAbortController = null;
-    const state = useChatStore.getState();
     if (state.activeTurnId) {
       const activeTurn = state.turns.find((turn) => turn.id === state.activeTurnId);
       if (activeTurn?.status === "optimizing" && activeTurn.optimization) {
@@ -581,6 +585,7 @@ async function runCompareTurn({
     }),
   );
   const request: CompareRequest = {
+    automatic_analysis: true,
     prompt: submittedPrompt,
     credit_activity_id: creditActivityId,
     initial_query: initialQuery,
@@ -626,7 +631,9 @@ async function runCompareTurn({
       }
       deltaBuffer.flush();
       const latest = useChatStore.getState();
-      if (chunk.type === "activity" && chunk.activity) {
+      if (chunk.type === "start" && chunk.request_group_id) {
+        useChatStore.setState((state) => ({ turns: state.turns.map((turn) => turn.id === activeTurnId ? { ...turn, requestGroupId: chunk.request_group_id } : turn) }));
+      } else if (chunk.type === "activity" && chunk.activity) {
         const responseCount =
           latest.turns.find((turn) => turn.id === activeTurnId)?.responses.length ??
           placeholders.length;
@@ -685,6 +692,9 @@ async function runCompareTurn({
 
   const latest = useChatStore.getState();
   if (!signal.aborted) {
+    const answers = latest.turns.find(turn => turn.id === activeTurnId)?.responses ?? [];
+    if (answers.filter(response => !response.error && response.text.trim()).length >= 2)
+      latest.setTurnAnalysisStatus(activeTurnId, "processing");
     latest.setTurnStatus(activeTurnId, "complete");
     latest.setStreaming(false);
     await refreshHistory();

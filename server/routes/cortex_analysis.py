@@ -2,32 +2,19 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import Literal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
-from config.cache_optimization import (
-    CORTEX_ANALYSIS_POLICY_VERSION,
-    cortex_analysis_reuse_enabled,
-)
 from db import (
     CortexAnalysisSchemaUnavailable,
-    create_cortex_analysis_run,
     get_compare_analysis_sources,
     list_cortex_analysis_runs,
-    record_cache_reuse_event,
     require_cortex_analysis_schema,
 )
 from server import cortex_analysis as analysis_service
 from server import persistence as persistence_service
-from server.billing.enforcement_service import (
-    BillableModelUsage,
-    ReservedRequestUsage,
-    resolve_model_target,
-)
-from server.billing.errors import enforcement_http_exception
 from server.billing.response_credit_service import calculate_response_credit_usage
 from server.dependencies import AuthResult, get_auth
 from server.routes.session_auth import SessionScopedAuthGuard
@@ -36,6 +23,7 @@ from server.schemas.cortex_analysis import (
     CortexAnalysisDisagreementDTO,
     CortexAnalysisRunDTO,
     CortexAnalysisSourceDTO,
+    CortexAnalysisStateDTO,
     CortexAnalysisUniqueInsightDTO,
 )
 from utils.logger import get_logger
@@ -51,30 +39,6 @@ _SESSION_AUTH_GUARD = SessionScopedAuthGuard(
 API_DB_ENABLED = persistence_service.API_DB_ENABLED
 _db_uow = persistence_service.db_uow
 _resolve_identity = persistence_service.resolve_identity
-
-
-def _record_analysis_reuse_decision(
-    *,
-    user_id: UUID,
-    request_id: str,
-    reused: bool,
-) -> None:
-    """Best-effort audit recording must never block Cortex Analysis."""
-
-    try:
-        with _db_uow() as db_session:
-            record_cache_reuse_event(
-                db_session,
-                user_id=user_id,
-                request_id=request_id,
-                operation_type="cortex_analysis",
-                reused=reused,
-            )
-    except Exception:
-        logger.warning(
-            "Cortex Analysis reuse telemetry unavailable",
-            exc_info=True,
-        )
 
 
 def _confidence_level(value: object) -> Literal["limited", "moderate", "high"]:
@@ -180,7 +144,7 @@ async def list_analysis_runs(
     return [
         _run_to_dto(
             run,
-            current_fingerprint=fingerprints.get(run["request_group_id"]),
+            current_fingerprint=fingerprints.get(run["analysis_id"]),
         )
         for run in runs
     ]
@@ -224,211 +188,14 @@ async def create_analysis_run(
             },
         )
 
-    sources, failed_count = analysis_service.normalize_analysis_sources(source_payload["responses"])
-    if len(sources) < 2:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "code": "insufficient_compare_responses",
-                "message": "At least two successful responses are required.",
-            },
-        )
-    if len(sources) > 3:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={
-                "code": "too_many_compare_responses",
-                "message": "Cortex Analysis supports two or three responses.",
-            },
-        )
-
-    fingerprint = analysis_service.source_fingerprint(sources)
-    reusable = None
-    if cortex_analysis_reuse_enabled() and not regenerate:
-        with _db_uow(commit_on_success=False) as db_session:
-            prior_runs = list_cortex_analysis_runs(
-                db_session,
-                resolution.user_id,
-                request_group_id=request_group_id,
-            )
-        reusable = next(
-            (
-                run
-                for run in prior_runs
-                if run.get("source_fingerprint") == fingerprint
-                and run.get("model") == analysis_service.configured_analysis_model()
-                and run.get("analysis_policy_version")
-                == CORTEX_ANALYSIS_POLICY_VERSION
-            ),
-            None,
-        )
-    _record_analysis_reuse_decision(
-        user_id=resolution.user_id,
-        request_id=req_id,
-        reused=reusable is not None,
+    from server import analysis_jobs
+    saved = await analysis_jobs.create_manual(
+        resolution.user_id, request_group_id, regenerate=regenerate, request_id=req_id,
     )
-    if reusable is not None:
-        logger.info(
-            "Reused an existing Cortex Analysis run",
-            extra={
-                "extra_fields": {
-                    "event": "cortex_analysis.reused",
-                    "request_id": req_id,
-                    "operation_type": "cortex_analysis",
-                    "provider": "openai",
-                    "model": analysis_service.configured_analysis_model(),
-                    "credits": 0,
-                    "cache_policy_version": CORTEX_ANALYSIS_POLICY_VERSION,
-                }
-            },
-        )
-        return _run_to_dto(reusable, current_fingerprint=fingerprint)
-
-    billing_reservation: ReservedRequestUsage | None = None
-    try:
-        billing_reservation = persistence_service.reserve_subscription_usage(
-            user_id=resolution.user_id,
-            request_id=f"{req_id}:cortex-analysis:{uuid4()}",
-            operation_type="cortex_analysis",
-            model_targets=(
-                resolve_model_target(
-                    provider="openai",
-                    model=analysis_service.configured_analysis_model(),
-                ),
-            ),
-            research_enabled=False,
-            input_text="\n".join(
-                [
-                    str(source_payload.get("question") or ""),
-                    *(source.content for source in sources),
-                ]
-            ),
-            initial_query=str(source_payload.get("question") or ""),
-            max_output_tokens=analysis_service.CORTEX_ANALYSIS_MAX_OUTPUT_TOKENS,
-        )
-    except Exception as exc:
-        raise enforcement_http_exception(exc) from exc
-
-    try:
-        generated = await asyncio.to_thread(
-            analysis_service.analyze_responses,
-            question=str(source_payload.get("question") or ""),
-            sources=sources,
-        )
-    except analysis_service.CortexAnalysisGenerationError as exc:
-        if billing_reservation is not None:
-            try:
-                persistence_service.release_subscription_usage(
-                    reservation=billing_reservation,
-                    reason="cortex_analysis_provider_failed",
-                )
-            except Exception:
-                logger.exception("Cortex Analysis credit reservation release failed")
-        logger.warning(
-            "Cortex Analysis generation failed",
-            extra={
-                "extra_fields": {
-                    "request_id": req_id,
-                    "request_group_id": str(request_group_id),
-                    "error_type": type(exc).__name__,
-                }
-            },
-        )
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail={
-                "code": "cortex_analysis_failed",
-                "message": "Cortex couldn't combine these answers. Try again.",
-            },
-        ) from exc
-
-    if billing_reservation is not None:
-        try:
-            persistence_service.finalize_subscription_usage(
-                reservation=billing_reservation,
-                successful_targets=(),
-                model_usages=(
-                    BillableModelUsage(
-                        provider="openai",
-                        model=analysis_service.configured_analysis_model(),
-                        prompt_tokens=generated.prompt_tokens,
-                        cached_input_tokens=generated.cached_input_tokens,
-                        cache_write_tokens=generated.cache_write_tokens,
-                        output_tokens=generated.completion_tokens,
-                        reasoning_tokens=generated.reasoning_tokens,
-                        output_text=generated.recommended_answer,
-                        provider_cost_usd=generated.estimated_cost,
-                        pricing_snapshot=generated.pricing_snapshot,
-                        pricing_version=generated.pricing_version,
-                    ),
-                ),
-                research_provider_credits_used=0,
-            )
-        except Exception as exc:
-            raise enforcement_http_exception(exc) from exc
-
-    session_id = persistence_service.coerce_uuid(str(source_payload.get("session_id") or ""))
-    if session_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "code": "compare_session_missing",
-                "message": "This Compare run is not attached to a saved session.",
-            },
-        )
-
-    snapshot = analysis_service.source_snapshot(sources)
-    with _db_uow() as db_session:
-        analysis_id = create_cortex_analysis_run(
-            db_session,
-            user_id=resolution.user_id,
-            session_id=session_id,
-            request_group_id=request_group_id,
-            model=analysis_service.configured_analysis_model(),
-            source_fingerprint=fingerprint,
-            source_snapshot=snapshot,
-            recommended_answer=generated.recommended_answer,
-            agreements=generated.agreements,
-            disagreements=generated.disagreements,
-            disagreement_note=generated.disagreement_note,
-            unique_insights=generated.unique_insights,
-            confidence_level=generated.confidence_level,
-            confidence_reason=generated.confidence_reason,
-            verify_items=generated.verify_items,
-            high_stakes_domain=generated.high_stakes_domain,
-            combined_response_count=len(sources),
-            failed_response_count=failed_count,
-            prompt_tokens=generated.prompt_tokens,
-            completion_tokens=generated.completion_tokens,
-            total_tokens=generated.total_tokens,
-            estimated_cost=generated.estimated_cost,
-            analysis_policy_version=CORTEX_ANALYSIS_POLICY_VERSION,
-            cached_input_tokens=generated.cached_input_tokens,
-            cache_write_tokens=generated.cache_write_tokens,
-            reasoning_tokens=generated.reasoning_tokens,
-            pricing_snapshot=generated.pricing_snapshot,
-            pricing_version=generated.pricing_version,
-        )
-
-    with _db_uow(commit_on_success=False) as db_session:
-        saved_runs = list_cortex_analysis_runs(
-            db_session,
-            resolution.user_id,
-            request_group_id=request_group_id,
-        )
-    saved = next(
-        (run for run in saved_runs if run["analysis_id"] == str(analysis_id)),
-        None,
-    )
-    if saved is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={
-                "code": "cortex_analysis_persistence_failed",
-                "message": "The analysis could not be saved.",
-            },
-        )
-    return _run_to_dto(saved, current_fingerprint=fingerprint)
+    sources, _ = analysis_service.normalize_analysis_sources(source_payload["responses"])
+    return _run_to_dto(saved, current_fingerprint=analysis_service.source_fingerprint(
+        sources, saved.get("context_snapshot") or [],
+    ))
 
 
 def _current_fingerprints(
@@ -446,7 +213,12 @@ def _current_fingerprints(
         if current is None:
             continue
         sources, _ = analysis_service.normalize_analysis_sources(current["responses"])
-        fingerprints[str(group_id)] = analysis_service.source_fingerprint(sources)
+        for run in runs:
+            if str(run.get("request_group_id")) != str(group_id):
+                continue
+            fingerprints[str(run["analysis_id"])] = analysis_service.source_fingerprint(
+                sources, run.get("context_snapshot") or []
+            ) if run.get("analysis_policy_version") != "cortex-analysis-v1" else analysis_service.source_fingerprint(sources)
     return fingerprints
 
 
@@ -489,6 +261,8 @@ def _run_to_dto(
         sessionId=str(run.get("session_id") or ""),
         model=analysis_model,
         recommendedAnswer=str(run.get("recommended_answer") or ""),
+        structuredResult=run.get("structured_result") or None,
+        contextSnapshot=run.get("context_snapshot") or [],
         agreements=[str(item) for item in run.get("agreements") or [] if str(item)],
         disagreements=[
             CortexAnalysisDisagreementDTO(
@@ -525,6 +299,8 @@ def _run_to_dto(
                 requestId=str(item.get("requestId") or ""),
                 responseVersion=max(1, int(item.get("responseVersion") or 1)),
                 responseName=str(item.get("responseName") or "One response"),
+                provider=str(item.get("provider") or ""), model=str(item.get("model") or ""),
+                content=item.get("content"), webSources=item.get("webSources") or [],
             )
             for item in snapshot
             if isinstance(item, dict)
@@ -535,7 +311,40 @@ def _run_to_dto(
         ),
         failedResponseCount=max(0, int(run.get("failed_response_count") or 0)),
         aiCredits=credit_usage.ai_credits,
-        creditUsageEstimated=credit_usage.credit_usage_estimated,
+        creditUsageEstimated=(credit_usage.credit_usage_estimated or
+            bool((run.get("structured_result") or {}).get("usageEstimated"))),
         createdAt=str(run.get("created_at") or ""),
         isStale=(current_fingerprint is not None and source_fingerprint != current_fingerprint),
     )
+
+
+@router.get("/compare/{request_group_id}/analysis-state", response_model=CortexAnalysisStateDTO)
+async def analysis_state(request_group_id: UUID, request: Request, auth: AuthResult = Depends(get_auth)):
+    """Read authorization/status and an estimate; this endpoint never starts paid work."""
+    from db import analysis_repository
+    from server.billing.credit_estimator import estimate_model_credits
+    _require_db_mode()
+    req_id = str(getattr(request.state, "request_id", "") or uuid4())
+    _SESSION_AUTH_GUARD.require(auth=auth, request_id=req_id)
+    with _db_uow(commit_on_success=False) as db:
+        identity = _resolve_identity(auth=auth, request_id=req_id, db_session=db)
+        payload = get_compare_analysis_sources(db, identity.user_id, request_group_id)
+        if payload is None:
+            raise HTTPException(404, detail="Analyze run was not found.")
+        intent = analysis_repository.get_intent(db, identity.user_id, request_group_id)
+    sources, _ = analysis_service.normalize_analysis_sources(payload["responses"])
+    context = intent.get("context_snapshot") if intent else payload.get("prior_context", [])
+    estimated = None
+    try:
+        target = analysis_service._model_registry().find_model("openai", analysis_service.configured_analysis_model())
+        estimated = estimate_model_credits(target,
+            input_text=analysis_service.reservation_input(payload["question"], sources, context),
+            max_output_tokens=analysis_service.analysis_output_tokens()).charge.total_credits
+    except Exception:
+        logger.warning("Analysis estimate unavailable", exc_info=True)
+    return {"state": intent["state"] if intent else "idle",
+            "progressStage": intent.get("progress_stage") if intent and intent["state"] == "processing" else None,
+            "automatic": bool(intent and intent["automatic"]),
+            "analysisId": str(intent.get("analysis_id") or "") if intent else None,
+            "errorCode": intent.get("error_code") if intent else None,
+            "estimatedAiCredits": estimated}

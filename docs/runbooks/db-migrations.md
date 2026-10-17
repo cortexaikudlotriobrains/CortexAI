@@ -85,6 +85,7 @@ psql "$env:MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260829_
 psql "$env:MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260905_add_subscription_grants.sql
 psql "$env:MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260927_add_tool_credit_transaction_item.sql
 psql "$env:MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20261007_add_versioned_model_rate_cards.sql
+psql "$env:MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20261016_add_compare_synthesis.sql
 ```
 
 The `20260727` script alters `llm_requests`, so the migration connection must
@@ -610,3 +611,33 @@ COMMIT;
 ```
 
 Once billing rows exist, do not use the table-drop rollback. Keep the additive schema or restore/repair from the verified snapshot with a reviewed compensating migration. Neither rollback path deletes or modifies historical LLM request/response or chat-history data.
+
+### Analyze synthesis migration and recovery
+
+Apply `20261016_add_compare_synthesis.sql` with the table owner, then restart the
+API to refresh reflected metadata. It adds `structured_result`/`context_snapshot`
+to append-only analysis runs and the owned `compare_analysis_intents` queue.
+The migration also adds nullable `compare_analysis_intents.progress_stage` for
+the live Analysis workflow. If the initial migration was already applied before
+this column was added, rerun this idempotent migration with the owner and restart
+the API to refresh metadata. Startup preflight checks the column. Progress writes
+are presentation metadata; they do not reserve work or change settlement.
+It does not rewrite old analyses or change their billing. Roll back by serving
+the previous application build; retain additive tables and audit rows.
+
+The queue worker starts in PostgreSQL runtimes. A request claims a queued intent
+atomically before calling a provider. Waiting intents can continue after an
+individual failed-response retry. Startup can resume queued/waiting authorized
+intents with persisted answers. A `processing` row older than 15 minutes becomes
+`failed/analysis_interrupted`, because the provider outcome may be unknown; the
+worker never purchases an automatic replay. Reconcile its canonical reservation
+and provider telemetry before a cost-disclosed manual retry. Standard reservation
+cleanup handles abandoned holds. The explicit stream cancel endpoint sets an owned durable cancellation flag; the producer process checks it while
+the selected model requests run, including when another API worker accepts Stop. Navigation uses detached completion.
+
+Schema/provider/pricing failures must stop combined execution before model calls.
+Check `/analysis-state` and immutable saved runs without triggering new work.
+Test upgrade/downgrade access, full/metadata storage policy, private sources,
+concurrent retries and worker restart behavior in staging. Routine tests use
+isolated databases and provider doubles; no production migration/data changes
+are made by development validation.

@@ -51,7 +51,7 @@ test("mobile Usage route renders the compact dashboard and footer navigation", a
     const mobileNav = page.getByRole("navigation", { name: "Mobile navigation" });
     await expect(mobileNav).toBeVisible();
     await expect(mobileNav.getByRole("button", { name: "Ask" })).toBeVisible();
-    await expect(mobileNav.getByRole("button", { name: "Compare" })).toBeVisible();
+    await expect(mobileNav.getByRole("button", { name: "Analyze" })).toBeVisible();
     await expect(mobileNav.getByRole("button", { name: "History" })).toBeVisible();
 
     await expectNoHorizontalOverflow(page);

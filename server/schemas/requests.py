@@ -169,6 +169,7 @@ class CompareTargetRequest(BaseModel):
 
 
 class CompareRequest(BaseModel):
+    automatic_analysis: bool = False
     prompt: str = Field("", min_length=0)
     credit_activity_id: Optional[str] = Field(None, min_length=1, max_length=96)
     initial_query: Optional[str] = None
@@ -208,6 +209,9 @@ class GenerationEstimateRequest(BaseModel):
     targets: List[GenerationEstimateTargetRequest] = Field(..., min_length=1, max_length=3)
     generation: Optional[GenerationRequest] = None
     research_enabled: bool = False
+    include_analysis: bool = False
+    include_native_search: bool = False
+    context: Optional[UserContextRequest] = None
 
 
 class ClientDiagnosticEvent(BaseModel):

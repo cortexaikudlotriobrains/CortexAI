@@ -20,11 +20,11 @@ test("mobile navigation switches between Ask, Compare, and History", async ({ re
         "Ask anything…",
     );
 
-    await openMobilePanel(page, "Compare");
+    await openMobilePanel(page, "Analyze");
     await expect(page.getByLabel("Compare model selectors")).toBeVisible();
     await expect(page.locator("#promptInput")).toHaveAttribute(
         "placeholder",
-        "Ask once and compare model responses",
+        "What would you like to understand?",
     );
 
     await openMobilePanel(page, "History");
@@ -53,7 +53,7 @@ test("mobile compose action starts a fresh Compare session from History", async 
     await expect(page.locator("#promptInput")).toHaveValue("");
     await expect(page.locator("#promptInput")).toHaveAttribute(
         "placeholder",
-        "Ask once and compare model responses",
+        "What would you like to understand?",
     );
     await expectNoHorizontalOverflow(page);
 });
@@ -115,7 +115,7 @@ test("mobile composer uses the refresh hairline shell with a soft focus state", 
     const { page } = responsiveApp;
     await page.setViewportSize({ width: 390, height: 844 });
 
-    for (const mode of ["Ask", "Compare"]) {
+    for (const mode of ["Ask", "Analyze"]) {
         await openMobilePanel(page, mode);
         const textarea = page.locator("#promptInput");
         const composer = textarea.locator("xpath=../..");
@@ -161,7 +161,7 @@ test("mobile Ask and Compare keep feature controls beside Attach", async ({ resp
 
     for (const [mode, switchNames] of [
         ["Ask", ["Smart routing"]],
-        ["Compare", []],
+        ["Analyze", []],
     ]) {
         await openMobilePanel(page, mode);
         await expectComposerToolbarOrder(page, switchNames);
@@ -321,7 +321,7 @@ test("small mobile keeps the Smart tooltip and options menu inside the viewport"
     await page.keyboard.press("Escape");
     await expect(optionsMenu).toBeHidden();
 
-    await openMobilePanel(page, "Compare");
+    await openMobilePanel(page, "Analyze");
     await expect(page.getByRole("switch", { name: "Research mode" })).toHaveCount(0);
     await page.getByRole("button", { name: "More options" }).click();
     await expect(page.getByRole("switch", { name: /Improve prompt/ })).toBeVisible();
@@ -385,16 +385,16 @@ test("mobile Ask and Compare empty states share the upper-quarter greeting line"
         await expect(page.locator('[aria-label="Prompt examples"]')).toHaveCount(0);
         await expect(page.getByRole("heading", { name: "Ask anything" })).toHaveCount(0);
 
-        await openMobilePanel(page, "Compare");
+        await openMobilePanel(page, "Analyze");
         await expect(promptInput).toBeVisible();
         await expect(promptInput).toHaveAttribute(
             "placeholder",
-            "Ask once and compare model responses",
+            "What would you like to understand?",
         );
         await expect(page.getByText("Hi, how can I help?", { exact: true })).toHaveCount(0);
         await expectGreetingAtMobileEmptyHeadingLine(
             page,
-            "Hi, what would you like to compare?",
+            "Hi, what would you like to analyze?",
         );
         await expect(page.getByRole("heading", { name: "Compare answers" })).toHaveCount(0);
         await expectNoHorizontalOverflow(page);
@@ -503,14 +503,18 @@ async function expectComposerToolbarOrder(page, switchNames) {
         options,
         send,
     ];
-    const bounds = [];
-
     for (const control of controls) {
         await expect(control).toBeVisible();
-        const box = await control.boundingBox();
-        expect(box).not.toBeNull();
-        bounds.push(box);
     }
+    // The estimate can resize the sheet between protocol calls. Measure the
+    // whole toolbar in one frame so every position belongs to the same layout.
+    const handles = await Promise.all(controls.map(control => control.elementHandle()));
+    const bounds = await page.evaluate(elements => elements.map(element => {
+        if (!element) return null;
+        const rect = element.getBoundingClientRect();
+        return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+    }), handles);
+    for (const box of bounds) expect(box).not.toBeNull();
 
     const attachCenter = bounds[0].y + bounds[0].height / 2;
     for (const box of bounds.slice(1, -1)) {

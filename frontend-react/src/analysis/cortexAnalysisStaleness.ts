@@ -5,7 +5,7 @@ export function currentSuccessfulResponses(responses: ChatResponse[]) {
     (response) =>
       !response.error &&
       response.ui_status !== "failed" &&
-      (response.ui_status === undefined || response.ui_status === "complete") &&
+      (response.ui_status === undefined || response.ui_status === "complete" || response.ui_status === "incomplete") &&
       !!response.text.trim(),
   );
 }

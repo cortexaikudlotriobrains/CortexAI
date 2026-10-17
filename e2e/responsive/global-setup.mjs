@@ -12,6 +12,8 @@ export default async function globalSetup(config) {
     const port = Number(config.metadata.responsivePort);
     const server = await createServer({
         root: frontendRoot,
+        // Independent responsive servers must not race Vite's deps rename on Windows.
+        cacheDir: path.join(repoRoot, ".runtime", "e2e-vite-cache", String(port)),
         configFile: path.join(frontendRoot, "vite.config.ts"),
         logLevel: "error",
         server: {

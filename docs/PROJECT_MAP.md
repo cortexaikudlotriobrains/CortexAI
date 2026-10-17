@@ -278,3 +278,44 @@ Last updated: 2026-08-20
 - `server/billing/subscription_service.py`: guarded local > enabled valid Stripe > valid grant > Free; existing entitlement, Work and credit services consume the catalogue unchanged.
 - `frontend-react/src/pages/PricingPage.tsx`, `BillingPage.tsx`: granted current-plan display, CortexAI-provided access and usage-reset wording.
 - `docs/runbooks/subscription-grants.md`: operator commands, coordinated deployment and audit policy.
+
+## Analyze redesign ownership
+
+- `server/analysis_jobs.py`: automatic/manual synthesis, wallet lifecycle,
+  durable authorization and startup queue recovery.
+- `server/analysis_evidence.py`: versioned schema, exact evidence validation,
+  context bounds and safe attributed source metadata.
+- `db/analysis_repository.py`, `20261016_add_compare_synthesis.sql`: atomic
+  owned job transitions and additive provenance snapshots.
+- `frontend-react/src/components/results/AnalyzeTurn.tsx`: responsive
+  Analysis/Responses/Sources state, immutable evidence navigation and real cards.
+- `AnalysisSources.tsx` / `.module.css`: screenshot source cards, Cited for
+  passages, provider/revision identity, original-source links and model-answer
+  navigation. `analysis/analysisSources.ts` merges safe source metadata and
+  immutable response snapshots without mixing per-model citation numbering.
+  `markdown/sourcePassages.ts` uses the existing unified/remark Markdown stack
+  to locate explicit citations/links outside code, definitions and bibliographies.
+  It parses passages only in the Sources view; no provider calls or storage changes.
+- `CompareResponses.tsx`: original model-response grid, aggregate summary,
+  equal-height desktop/tablet cards with independent scrolling and horizontal
+  sticky phone provider tabs. It reuses the unchanged `ResultsSection.module.css`;
+  Cortex Analysis is the default view on entry/re-entry to Analyze; Model responses retains its separate original layout and selected model.
+- `CortexAnalysisZone.tsx`: takeaway, quotations, differences, limits, saved runs
+  and shared `AnalysisPassages` attribution/context controls. Its CSS module and
+  `AnalyzeTurn.module.css` use the existing Cortex theme tokens; shared shell,
+  branding, provider icons and composer styling retain their original theme.
+  `AnalysisModelName` reuses provider logos throughout the result views. The
+  result-only lavender takeaway, editorial overview, difference disclosure,
+  quote grid and source-count strip follow the supplied screenshots. The shared
+  `CortexIcon.tsx` adds layers/sparkles/split/book-open glyphs for these results
+  without replacing existing glyphs or global styling.
+- Cortex Analysis loading uses a live model-status ledger and three-step
+  workflow in `CortexAnalysisZone.tsx`, fed by response activity and read-only
+  `AnalyzeTurn.tsx` polling. `server/analysis_jobs.py` persists `progress_stage`
+  on the owned intent; `server/cortex_analysis.py` reports payload preparation,
+  synthesis and quote-validation milestones. The status DTO exposes nullable
+  `progressStage`. No demo timers, extra provider calls or paid view changes.
+- `hooks/useAnalyzeEstimate.ts`, `config/productLabels.ts`,
+  `store/responseUiStore.ts`: combined-estimate Send authorization, mode naming
+  and local votes. The composer estimate footer and above-tab contributor/status
+  strip are omitted; provider identity remains in the analysis and response cards.

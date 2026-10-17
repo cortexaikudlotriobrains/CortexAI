@@ -413,10 +413,10 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"prompt\": \"Estimate a detailed answer\",\n  \"targets\": [\n    {\"provider\": \"{{chat_provider}}\", \"model\": \"{{chat_model}}\"}\n  ],\n  \"generation\": {\"profile\": \"auto\", \"reasoning\": {\"mode\": \"auto\", \"effort\": \"auto\"}},\n  \"research_enabled\": false\n}"
+              "raw": "{\n  \"prompt\": \"Estimate a detailed answer\",\n  \"targets\": [\n    {\n      \"provider\": \"{{chat_provider}}\",\n      \"model\": \"{{chat_model}}\"\n    }\n  ],\n  \"generation\": {\n    \"profile\": \"auto\",\n    \"reasoning\": {\n      \"mode\": \"auto\",\n      \"effort\": \"auto\"\n    }\n  },\n  \"research_enabled\": false,\n  \"include_analysis\": true,\n  \"context\": {\n    \"conversation_history\": []\n  },\n  \"include_native_search\": true\n}"
             },
             "url": "{{base_url}}/v1/billing/estimate-generation",
-            "description": "Returns the same per-target generation ceilings and maximum temporary AI-credit hold used by Ask/Compare without creating a reservation. Unsupported/unsafe generation requests return 422."
+            "description": "Returns the same per-target generation ceilings and maximum temporary AI-credit hold used by Ask/Compare without creating a reservation. Unsupported/unsafe generation requests return 422. Read-only combined estimate; include_analysis adds analysis_ai_credits to estimated_max_ai_credits. No reservation or model call. include_native_search uses the same automatic native-search reservation policy as Analyze."
           },
           "event": [
             {
@@ -1054,10 +1054,10 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"prompt\": \"Postman B2B compare probe\",\n  \"credit_activity_id\": \"postman-compare-activity\",\n  \"initial_query\": \"Postman B2B compare probe\",\n  \"generation\": {\"profile\": \"auto\", \"reasoning\": {\"mode\": \"on\", \"effort\": \"low\"}},\n  \"routing\": {\"web_mode\": \"auto\"},\n  \"targets\": [\n    {\"provider\": \"{{chat_provider}}\", \"model\": \"{{chat_model}}\"},\n    {\"provider\": \"{{compare_provider}}\", \"model\": \"{{compare_model}}\"}\n  ]\n}"
+              "raw": "{\n  \"prompt\": \"Postman B2B compare probe\",\n  \"credit_activity_id\": \"postman-compare-activity\",\n  \"initial_query\": \"Postman B2B compare probe\",\n  \"generation\": {\n    \"profile\": \"auto\",\n    \"reasoning\": {\n      \"mode\": \"on\",\n      \"effort\": \"low\"\n    }\n  },\n  \"routing\": {\n    \"web_mode\": \"auto\"\n  },\n  \"targets\": [\n    {\n      \"provider\": \"{{chat_provider}}\",\n      \"model\": \"{{chat_model}}\"\n    },\n    {\n      \"provider\": \"{{compare_provider}}\",\n      \"model\": \"{{compare_model}}\"\n    }\n  ],\n  \"automatic_analysis\": true\n}"
             },
             "url": "{{base_url}}/v1/compare",
-            "description": "Accepts 2-3 explicit targets. web_mode=auto gives every target its own provider-native search and source set; DeepSeek alone uses the Tavily backend. Optional credit_activity_id and initial_query are display-only ledger context. Free/Plus allow 2 and Pro allows 3. Claude generation controls are resolved independently per target from registry capabilities. All target classes and worst-case search operations are reserved before providers start; settlement charges only successful targets and reported search operations up to the three-operation product cap."
+            "description": "Accepts 2-3 explicit targets. web_mode=auto gives every target its own provider-native search and source set; DeepSeek alone uses the Tavily backend. Optional credit_activity_id and initial_query are display-only ledger context. Free/Plus allow 2 and Pro allows 3. Claude generation controls are resolved independently per target from registry capabilities. All target classes and worst-case search operations are reserved before providers start; settlement charges only successful targets and reported search operations up to the three-operation product cap. Analyze opt-in: automatic_analysis=true authorizes the selected model answers plus one eligible synthesis. Preflight/reserve both stages before providers. Omit/false preserves legacy response-only API behavior. Display the combined estimate before Send."
           },
           "event": [
             {
@@ -1109,10 +1109,10 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"prompt\": \"Postman B2B compare stream probe\",\n  \"credit_activity_id\": \"postman-compare-stream-activity\",\n  \"initial_query\": \"Postman B2B compare stream probe\",\n  \"generation\": {\"profile\": \"auto\", \"reasoning\": {\"mode\": \"on\", \"effort\": \"low\"}},\n  \"routing\": {\"web_mode\": \"auto\"},\n  \"targets\": [\n    {\"provider\": \"{{chat_provider}}\", \"model\": \"{{chat_model}}\"},\n    {\"provider\": \"{{compare_provider}}\", \"model\": \"{{compare_model}}\"}\n  ]\n}"
+              "raw": "{\n  \"prompt\": \"Postman B2B compare stream probe\",\n  \"credit_activity_id\": \"postman-compare-stream-activity\",\n  \"initial_query\": \"Postman B2B compare stream probe\",\n  \"generation\": {\n    \"profile\": \"auto\",\n    \"reasoning\": {\n      \"mode\": \"on\",\n      \"effort\": \"low\"\n    }\n  },\n  \"routing\": {\n    \"web_mode\": \"auto\"\n  },\n  \"targets\": [\n    {\n      \"provider\": \"{{chat_provider}}\",\n      \"model\": \"{{chat_model}}\"\n    },\n    {\n      \"provider\": \"{{compare_provider}}\",\n      \"model\": \"{{compare_model}}\"\n    }\n  ],\n  \"automatic_analysis\": true\n}"
             },
             "url": "{{base_url}}/v1/compare/stream",
-            "description": "Reserves all Compare targets and their independent provider-native search caps before returning NDJSON. OpenAI, Claude, Gemini, and Grok targets multiplex native provider text and known safe activity under their target index; DeepSeek and rollout-disabled targets use buffered replay. Queued native deltas are emitted before that target's response_done, preventing final-text duplication when a provider finishes quickly. Gemini rebuilds omitted answer/search steps from its streamed lifecycle when interaction.completed is partial, and an empty terminal text field does not erase visible streamed text. Activity envelopes use one monotonically increasing request-wide sequence; each target progresses or fails independently, and partial text remains visible while other targets continue. Raw provider events and provider terminal states never cross the public boundary. Claude generation controls are resolved independently per target from registry capabilities. Aggregate settlement finalizes successful targets and reported search-tool operations up to the product cap before done and also handles completed partial targets on disconnect/error. Unexpected terminal errors contain only code, customer-safe message, retryable, and request_id."
+            "description": "Reserves all Compare targets and their independent provider-native search caps before returning NDJSON. OpenAI, Claude, Gemini, and Grok targets multiplex native provider text and known safe activity under their target index; DeepSeek and rollout-disabled targets use buffered replay. Queued native deltas are emitted before that target's response_done, preventing final-text duplication when a provider finishes quickly. Gemini rebuilds omitted answer/search steps from its streamed lifecycle when interaction.completed is partial, and an empty terminal text field does not erase visible streamed text. Activity envelopes use one monotonically increasing request-wide sequence; each target progresses or fails independently, and partial text remains visible while other targets continue. Raw provider events and provider terminal states never cross the public boundary. Claude generation controls are resolved independently per target from registry capabilities. Aggregate settlement finalizes successful targets and reported search-tool operations up to the product cap before done and also handles completed partial targets on disconnect/error. Unexpected terminal errors contain only code, customer-safe message, retryable, and request_id. Analyze opt-in: automatic_analysis=true authorizes the selected model answers plus one eligible synthesis. Preflight/reserve both stages before providers. Omit/false preserves legacy response-only API behavior. Display the combined estimate before Send."
           },
           "event": [
             {
@@ -1154,7 +1154,8 @@
                 "value": "Bearer {{bearer_token}}"
               }
             ],
-            "url": "{{base_url}}/v1/compare/{{request_group_id}}/analysis"
+            "url": "{{base_url}}/v1/compare/{{request_group_id}}/analysis",
+            "description": "Direct cost-disclosed manual create/update/retry. Identical model/policy/context/revisions reuse saved output; ?regenerate=true explicitly purchases a new run. 409 means a run is in progress; 502 preserves previous saved results. V2 structuredResult contains takeaway, exact revision-bound passages, supported differences/limits and server-resolved safe linkedSources. Optional nullable headline, introduction and differences[].title support the editorial result layout under cortex-analysis-v2-editorial; older saved v2 runs may omit them. Known-source URL checks and anonymous-label restoration cover the new overview prose. Legacy fields stay readable."
           },
           "event": [
             {
@@ -1172,6 +1173,8 @@
                   "  pm.expect(body.requestGroupId).to.eql(pm.collectionVariables.get('request_group_id'));",
                   "  pm.expect(body.model).to.be.a('string');",
                   "  pm.expect(body.recommendedAnswer).to.be.a('string');",
+                  "  pm.expect(body.structuredResult.schemaVersion).to.eql(2);",
+                  "  pm.expect(body.structuredResult.passages).to.be.an('array');",
                   "  pm.expect(body.disagreements).to.be.an('array');",
                   "  body.disagreements.forEach(function (item) { pm.expect(item).to.have.all.keys('who', 'text'); });",
                   "  pm.expect(body.disagreementNote === null || typeof body.disagreementNote === 'string').to.eql(true);",
@@ -1249,6 +1252,43 @@
               }
             }
           ]
+        },
+        {
+          "name": "GET /v1/compare/{request_group_id}/analysis-state",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearer_token}}"
+              }
+            ],
+            "url": "{{base_url}}/v1/compare/{{request_group_id}}/analysis-state",
+            "description": "Read-only owned automatic-analysis state, automatic, analysisId, errorCode, estimatedAiCredits and nullable progressStage (comparing, reading, synthesizing, validating; only while processing). Stages are persisted worker milestones. Terminal/legacy states return null. Never starts or reserves work. Existing auth/ownership errors are unchanged."
+          },
+          "response": [
+            {
+              "name": "Analysis in progress",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"state\": \"processing\",\n  \"automatic\": true,\n  \"analysisId\": \"\",\n  \"errorCode\": null,\n  \"estimatedAiCredits\": 1234,\n  \"progressStage\": \"synthesizing\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/compare/{request_group_id}/cancel",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearer_token}}"
+              }
+            ],
+            "url": "{{base_url}}/v1/compare/{{request_group_id}}/cancel",
+            "description": "Explicit Stop for an owned active combined stream on its serving process. Returns 204."
+          }
         }
       ]
     },

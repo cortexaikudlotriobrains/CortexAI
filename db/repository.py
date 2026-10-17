@@ -2725,10 +2725,27 @@ def get_compare_analysis_sources(
         current_rows.append(payload)
 
     first = current_rows[0]
+    prior_context: list[dict[str, str]] = []
+    created_times = [row._mapping.get("created_at") for row in rows if row._mapping.get("created_at")]
+    if first.get("session_id") and created_times:
+        messages = get_table("messages")
+        sessions = get_table("sessions")
+        prior_rows = db.execute(
+            select(messages.c.role, messages.c.content)
+            .select_from(messages.join(sessions, messages.c.session_id == sessions.c.id))
+            .where(sessions.c.user_id == user_id,
+                   messages.c.session_id == first["session_id"],
+                   messages.c.created_at < min(created_times),
+                   messages.c.role.in_(("user", "assistant")))
+            .order_by(desc(messages.c.created_at), desc(messages.c.id)).limit(10)
+        ).mappings().all()
+        prior_context = [{"role": str(row["role"]), "content": str(row["content"])}
+                         for row in reversed(prior_rows)]
     return {
         "session_id": first.get("session_id"),
         "request_group_id": first.get("request_group_id"),
         "question": str(first.get("prompt") or ""),
+        "prior_context": prior_context,
         "responses": [
             {
                 "request_id": str(item.get("request_id") or ""),
@@ -2902,6 +2919,8 @@ def create_cortex_analysis_run(
     reasoning_tokens: int = 0,
     pricing_snapshot: dict[str, Any] | None = None,
     pricing_version: str | None = None,
+    structured_result: dict[str, Any] | None = None,
+    context_snapshot: list[dict[str, str]] | None = None,
 ) -> UUID:
     """Append one immutable Cortex Analysis run."""
     from db.tables import get_table
@@ -2938,6 +2957,8 @@ def create_cortex_analysis_run(
             reasoning_tokens=max(0, int(reasoning_tokens)),
             pricing_snapshot=dict(pricing_snapshot or {}),
             pricing_version=str(pricing_version or "") or None,
+            structured_result=dict(structured_result or {}),
+            context_snapshot=list(context_snapshot or []),
         )
     )
     return analysis_id
@@ -2993,6 +3014,8 @@ def list_cortex_analysis_runs(
                     payload.get("source_snapshot"),
                     [],
                 ),
+                "structured_result": _decode_json_value(payload.get("structured_result"), {}),
+                "context_snapshot": _decode_json_value(payload.get("context_snapshot"), []),
                 "recommended_answer": str(payload.get("recommended_answer") or ""),
                 "agreements": _decode_json_value(payload.get("agreements"), []),
                 "disagreements": _decode_json_value(payload.get("disagreements"), []),
@@ -3549,6 +3572,9 @@ def delete_llm_history_entry(db: Session, user_id: UUID, entry_id: int) -> bool:
             )
         ).scalar_one()
         if int(remaining or 0) == 0:
+            intents = get_table("compare_analysis_intents")
+            db.execute(delete(intents).where(intents.c.user_id == user_id,
+                intents.c.request_group_id == request_group_id))
             db.execute(
                 delete(cortex_analysis_runs).where(
                     and_(
@@ -3600,6 +3626,11 @@ def clear_llm_history(db: Session, user_id: UUID, session_id: str | None = None)
     analysis_filters = [cortex_analysis_runs.c.user_id == user_id]
     if session_id:
         analysis_filters.append(cortex_analysis_runs.c.session_id == parsed_session_id)
+    intents = get_table("compare_analysis_intents")
+    intent_filters = [intents.c.user_id == user_id]
+    if session_id:
+        intent_filters.append(intents.c.request_group_id.in_(select(llm_requests.c.request_group_id).where(and_(*filters))))
+    db.execute(delete(intents).where(and_(*intent_filters)))
     db.execute(delete(cortex_analysis_runs).where(and_(*analysis_filters)))
     db.execute(
         delete(routing_attempts).where(

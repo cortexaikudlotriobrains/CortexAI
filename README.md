@@ -255,8 +255,9 @@ STRIPE_PORTAL_RETURN_URL=https://app.example.com/account/billing
 # STRIPE_API_VERSION=               # optional; default is the SDK-pinned version
 # DEV_SUBSCRIPTION_PLAN=pro         # local/dev only; also supports guarded unrestricted mode
 
-# On-demand Compare synthesis (requires OPENAI_API_KEY)
+# Analyze synthesis (requires OPENAI_API_KEY and the synthesis migration)
 CORTEX_ANALYSIS_MODEL=gpt-5.4-mini
+CORTEX_ANALYSIS_MAX_OUTPUT_TOKENS=1800 # bounded 1800..4000
 
 # Provider-native Ask/Compare web search
 NATIVE_WEB_SEARCH_MODE=enabled      # off|shadow|enabled
@@ -489,7 +490,10 @@ Frontend runtime config (`/runtime-config.js`):
 - An explicit fresh sign-in starts an empty new chat session instead of appending the first prompt to the previously active thread. Browser refreshes, tab resume/reload, same-browser reauth, and explicit History selections continue the selected thread.
 - React Ask and Compare turns send `context.session_id`, bounded `conversation_history`, and `new_session` so follow-ups continue the selected thread and New Chat starts a new backend session.
 - React Ask and Compare omit a Web toggle and submit `routing.web_mode=auto`; prompt intent or an API-level override controls search. Compare mode streams `/v1/compare/stream` events into each model response column.
-- React Compare keeps every selected response visible in a responsive grid without a horizontal response rail on desktop and tablet widths: three columns on wide desktop, two columns at tablet widths, and stacked tall cards at the app's tablet/mobile shell breakpoint. Phone-sized mobile restores the segmented model switcher, shows one selected response card at a time in natural page flow, and elevates the switcher into a frosted sticky bar with provider-tinted active cues while keeping every model pill horizontally stable during scroll transitions.
+- React Analyze opens Cortex Analysis by default, including when returning from Ask, and retains separate Model responses and Sources views. Original model-response presentation is preserved: equal-height side-by-side cards on desktop (three models share one row above 1180px, wrapping to two columns at 901–1180px), stacked tall cards at 761–900px, and the original horizontal provider tabs at 760px and below. Desktop/tablet card bodies scroll independently; phone tabs switch one natural-height response with sticky controls and transcript scrolling. Regeneration, metadata, feedback, code/table containment and composer clearance remain available. Analyze preserves the original Cortex typography, colors, logos, icons, sidebar preference and mobile navigation/history at the existing 900px shell breakpoint.
+- Within Analyze results, model bylines and quotation headers reuse the proper provider logos. The contributor/status/credits strip above the result tabs is omitted. The Cortex Analysis tab and takeaway use a layers symbol; the synthesis header uses sparkles. New runs may include an answer headline and introduction above the lavender takeaway (`#f1eefc` light / `#2d2845` dark). Consequential differences show a title and expandable supporting passages before the quotation grid, followed by a Sources link and real linked-source count. Quotes sit side by side where readable and stack on narrow screens. These result-only treatments preserve the original shared shell and composer.
+- Sources shows numbered cards with publisher/domain, proper provider logos, **Open original source**, and **Cited for** passages resolved from each response's actual numbered citations or matching Markdown links. **View the model’s answer** opens the correct model/revision, highlights its original passage, and offers **Back to Sources**. Each model and saved revision keeps its own source ordering. Metadata-only links explicitly lack a specific cited passage; missing earlier text never redirects to a different revision. No extra model/search call or historical rewrite is involved.
+- While answers arrive, Cortex Analysis shows a live provider-logo ledger with queue, search/tool activity, writing, completed/partial and failed/stopped states, plus a link to Model responses. Once analysis starts, an animated three-step workflow follows server progress; quote validation is shown before saving. Reduced-motion preferences stop spinner animation. A previous analysis stays readable during an update or failed update; timers never fabricate completed steps.
 - Compare card headers and action footers remain fixed inside each desktop/tablet panel while only the answer body scrolls. The transcript retains bottom breathing room above the persistent composer so the input area does not compress the reading workspace.
 - React Compare renders submitted prompts with the same right-aligned user bubble used by Ask mode. Aggregate result totals remain in a separate compact row, while model cards keep friendly names, exact API model IDs, and compact icon actions.
 - Smart composer preferences use per-user browser storage at `cortex.composerPrefs.v1`; there is no preferences HTTP API or device sync. The composer Smart button and Smart in new chats switch in More options both display the current Ask chat state. Toggling either immediately updates the chat and saves the setting for future chats; the model picker stays chat-scoped. Its subtitle stays New chats start with Smart on in both switch states, while When Smart is off carries the model name. New chats and Compare use the resolved saved model with entitlement-aware fallback, while restored sessions retain their own state. See [Smart composer preferences](docs/SMART_COMPOSER_PREFERENCES.md).
@@ -513,14 +517,14 @@ Frontend runtime config (`/runtime-config.js`):
 - Streaming Ask and Compare cards progressively render buffered Markdown instead of raw text.
 - Whenever a new Ask or Compare turn is submitted, React performs one smooth reveal of that new turn so the submitted question becomes visible even when the user was viewing an older turn.
 - Streaming responses do not auto-follow generated text as it grows, and the transcript no longer renders a floating down-arrow jump control.
-- React frontend uses the Alabaster Minimal workspace shell: a quiet 272px desktop navigation rail that can collapse to a narrow icon rail, top Ask/Compare tabs with theme-aware high-contrast active and inactive text, a centered empty-workspace composer, horizontal compare canvas, unified bottom composer after a turn starts, visually aligned mobile Ask/Compare/History navigation, and light/dark theme tokens switched from the account menu.
-- Empty Ask and Compare workspaces show a small mode-specific greeting with no marketing copy or starter examples. Ask says `Hi, how can I help?`; Compare says `Hi, what would you like to compare?`. Desktop and tablet place it directly above the centered composer; mobile places it one-quarter down from the viewport top (three-quarters above the base) while retaining the existing bottom-sheet composer. As soon as a user turn is created or a response starts streaming, the greeting disappears and the composer returns to its normal bottom dock.
+- React frontend uses the Alabaster Minimal workspace shell: a quiet 280px desktop sidebar that can collapse to a 76px icon rail, theme-aware Ask/Analyze tabs, a centered empty-workspace composer, a tabbed Analyze workspace, unified bottom composer after a turn starts, mobile history access, and light/dark themes switched from the account menu.
+- Empty Ask keeps `Hi, how can I help?`. Analyze uses `Hi, what would you like to analyze?` with the original centered composer and its existing controls. The composer omits the Models + analysis estimate footer; the combined estimate still gates Send authorization. Both modes dock the composer after submission and retain selected models, attachments and controls.
 - The empty Work goal surface shares that desktop/tablet composer center line while keeping its task heading, guidance, and examples above it. Mobile retains the compact introduction, places `Start a task` on the same one-quarter viewport line as the Ask and Compare greetings, and docks the Work goal composer immediately above the fixed navigation.
 - Frontend Ask/Compare selectors always load active selectable rows from authenticated `/v1/model-options`, independently of the rich catalogue flag. The bundled selector data is only a frontend-only/error fallback, so disabling `/v1/models` cannot remove supported providers from the normal selector path.
 - The shared Ask/Compare composer exposes `Reasoning · Auto|Low|Medium|High|Maximum`. Smart starts at Auto and treats a manual level as a hard model-capability routing constraint. Manual Ask models start at their lowest supported level. Compare enables only levels shared by every selected model. Unsupported combinations stay disabled in the browser and are rejected by the backend; provider-specific values such as `minimal` and `xhigh` remain internal aliases. A completed successful Smart Ask card shows the actual normalized `Low|Medium|High|Max reasoning` effort immediately after AI-credit usage, using distinct accessible colors to explain why deeper Auto reasoning can take longer. Manual Ask, Compare, failed/loading cards, and Work do not show that Smart-only metric. Work is otherwise unchanged.
 - The React AI-credit destination is available at `/credits`. It owns the authenticated account's unified balance, billing-period reset date, and newest model/search/feature charges from `/v1/entitlements` and `/v1/credits/transactions`. React groups itemized API rows by `activity_id` into one activity card, including Prompt Optimizer and the following Ask/Compare request, and shows the original pre-optimization question, action label, total credits, and timestamp first. When an optimizer charge has a following answer in the same activity, the collapsed breakdown combines both into one `Final optimized ... answer` line whose description explicitly includes the optimizer attempt count and final answer generation; a standalone optimizer-only activity remains labelled `Prompt Optimizer`. Compare, Cortex Analysis, and Web Search remain understandable within the requested breakdown, optimizer retries are aggregated, and zero-credit reconciliation rows do not create user-facing noise. Older activity created before grouping/query tracking falls back to its request ID and an unavailable-question message. Provider token/cost analytics and CSV export remain under `/usage`.
 - The React Models destination and rich catalogue endpoint are retained behind `ENABLE_MODELS_CATALOG=true` for possible future use. The default `false` state removes sidebar/account-menu entry points, redirects `/models` to Ask, and returns `404 Not Found` from `/v1/models`. When explicitly enabled, production rows still come from the canonical backend registry and include the existing lifecycle, pricing, and official-source details.
-- Compare response cards render as tall equal-height model panels with fixed model headers/actions and independently scrolling readable Markdown bodies.
+- Analyze response cards render complete Markdown, metadata and actions in natural page flow. Evidence opens the exact immutable response revision; switching views preserves local feedback and reading positions.
 - The composer keeps active compare models as removable chips and exposes Add Model from the same options row without separating the prompt, attachments, feature controls, or send action into independent boxes.
 
 ## Authentication
@@ -995,36 +999,42 @@ See `docs/PROVIDER_NATIVE_WEB_SEARCH.md` for provider mappings, billing, rollout
 
 ## Cortex Analysis
 
-Cortex Analysis is an on-demand synthesized model call below completed browser Compare responses. It consumes the same unified monthly AI-credit wallet and has no separate Cortex quota.
+The browser **Analyze** experience retains internal Compare routes and modes.
+Send checks the combined estimate for authorization, runs the selected models, and automatically
+creates one eligible Cortex Analysis with **The takeaway**, exact **In their
+words** quotations and separate linked-source/model-passage views. Source
+regeneration marks old analyses stale; a cost-disclosed **Update analysis** is
+explicit, and the old result remains readable during updates and after failure.
 
-- `POST /v1/compare/{request_group_id}/analysis` analyzes the latest successful revisions from two or three responses with `CORTEX_ANALYSIS_MODEL` (default `gpt-5.4-mini`) and returns `201`.
-- Before invoking the model, the route resolves the effective plan, verifies model access, and reserves for the Compare question, source responses, and a clamped 1,800-token output ceiling. Successful actual input/output usage settles the reservation; generation failure releases it. Each re-run is a new billable model call.
-- Provider/model identities are removed before the analysis model receives
-  shuffled `Response A/B/C` content. After generation, the server replaces
-  those anonymous labels with canonical provider-and-model display names (for
-  example, `Claude (Sonnet 4.6)`) in every user-visible result section before
-  saving the run. Responses from different models of one provider therefore
-  remain distinct in insights, differences, confidence, and verification copy.
-- The model uses strict Structured Outputs, and the API validates the result before persistence. Provider failure or invalid output returns `502`; a failed generation does not create a run.
-- Each disagreement is returned as `{ "who": <display name>, "text": <position> }`; optional `disagreementNote` explains the nature of the difference without choosing a winner. Unique insights retain their model attribution.
-- The finished React result is one continuous document: its header shows the run's customer-facing AI-credit charge, then the combined answer and inline qualitative confidence, always-visible agreement/difference/unique-insight evidence, and one verification band. The API returns raw `aiCredits` plus `creditUsageEstimated`; React applies the shared display-credit formatter and labels fallback-derived historical usage as estimated. There are no per-section disclosures or saved open/closed preferences. When confidence is `limited` and disagreements exist, the difference column leads visually without changing model ranking or hiding original responses.
-- Successful runs are append-only in `cortex_analysis_runs`. Re-running never overwrites an earlier result.
-- While a re-run is processing, the result area temporarily replaces the
-  previous combined answer with the analysis progress state. If the re-run
-  fails, the saved answer returns below the retry message.
-- `GET /v1/compare/analysis-runs` requires either `session_id` or `request_group_id` and returns every owned run newest-first, including the persisted-token-derived `aiCredits` and `creditUsageEstimated` values used by restored result cards.
-- Each run snapshots exact source `requestId` and `responseVersion` values. If a source response is regenerated later, earlier analyses remain readable and return `isStale: true`; the browser offers an explicit update action.
-- Reloading or reopening a history thread hydrates its Compare transcript and all saved Cortex Analysis runs. The result area defaults to the newest run and exposes older runs through Analysis history.
-- Analysis starts only after a user action and only when at least two Compare responses succeeded. Existing Compare research context is reused without another research charge. Saved runs stay readable after downgrade; a new run can still be denied if its configured model is no longer allowed or the unified wallet has insufficient credits. There is no automatic synthesis, separate Cortex quota, or Cortex-only mobile tab.
+The browser opts in with `automatic_analysis: true`. Existing API clients may
+omit it to retain response-only Compare. `POST /v1/billing/estimate-generation`
+accepts `include_analysis: true`, `include_native_search: true` and context; it returns the total estimate and
+`analysis_ai_credits`. Both stages preflight and reserve through the unified
+wallet before providers start, then settle actual usage. Opening history or a
+view never authorizes paid work. A durable intent and server-owned producer
+continue authorized work after navigation. Explicit Stop uses the owned
+`POST /v1/compare/{request_group_id}/cancel` endpoint.
 
-Apply `db/migrations/20260727_add_cortex_analysis_runs.sql` with a database role
-that owns `llm_requests`, then apply
-`db/migrations/20260802_add_cortex_analysis_attribution.sql` before deploying
-this behavior. Restart the API so reflected table metadata includes the new
-column. Until that schema is ready,
-both Cortex Analysis endpoints return
-`503 cortex_analysis_schema_unavailable`; the create endpoint performs this
-check before calling the analysis model.
+Manual retry/update uses `POST /v1/compare/{request_group_id}/analysis` (201),
+read-only status uses `GET /v1/compare/{request_group_id}/analysis-state`, and
+saved runs use `GET /v1/compare/analysis-runs` filtered by group/session. V2
+status includes nullable `progressStage` (`comparing`, `reading`, `synthesizing`,
+`validating`) while processing. These are persisted worker milestones, with no
+percentages or estimated durations. Status reads never start paid work. V2
+adds `structuredResult` (schema version 2), immutable evidence snapshots and
+bounded context, while legacy result fields remain readable. Optional nullable
+`headline`, `introduction` and `differences[].title` support the editorial result
+layout; older saved runs omit them and render without invented headings. Exact quotes and
+server-known safe source URLs are validated; source metadata is not independent
+verification. The configured model remains `gpt-5.4-mini` with search off and a
+default 1800-token output ceiling. `CORTEX_ANALYSIS_MAX_OUTPUT_TOKENS` may set
+1800–4000; canonical reservations include that ceiling and all input/context.
+Metadata-only storage cannot authorize this saved-response analysis flow.
+
+Apply `db/migrations/20261016_add_compare_synthesis.sql` and restart the API
+before this release. See [the Compare guide](docs/COMPARE_MODE_GUIDE.md) for
+state, provenance, errors and compatibility, and [the migration
+runbook](docs/runbooks/db-migrations.md) for rollout and interrupted-call recovery.
 
 ## Streaming NDJSON Contract
 
