@@ -222,6 +222,13 @@ Rollback: deploy the previous build; the extra table is harmless. Users sign in 
   `auth.cognito.misconfigured` with `reason=client_secret` means the app client has a secret and
   `COGNITO_CLIENT_SECRET` is missing or wrong; `ResourceNotFoundException` means a wrong client id,
   pool or region.
+- **Password accepted by Cognito but sign-in still fails**: `auth.login.failed` with
+  `code=token_invalid` (and `auth.cognito.token_invalid` with the reason) means the ID token failed
+  verification (pool/client/region mismatch, clock skew, JWKS unreachable); `email_unverified`
+  means the Cognito user's `email_verified` attribute is false (verify it in the Cognito console);
+  `email_mismatch` means the account's email differs from what was typed.
+- **Google token exchange**: `auth.oauth.token_exchange_failed` shows Cognito's status and error
+  (`invalid_grant`, `invalid_client`, ...).
 - **"Incorrect email or password" for a known account**: the email may belong to a Google-only
   user (federated users have no Cognito password; use Continue with Google), or the account was
   created under a different username in the pool. Cognito lockouts show as `rate_limited` and

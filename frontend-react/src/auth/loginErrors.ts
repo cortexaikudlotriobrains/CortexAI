@@ -3,6 +3,7 @@ import { ApiClientError } from "../api/client";
 export type LoginErrorCode =
   | "invalid_credentials"
   | "email_not_verified"
+  | "email_unverified"
   | "password_reset_required"
   | "challenge_unsupported"
   | "weak_password"
@@ -20,6 +21,8 @@ export type LoginErrorCode =
 const COPY: Record<LoginErrorCode, string> = {
   invalid_credentials: "Incorrect email or password.",
   email_not_verified: "Verify your email address to continue.",
+  email_unverified:
+    "This account's email address isn't verified yet. Contact support, or continue with Google if you use it.",
   password_reset_required: "For your security, reset your password to continue.",
   challenge_unsupported: "This account needs extra steps. Reset your password to continue.",
   weak_password: "Choose a stronger password that meets the requirements below.",

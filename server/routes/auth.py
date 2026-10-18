@@ -525,9 +525,35 @@ async def login_with_password(
     claims = await asyncio.to_thread(verify_cognito_id_token, result.id_token)
     # Only the ID token is needed; drop the refresh token so it cannot outlive us.
     await asyncio.to_thread(cognito_idp.revoke_refresh_token, result.refresh_token)
-    if not claims or not claims.email_verified or (claims.email or "").lower() != email:
+    # Cognito accepted the password from here on, so none of these is a wrong password.
+    if not claims:
         audit_event(
-            request, "auth.login.failed", auth_method="password", email=email, code="token_rejected"
+            request, "auth.login.failed", auth_method="password", email=email, code="token_invalid"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=error_detail(
+                "auth_unavailable", "Sign-in is temporarily unavailable. Please try again shortly."
+            ),
+        )
+    if not claims.email_verified:
+        audit_event(
+            request,
+            "auth.login.failed",
+            auth_method="password",
+            email=email,
+            code="email_unverified",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=error_detail(
+                "email_unverified",
+                "This account's email address is not verified. Contact support to verify it.",
+            ),
+        )
+    if (claims.email or "").lower() != email:
+        audit_event(
+            request, "auth.login.failed", auth_method="password", email=email, code="email_mismatch"
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

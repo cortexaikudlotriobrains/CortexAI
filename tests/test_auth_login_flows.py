@@ -343,7 +343,8 @@ def test_password_login_requires_verified_email_claim(client, monkeypatch):
     r = client.post(
         "/v1/auth/login/password", json={"email": "ada@example.com", "password": "x" * 14}
     )
-    assert r.status_code == 401
+    assert r.status_code == 403
+    assert r.json()["detail"]["code"] == "email_unverified"
     assert "set-cookie" not in r.headers
 
 
@@ -1050,3 +1051,20 @@ def test_not_authorized_is_split_into_real_causes(monkeypatch, caplog, message, 
             getattr(r, "extra_fields", {}).get("event") == "auth.cognito.misconfigured"
             for r in caplog.records
         )
+
+
+def test_password_login_token_failures_are_not_reported_as_wrong_passwords(client, monkeypatch):
+    import server.routes.auth as auth_route
+
+    _stub_login(monkeypatch)
+    monkeypatch.setattr(auth_route, "verify_cognito_id_token", lambda t: None)
+    body = {"email": "ada@example.com", "password": "x" * 14}
+    r = client.post("/v1/auth/login/password", json=body)
+    assert (r.status_code, r.json()["detail"]["code"]) == (502, "auth_unavailable")
+
+    monkeypatch.setattr(
+        auth_route, "verify_cognito_id_token", lambda t: _claims("someone-else@example.com")
+    )
+    r = client.post("/v1/auth/login/password", json=body)
+    assert (r.status_code, r.json()["detail"]["code"]) == (401, "invalid_credentials")
+    assert "set-cookie" not in r.headers

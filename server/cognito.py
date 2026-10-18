@@ -8,6 +8,7 @@ COGNITO_REGION, COGNITO_DOMAIN. Optional COGNITO_CLIENT_SECRET for token exchang
 import json
 import os
 import ssl
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -112,7 +113,12 @@ def verify_cognito_id_token(token: str) -> CognitoClaims | None:
                 break
 
         if signing_key is None:
-            logger.debug("Cognito token verification failed: no matching key id in JWKS")
+            logger.warning(
+                "Cognito token verification failed: no matching key id in JWKS",
+                extra={
+                    "extra_fields": {"event": "auth.cognito.token_invalid", "reason": "unknown_kid"}
+                },
+            )
             return None
 
         payload = jwt.decode(
@@ -129,12 +135,25 @@ def verify_cognito_id_token(token: str) -> CognitoClaims | None:
             },
         )
     except Exception as e:
-        logger.debug("Cognito token verification failed: %s", e)
+        # PyJWT messages ("Invalid audience", "Signature has expired") carry no token data.
+        logger.warning(
+            "Cognito token verification failed",
+            extra={
+                "extra_fields": {
+                    "event": "auth.cognito.token_invalid",
+                    "error_type": type(e).__name__,
+                    "reason": str(e)[:200],
+                }
+            },
+        )
         return None
 
     token_use = payload.get("token_use")
     if token_use != "id":
-        logger.debug("Cognito token_use is not 'id': %s", token_use)
+        logger.warning(
+            "Cognito token is not an ID token",
+            extra={"extra_fields": {"event": "auth.cognito.token_invalid", "reason": "token_use"}},
+        )
         return None
 
     return CognitoClaims(
@@ -259,6 +278,31 @@ def exchange_code_for_tokens(
     try:
         with urllib.request.urlopen(req, timeout=15, context=ctx) as r:
             return json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        # Cognito answers {"error": "invalid_grant" | "invalid_client" | ...}; no tokens.
+        try:
+            detail = e.read().decode("utf-8", errors="replace")[:200]
+        except Exception:
+            detail = ""
+        logger.warning(
+            "Cognito token exchange rejected",
+            extra={
+                "extra_fields": {
+                    "event": "auth.oauth.token_exchange_failed",
+                    "status": e.code,
+                    "detail": detail,
+                }
+            },
+        )
+        return None
     except Exception as e:
-        logger.debug("Token exchange failed: %s", e)
+        logger.warning(
+            "Cognito token exchange failed",
+            extra={
+                "extra_fields": {
+                    "event": "auth.oauth.token_exchange_failed",
+                    "error_type": type(e).__name__,
+                }
+            },
+        )
         return None
