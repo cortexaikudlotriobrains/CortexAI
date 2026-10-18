@@ -110,13 +110,15 @@ migration and before deploying an API that enables Work schema preflight.
 
 `20261018_add_auth_sessions.sql` creates `auth_sessions`: one row per browser
 session holding the keyed hash of an opaque cookie token, its auth method,
-expiry, last-seen time, and revocation. It is additive and idempotent. The API
+expiry, last-seen time, and revocation. It also creates `auth_rate_limits`,
+fixed-window brute-force counters shared by every API instance. It is additive and idempotent. The API
 refuses to start on PostgreSQL without it (`server/auth_schema_preflight.py`), so
 apply it before deploying the matching build. Cookies issued by the previous
 build (a signed user ID) are not accepted afterwards, so every user signs in once.
 Set `SESSION_SECRET` (>= 32 characters) before the first production start. Rollback
-is a redeploy of the previous build; the table can stay. Periodically delete rows
-with `expires_at < now() - interval '30 days'`. See [in-app login](auth-login.md).
+is a redeploy of the previous build; the tables can stay. The API purges sessions
+that ended over 30 days ago and rate-limit windows older than a day every hour
+(`AUTH_MAINTENANCE_INTERVAL_SECONDS`). See [in-app login](auth-login.md).
 
 ### Provider rate-card migration
 

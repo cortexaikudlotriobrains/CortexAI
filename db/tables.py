@@ -35,6 +35,7 @@ TABLE_NAMES = [
     "pricing_sync_runs",
     "users",
     "auth_sessions",
+    "auth_rate_limits",
     "api_keys",
     "api_key_settings",
     "byok_provider_keys",

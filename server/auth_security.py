@@ -1,8 +1,9 @@
 """Security helpers for the in-app login endpoints.
 
-Covers request-origin checks, brute-force throttles, open-redirect-safe ``next``
-targets, the signed one-shot OAuth transaction cookie (state + PKCE verifier +
-nonce) and the sign-up password policy.
+Covers trusted browser origins (auth POSTs and credentialed CORS), brute-force
+throttles shared across API instances, open-redirect-safe ``next`` targets, the
+signed one-shot OAuth transaction cookie (state + PKCE verifier + nonce), the
+sign-up password policy including a breached-password check, and auth audit logs.
 """
 
 from __future__ import annotations
@@ -14,16 +15,27 @@ import json
 import os
 import re
 import secrets
+import threading
 import time
+import urllib.request
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
 
 from fastapi import HTTPException, Request, status
 
-from server.rate_limit import InMemoryRateLimiter
-from server.session_auth import hash_value, is_production_runtime, session_secret
+from server.session_auth import (
+    hash_value,
+    is_production_runtime,
+    session_cookie_secure,
+    session_secret,
+)
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 OAUTH_TX_COOKIE_NAME = "cortex_oauth_tx"
+SECURE_OAUTH_TX_COOKIE_NAME = "__Host-cortex_oauth_tx"
 OAUTH_TX_TTL_SECONDS = 600
 
 _EMAIL_PATTERN = re.compile(r"^[^@\s]{1,64}@[^@\s]{1,255}\.[^@\s]{2,63}$")
@@ -117,18 +129,34 @@ def _normalize_origin(value: str) -> str:
     return f"{parts.scheme}://{parts.netloc}".lower()
 
 
-def _allowed_origins(request: Request) -> set[str]:
-    allowed = {_normalize_origin(str(request.base_url))}
+def trusted_browser_origins() -> set[str]:
+    """Origins (besides the API's own) that may send cookies to the API.
+
+    ``AUTH_ALLOWED_ORIGINS`` plus the origin of ``COGNITO_SUCCESS_REDIRECT_URI``
+    for a separately hosted frontend. Used for auth POSTs and credentialed CORS.
+    """
+    origins: set[str] = set()
     for raw in (os.getenv("AUTH_ALLOWED_ORIGINS") or "").split(","):
         normalized = _normalize_origin(raw)
         if normalized:
-            allowed.add(normalized)
-    return allowed
+            origins.add(normalized)
+    success = _normalize_origin(os.getenv("COGNITO_SUCCESS_REDIRECT_URI") or "")
+    if success.startswith(("http://", "https://")):
+        origins.add(success)
+    return origins
 
 
-def _is_loopback_origin(origin: str) -> bool:
-    host = urlsplit(origin).hostname or ""
-    return host in {"localhost", "127.0.0.1", "::1"}
+# Any port on a loopback host; only trusted outside production.
+LOOPBACK_ORIGIN_REGEX = r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$"
+
+
+def is_trusted_browser_origin(origin: str) -> bool:
+    normalized = _normalize_origin(origin)
+    if not normalized:
+        return False
+    if normalized in trusted_browser_origins():
+        return True
+    return not is_production_runtime() and re.match(LOOPBACK_ORIGIN_REGEX, normalized) is not None
 
 
 def require_same_origin(request: Request) -> None:
@@ -142,10 +170,9 @@ def require_same_origin(request: Request) -> None:
         if request.headers.get("sec-fetch-site", "").lower() == "cross-site":
             raise _forbidden_origin()
         return
-    normalized = _normalize_origin(origin)
-    if normalized in _allowed_origins(request):
+    if _normalize_origin(origin) == _normalize_origin(str(request.base_url)):
         return
-    if not is_production_runtime() and normalized and _is_loopback_origin(normalized):
+    if is_trusted_browser_origin(origin):
         return
     raise _forbidden_origin()
 
@@ -161,8 +188,35 @@ def _forbidden_origin() -> HTTPException:
 # Throttling
 # --------------------------------------------------------------------------- #
 
-_IP_LIMITER = InMemoryRateLimiter(window_seconds=60)
-_IDENTITY_LIMITER = InMemoryRateLimiter(window_seconds=300)
+_IP_WINDOW_SECONDS = 60
+_IDENTITY_WINDOW_SECONDS = 300
+_MEMORY_MAX_BUCKETS = 50_000
+
+
+class _FixedWindowCounter:
+    """Bounded in-memory fallback used only when the shared table is unavailable."""
+
+    def __init__(self) -> None:
+        self._counts: dict[tuple[str, int], int] = {}
+        self._lock = threading.Lock()
+
+    def hit(self, key: str, window_start: int, oldest_live: int) -> int:
+        with self._lock:
+            if len(self._counts) >= _MEMORY_MAX_BUCKETS:
+                self._counts = {k: v for k, v in self._counts.items() if k[1] >= oldest_live}
+                if len(self._counts) >= _MEMORY_MAX_BUCKETS:
+                    self._counts.clear()
+            bucket = (key, window_start)
+            self._counts[bucket] = self._counts.get(bucket, 0) + 1
+            return self._counts[bucket]
+
+    def reset(self) -> None:
+        with self._lock:
+            self._counts.clear()
+
+
+_MEMORY_COUNTER = _FixedWindowCounter()
+_DB_FALLBACK_WARNED = False
 
 
 def _int_env(name: str, default: int) -> int:
@@ -176,23 +230,79 @@ def client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+def _db_hit(bucket_key: str, window_start: datetime) -> int:
+    """Atomically count one hit in the shared ``auth_rate_limits`` table."""
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+    from db.session import SessionLocal
+    from db.tables import get_table
+
+    table = get_table("auth_rate_limits")
+    db = SessionLocal()
+    try:
+        insert = sqlite_insert if db.get_bind().dialect.name == "sqlite" else pg_insert
+        stmt = insert(table).values(bucket_key=bucket_key, window_start=window_start, hits=1)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["bucket_key", "window_start"],
+            set_={"hits": table.c.hits + 1},
+        ).returning(table.c.hits)
+        hits = int(db.execute(stmt).scalar_one())
+        db.commit()
+        return hits
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def _hit(key: str, window_seconds: int) -> tuple[int, int]:
+    """Return (hits in the current window, seconds until it resets)."""
+    global _DB_FALLBACK_WARNED
+    now = time.time()
+    start = int(now // window_seconds) * window_seconds
+    retry_after = max(1, int(start + window_seconds - now))
+    bucket_key = hash_value(key)
+    try:
+        hits = _db_hit(bucket_key, datetime.fromtimestamp(start, tz=timezone.utc))
+    except Exception:
+        if not _DB_FALLBACK_WARNED:
+            _DB_FALLBACK_WARNED = True
+            logger.warning(
+                "Shared auth rate-limit table unavailable; using per-process limits",
+                exc_info=True,
+                extra={"extra_fields": {"event": "auth.rate_limit.db_unavailable"}},
+            )
+        hits = _MEMORY_COUNTER.hit(bucket_key, start, start - _IDENTITY_WINDOW_SECONDS)
+    return hits, retry_after
+
+
 def enforce_auth_rate_limit(request: Request, *, action: str, identity: str | None = None) -> None:
     """Throttle per client IP and, when given, per identity (hashed email).
 
-    Limits are per API process; Cognito applies its own account-level lockouts.
-    ``AUTH_RATE_LIMIT_IP_PER_MINUTE`` / ``AUTH_RATE_LIMIT_IDENTITY_PER_5_MIN``
-    tune the limits; 0 disables a limit.
+    Counters live in the shared ``auth_rate_limits`` table so the limits hold
+    across every API instance (per-process fallback if the table is unavailable);
+    Cognito adds its own account-level lockouts. ``AUTH_RATE_LIMIT_IP_PER_MINUTE``
+    / ``AUTH_RATE_LIMIT_IDENTITY_PER_5_MIN`` tune the limits; 0 disables a limit.
     """
     ip_limit = _int_env("AUTH_RATE_LIMIT_IP_PER_MINUTE", 20)
     identity_limit = _int_env("AUTH_RATE_LIMIT_IDENTITY_PER_5_MIN", 8)
-    checks: list[tuple[InMemoryRateLimiter, str, int]] = []
+    checks: list[tuple[str, int, int]] = []
     if ip_limit:
-        checks.append((_IP_LIMITER, f"{action}:ip:{hash_value(client_ip(request))}", ip_limit))
+        checks.append((f"{action}:ip:{client_ip(request)}", ip_limit, _IP_WINDOW_SECONDS))
     if identity and identity_limit:
-        checks.append((_IDENTITY_LIMITER, f"{action}:id:{hash_value(identity)}", identity_limit))
-    for limiter, key, limit in checks:
-        allowed, retry_after = limiter.check_and_record(key, limit=limit)
-        if not allowed:
+        checks.append((f"{action}:id:{identity}", identity_limit, _IDENTITY_WINDOW_SECONDS))
+    for key, limit, window in checks:
+        hits, retry_after = _hit(key, window)
+        if hits > limit:
+            audit_event(
+                request,
+                "auth.rate_limited",
+                action=action,
+                email=identity,
+                scope="identity" if ":id:" in key else "ip",
+            )
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail=error_detail(
@@ -205,8 +315,115 @@ def enforce_auth_rate_limit(request: Request, *, action: str, identity: str | No
 
 
 def reset_auth_rate_limits() -> None:
-    _IP_LIMITER.reset()
-    _IDENTITY_LIMITER.reset()
+    """Test helper: clear in-memory counters (database counters live per test DB)."""
+    global _DB_FALLBACK_WARNED
+    _MEMORY_COUNTER.reset()
+    _DB_FALLBACK_WARNED = False
+
+
+def purge_rate_limit_windows(db, *, older_than: timedelta) -> int:
+    """Delete counter windows that ended long ago. Caller commits."""
+    from sqlalchemy import delete
+
+    from db.tables import get_table
+
+    table = get_table("auth_rate_limits")
+    cutoff = datetime.now(timezone.utc) - older_than
+    result = db.execute(delete(table).where(table.c.window_start < cutoff))
+    return int(result.rowcount or 0)
+
+
+# --------------------------------------------------------------------------- #
+# Breached passwords (Have I Been Pwned, k-anonymity range API)
+# --------------------------------------------------------------------------- #
+
+_PWNED_RANGE_URL = "https://api.pwnedpasswords.com/range/"
+
+
+def _breach_check_enabled() -> bool:
+    raw = str(os.getenv("AUTH_BREACHED_PASSWORD_CHECK", "true") or "true").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def password_breach_count(password: str) -> int | None:
+    """How often a password appears in known breaches; None if the check could not run.
+
+    Only the first 5 hex characters of the SHA-1 leave the server (k-anonymity), and
+    ``Add-Padding`` hides the response size. Fails open: an outage never blocks sign-up.
+    """
+    if not _breach_check_enabled():
+        return None
+    digest = hashlib.sha1(password.encode("utf-8"), usedforsecurity=False).hexdigest().upper()
+    prefix, suffix = digest[:5], digest[5:]
+    request = urllib.request.Request(
+        _PWNED_RANGE_URL + prefix,
+        headers={"Add-Padding": "true", "User-Agent": "CortexAI-password-check"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=3) as response:
+            body = response.read().decode("utf-8", errors="replace")
+    except Exception as exc:
+        logger.warning(
+            "Breached-password check unavailable; continuing without it",
+            extra={
+                "extra_fields": {
+                    "event": "auth.breach_check.unavailable",
+                    "error_type": type(exc).__name__,
+                }
+            },
+        )
+        return None
+    for line in body.splitlines():
+        candidate, _, count = line.strip().partition(":")
+        if candidate == suffix:
+            try:
+                return int(count)
+            except ValueError:
+                return None
+    return 0
+
+
+def reject_breached_password(password: str) -> None:
+    count = password_breach_count(password)
+    if count:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=error_detail(
+                "breached_password",
+                "This password has appeared in a data breach. Choose a different one.",
+            ),
+        )
+
+
+# --------------------------------------------------------------------------- #
+# Audit log
+# --------------------------------------------------------------------------- #
+
+
+def audit_event(
+    request: Request,
+    event: str,
+    *,
+    email: str | None = None,
+    user_id: object | None = None,
+    **fields: object,
+) -> None:
+    """Structured auth audit record. Email and IP are keyed hashes, never raw values.
+
+    Search logs for ``event`` values starting with ``auth.`` to build alerts
+    (failed-login spikes per ``email_hash``/``ip_hash``, sign-up bursts).
+    """
+    record: dict[str, object] = {
+        "event": event,
+        "ip_hash": hash_value(client_ip(request)),
+        "request_id": getattr(request.state, "request_id", None),
+        **fields,
+    }
+    if email:
+        record["email_hash"] = hash_value(email)
+    if user_id is not None:
+        record["user_id"] = str(user_id)
+    logger.info("Auth audit event", extra={"extra_fields": record})
 
 
 # --------------------------------------------------------------------------- #
@@ -242,6 +459,10 @@ class OAuthTransaction:
     code_verifier: str
     nonce: str
     next_path: str
+
+
+def oauth_tx_cookie_name(request: Request) -> str:
+    return SECURE_OAUTH_TX_COOKIE_NAME if session_cookie_secure(request) else OAUTH_TX_COOKIE_NAME
 
 
 def _sign(payload: bytes) -> str:

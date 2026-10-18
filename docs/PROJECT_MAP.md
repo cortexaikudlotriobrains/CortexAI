@@ -8,14 +8,17 @@ This map is the quick "where do I change X?" reference for the current API-first
   callback also mounted at `/auth` in `server/app.py`); Cognito user-pool calls
   `server/cognito_idp.py`; ID-token verification, authorize URL and code exchange
   `server/cognito.py`; origin check, throttles, `next` sanitizing, OAuth state/PKCE cookie and
-  password policy `server/auth_security.py`; opaque server-side sessions (issue/parse/revoke)
-  `server/session_auth.py`; schema preflight `server/auth_schema_preflight.py`; security headers
+  password policy, breached-password check, shared throttles and audit events
+  `server/auth_security.py`; opaque server-side sessions (issue/parse/revoke/list, idle timeout,
+  `__Host-` cookie naming) `server/session_auth.py`; hourly purge `server/auth_maintenance.py`;
+  schema preflight `server/auth_schema_preflight.py`; security headers and credential-aware CORS
   `server/middleware.py`; persistence `db/migrations/20261018_add_auth_sessions.sql`,
   `db/repository.py` (`get_or_create_user_by_cognito`, `UserEmailConflictError`,
-  `is_user_active`). React: `frontend-react/src/pages/LoginPage.tsx`, `api/auth.ts`,
-  `auth/` (redirect safety, password policy, error copy), `hooks/useAuth.ts`. Tests:
-  `tests/test_auth_login_flows.py`, `frontend-react/src/__tests__/LoginPage.test.tsx`,
-  `auth.test.ts`. Runbook: `docs/runbooks/auth-login.md`.
+  `is_user_active`). React: `frontend-react/src/pages/LoginPage.tsx`, signed-in devices
+  `pages/SecurityPage.tsx`, `api/auth.ts`, `auth/` (redirect safety, password policy, error copy,
+  device labels), `hooks/useAuth.ts`; production CSP in `index.html` plus `strictProductionCsp` in
+  `vite.config.ts`. Tests: `tests/test_auth_login_flows.py`,
+  `frontend-react/src/__tests__/LoginPage.test.tsx`, `SecurityPage.test.tsx`, `auth.test.ts`. Runbook: `docs/runbooks/auth-login.md`.
 
 - Provider rate-card subsystem: `pricing/models.py`, `pricing/engine.py`,
   `pricing/identity.py`, `pricing/service.py`, `pricing/schedules.py`,

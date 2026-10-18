@@ -4,10 +4,10 @@ import os
 from dataclasses import dataclass
 from uuid import UUID
 
-from fastapi import Cookie, Header, HTTPException, Request, status
+from fastapi import Header, HTTPException, Request, status
 
 from server.cognito import CognitoClaims, cognito_enabled, verify_cognito_id_token
-from server.session_auth import SESSION_COOKIE_NAME, parse_session
+from server.session_auth import parse_session, session_cookie_value
 from server.utils import redact_sensitive_headers
 from utils.logger import get_logger
 
@@ -33,7 +33,6 @@ class AuthResult:
 
 async def get_auth(
     request: Request,
-    session_cookie: str | None = Cookie(None, alias=SESSION_COOKIE_NAME),
     authorization: str | None = Header(None),
     x_api_key: str | None = Header(None, alias="X-API-Key"),
 ) -> AuthResult:
@@ -48,6 +47,7 @@ async def get_auth(
     path = str(request.url.path or "")
     has_api_key_header = bool(x_api_key)
     has_authorization_header = bool(authorization)
+    session_cookie = session_cookie_value(request)
     has_session_cookie = bool(session_cookie)
 
     # 1. Try session cookie (cortex_session)
@@ -148,13 +148,11 @@ async def get_api_key(request: Request, x_api_key: str | None = Header(None)):
     return x_api_key
 
 
-async def get_session_user_id(
-    session_cookie: str | None = Cookie(None, alias=SESSION_COOKIE_NAME),
-) -> UUID:
+async def get_session_user_id(request: Request) -> UUID:
     """
-    Resolve user_id from signed session cookie.
+    Resolve user_id from the server-side session cookie.
     """
-    user_id = parse_session(session_cookie)
+    user_id = parse_session(session_cookie_value(request))
     if not user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

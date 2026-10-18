@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
     loading: false,
     loggedIn: false,
   },
+  logout: vi.fn(),
   signUp: vi.fn(),
   confirmSignUp: vi.fn(),
   resendSignUpCode: vi.fn(),
@@ -25,7 +26,7 @@ vi.mock("../hooks/useAuth", () => ({
   useAuth: () => ({
     ...mocks.authState,
     login: vi.fn(),
-    logout: vi.fn(),
+    logout: mocks.logout,
     refresh: vi.fn(),
   }),
 }));
@@ -310,4 +311,30 @@ describe("LoginPage", () => {
     renderLogin("/login?next=%2Fwork");
     await waitFor(() => expect(screen.getByTestId("landing")).toHaveTextContent("/work"));
   });
+
+  it("shows breached-password feedback on the password field", async () => {
+    const user = userEvent.setup();
+    mocks.signUp.mockRejectedValue(apiError(422, "breached_password"));
+    renderLogin();
+    await user.click(screen.getByRole("button", { name: "Create an account" }));
+    await user.type(screen.getByLabelText("Email"), "ada@example.com");
+    await user.type(screen.getByLabelText("Password"), GOOD_PASSWORD);
+    await user.click(screen.getByRole("button", { name: "Create account" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/known data breach/);
+    expect(screen.getByLabelText("Password")).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("stays put after a failed sign-out and lets the user retry", async () => {
+    const user = userEvent.setup();
+    mocks.authState.loggedIn = true;
+    renderLogin("/login?error=logout_failed");
+
+    expect(screen.getByRole("heading", { name: "You're still signed in" })).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("couldn't sign you out");
+    expect(screen.queryByTestId("landing")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Sign out again" }));
+    expect(mocks.logout).toHaveBeenCalledTimes(1);
+  });
 });
+

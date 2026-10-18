@@ -17,14 +17,18 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, select, update
+from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.orm import Session
+from starlette.requests import Request
 
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 SESSION_COOKIE_NAME = "cortex_session"
+# On HTTPS the cookie uses the __Host- prefix: browsers then require Secure,
+# Path=/ and no Domain, so a sibling subdomain cannot plant or overwrite it.
+SECURE_SESSION_COOKIE_NAME = "__Host-cortex_session"
 
 # Auth methods allowed by ck_auth_sessions_method.
 AUTH_METHODS = frozenset({"password", "google", "cognito_token", "dev"})
@@ -35,6 +39,7 @@ _PRODUCTION_ENV_VALUES = {"prod", "production"}
 _DEFAULT_SESSION_MAX_AGE = 7 * 24 * 3600
 _NON_PERSISTENT_SESSION_LIFETIME = 12 * 3600
 _LAST_SEEN_INTERVAL = timedelta(minutes=5)
+_DEFAULT_IDLE_TIMEOUT = 3 * 24 * 3600
 _TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9_-]{32,128}$")
 
 
@@ -76,6 +81,41 @@ def session_max_age_seconds() -> int | None:
     except ValueError:
         return _DEFAULT_SESSION_MAX_AGE
     return value if value > 0 else None
+
+
+def session_idle_timeout() -> timedelta | None:
+    """Sessions unused for this long end. ``SESSION_IDLE_TIMEOUT_SECONDS=0`` disables it."""
+    raw = str(os.getenv("SESSION_IDLE_TIMEOUT_SECONDS", "") or "").strip()
+    try:
+        value = int(raw) if raw else _DEFAULT_IDLE_TIMEOUT
+    except ValueError:
+        value = _DEFAULT_IDLE_TIMEOUT
+    return timedelta(seconds=value) if value > 0 else None
+
+
+def session_cookie_secure(request: Request) -> bool:
+    """Whether session cookies get the Secure flag (and the __Host- name).
+
+    ``SESSION_COOKIE_SECURE`` is an explicit override; otherwise this follows the
+    effective request scheme, which is HTTPS behind CloudFront/ALB when
+    ProxyHeadersMiddleware trusts the forwarded scheme.
+    """
+    explicit = os.getenv("SESSION_COOKIE_SECURE")
+    if explicit is not None:
+        return str(explicit).strip().lower() in {"1", "true", "yes", "on"}
+    return request.url.scheme == "https"
+
+
+def session_cookie_name(request: Request) -> str:
+    return SECURE_SESSION_COOKIE_NAME if session_cookie_secure(request) else SESSION_COOKIE_NAME
+
+
+def session_cookie_value(request: Request) -> str | None:
+    """Read only the cookie name that matches the scheme.
+
+    Over HTTPS the unprefixed name is ignored, because any subdomain can set it.
+    """
+    return request.cookies.get(session_cookie_name(request))
 
 
 def _server_lifetime() -> timedelta:
@@ -140,19 +180,21 @@ def parse_session(cookie_value: str | None) -> UUID | None:
         sessions = get_table("auth_sessions")
         users = get_table("users")
         now = _now()
+        conditions = [
+            sessions.c.token_hash == hash_value(cookie_value),
+            sessions.c.revoked_at.is_(None),
+            sessions.c.expires_at > now,
+            users.c.is_active.is_(True),
+        ]
+        idle = session_idle_timeout()
+        if idle is not None:
+            conditions.append(sessions.c.last_seen_at > now - idle)
         db = SessionLocal()
         try:
             row = db.execute(
                 select(sessions.c.id, sessions.c.user_id, sessions.c.last_seen_at)
                 .select_from(sessions.join(users, users.c.id == sessions.c.user_id))
-                .where(
-                    and_(
-                        sessions.c.token_hash == hash_value(cookie_value),
-                        sessions.c.revoked_at.is_(None),
-                        sessions.c.expires_at > now,
-                        users.c.is_active.is_(True),
-                    )
-                )
+                .where(and_(*conditions))
             ).first()
             if row is None:
                 return None
@@ -204,14 +246,97 @@ def revoke_session(cookie_value: str | None, *, reason: str = "logout") -> str |
         db.close()
 
 
-def revoke_user_sessions(db: Session, user_id: UUID, *, reason: str) -> int:
-    """Revoke every live session of a user (password reset, disable). Caller commits."""
+def revoke_user_sessions(
+    db: Session,
+    user_id: UUID,
+    *,
+    reason: str,
+    keep_token: str | None = None,
+) -> int:
+    """Revoke every live session of a user, optionally keeping one. Caller commits."""
+    from db.tables import get_table
+
+    sessions = get_table("auth_sessions")
+    conditions = [sessions.c.user_id == user_id, sessions.c.revoked_at.is_(None)]
+    if keep_token:
+        conditions.append(sessions.c.token_hash != hash_value(keep_token))
+    result: Any = db.execute(
+        update(sessions)
+        .where(and_(*conditions))
+        .values(revoked_at=_now(), revoked_reason=reason[:64])
+    )
+    return int(result.rowcount or 0)
+
+
+def list_user_sessions(db: Session, user_id: UUID, *, current_token: str | None) -> list[dict]:
+    """Live sessions of a user, newest activity first. Never returns token hashes."""
+    from db.tables import get_table
+
+    sessions = get_table("auth_sessions")
+    now = _now()
+    conditions = [
+        sessions.c.user_id == user_id,
+        sessions.c.revoked_at.is_(None),
+        sessions.c.expires_at > now,
+    ]
+    idle = session_idle_timeout()
+    if idle is not None:
+        conditions.append(sessions.c.last_seen_at > now - idle)
+    current_hash = hash_value(current_token) if current_token else None
+    rows = db.execute(
+        select(
+            sessions.c.id,
+            sessions.c.token_hash,
+            sessions.c.auth_method,
+            sessions.c.created_at,
+            sessions.c.last_seen_at,
+            sessions.c.expires_at,
+            sessions.c.user_agent,
+        )
+        .where(and_(*conditions))
+        .order_by(sessions.c.last_seen_at.desc())
+    ).all()
+    return [
+        {
+            "id": str(row.id),
+            "auth_method": row.auth_method,
+            "created_at": _as_utc(row.created_at).isoformat(),
+            "last_seen_at": _as_utc(row.last_seen_at).isoformat(),
+            "expires_at": _as_utc(row.expires_at).isoformat(),
+            "user_agent": row.user_agent,
+            "current": current_hash is not None
+            and hmac.compare_digest(row.token_hash, current_hash),
+        }
+        for row in rows
+    ]
+
+
+def revoke_user_session_by_id(db: Session, user_id: UUID, session_id: UUID) -> bool:
+    """Revoke one of the user's own sessions. Caller commits."""
     from db.tables import get_table
 
     sessions = get_table("auth_sessions")
     result: Any = db.execute(
         update(sessions)
-        .where(and_(sessions.c.user_id == user_id, sessions.c.revoked_at.is_(None)))
-        .values(revoked_at=_now(), revoked_reason=reason[:64])
+        .where(
+            and_(
+                sessions.c.id == session_id,
+                sessions.c.user_id == user_id,
+                sessions.c.revoked_at.is_(None),
+            )
+        )
+        .values(revoked_at=_now(), revoked_reason="user_revoked")
+    )
+    return bool(result.rowcount)
+
+
+def purge_ended_sessions(db: Session, *, retention: timedelta) -> int:
+    """Delete sessions that expired or were revoked more than ``retention`` ago. Caller commits."""
+    from db.tables import get_table
+
+    sessions = get_table("auth_sessions")
+    cutoff = _now() - retention
+    result: Any = db.execute(
+        delete(sessions).where(or_(sessions.c.expires_at < cutoff, sessions.c.revoked_at < cutoff))
     )
     return int(result.rowcount or 0)

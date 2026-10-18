@@ -72,11 +72,14 @@ export function useAuth() {
     try {
       cognitoLogoutUrl = (await logoutSession()).cognito_logout_url;
     } catch {
-      // The session cookie may already be gone; continue clearing local state.
-    } finally {
-      markFreshLoginPending();
-      setState((prev) => ({ ...prev, whoAmI: null, loggedIn: false }));
+      if (cognitoConfig?.enabled) {
+        // The server session may still be valid: say so instead of pretending.
+        window.location.assign("/login?error=logout_failed");
+        return;
+      }
     }
+    markFreshLoginPending();
+    setState((prev) => ({ ...prev, whoAmI: null, loggedIn: false }));
     if (!cognitoConfig?.enabled) return;
     // A full navigation also drops all in-memory chat state from the page.
     window.location.assign(cognitoLogoutUrl ?? "/login");

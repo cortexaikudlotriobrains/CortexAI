@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from contextlib import suppress
 
-from sqlalchemy import Boolean, Column, DateTime, MetaData, String, Table, Uuid, text
+from sqlalchemy import Boolean, Column, DateTime, Integer, MetaData, String, Table, Uuid, text
 
 
 def reset_db_runtime_state(monkeypatch, *, schema_name: str = "main") -> None:
@@ -53,6 +53,13 @@ def bootstrap_auth_sqlite_schema() -> None:
         Column("user_agent", String),
         Column("ip_hash", String),
     )
+    Table(
+        "auth_rate_limits",
+        metadata,
+        Column("bucket_key", String, primary_key=True),
+        Column("window_start", DateTime(timezone=True), primary_key=True),
+        Column("hits", Integer, nullable=False, default=0),
+    )
     metadata.create_all(engine)
 
     # In-memory SQLite shares one connection (StaticPool): lazily reflecting a table
@@ -61,3 +68,4 @@ def bootstrap_auth_sqlite_schema() -> None:
 
     get_table("users")
     get_table("auth_sessions")
+    get_table("auth_rate_limits")

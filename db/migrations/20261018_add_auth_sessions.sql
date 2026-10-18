@@ -33,4 +33,17 @@ CREATE INDEX IF NOT EXISTS ix_auth_sessions_user_active
 CREATE INDEX IF NOT EXISTS ix_auth_sessions_expires_at
     ON public.auth_sessions (expires_at);
 
+-- Fixed-window brute-force counters shared by every API instance. bucket_key is a
+-- keyed hash of "<action>:<ip|email>"; old windows are purged by the API.
+CREATE TABLE IF NOT EXISTS public.auth_rate_limits (
+    bucket_key char(64) NOT NULL,
+    window_start timestamptz NOT NULL,
+    hits integer NOT NULL DEFAULT 0,
+    CONSTRAINT pk_auth_rate_limits PRIMARY KEY (bucket_key, window_start),
+    CONSTRAINT ck_auth_rate_limits_hits CHECK (hits >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS ix_auth_rate_limits_window_start
+    ON public.auth_rate_limits (window_start);
+
 COMMIT;

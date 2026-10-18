@@ -5,6 +5,7 @@ import {
   loginWithPassword,
   logoutSession,
   requestPasswordReset,
+  revokeOtherSessions,
   resendSignUpCode,
   resetPassword,
   signUp,
@@ -60,6 +61,7 @@ describe("auth API client", () => {
       { email: "a@b.co", code: "123456", new_password: "new-pw" },
     ],
     ["logoutSession", () => logoutSession(), "/v1/auth/logout", {}],
+    ["revokeOtherSessions", () => revokeOtherSessions(), "/v1/auth/sessions/revoke-others", {}],
   ];
 
   it.each(cases)("%s posts JSON with credentials to the backend", async (_n, call, path, body) => {

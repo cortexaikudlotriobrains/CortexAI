@@ -62,7 +62,7 @@ export function LoginPage() {
   useTheme();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { cognitoConfig, loading, loggedIn } = useAuth();
+  const { cognitoConfig, loading, loggedIn, logout } = useAuth();
   const nextPath = safeNextPath(searchParams.get("next"));
 
   const [view, setView] = useState<View>("signin");
@@ -75,6 +75,7 @@ export function LoginPage() {
     oauthRedirectMessage(searchParams.get("error")),
   );
   const [errorField, setErrorField] = useState<Field | null>(null);
+  const [logoutFailed] = useState(() => searchParams.get("error") === "logout_failed");
   const [notice, setNotice] = useState<string | null>(null);
   const [cooldown, setCooldown] = useState(0);
 
@@ -102,8 +103,9 @@ export function LoginPage() {
   }, [searchParams, setSearchParams]);
 
   useEffect(() => {
-    if (loggedIn) navigate(nextPath, { replace: true });
-  }, [loggedIn, navigate, nextPath]);
+    // After a failed sign-out the session may still be live; stay here to retry.
+    if (loggedIn && !logoutFailed) navigate(nextPath, { replace: true });
+  }, [loggedIn, logoutFailed, navigate, nextPath]);
 
   useEffect(() => {
     if (cooldown <= 0) return undefined;
@@ -230,7 +232,7 @@ export function LoginPage() {
           : 0;
       if (failure.code === "rate_limited" && retry > 0) setCooldown(Math.min(retry, 300));
       const field: Field | null =
-        failure.code === "weak_password"
+        failure.code === "weak_password" || failure.code === "breached_password"
           ? "password"
           : failure.code === "invalid_code" || failure.code === "expired_code"
             ? "code"
@@ -283,6 +285,29 @@ export function LoginPage() {
           <p className={styles.lede}>
             Sign-in isn't configured for this environment. Ask your administrator to set it up.
           </p>
+          <Link className={styles.secondaryLink} to="/">
+            Back to CortexAI
+          </Link>
+        </section>
+      </main>
+    );
+  }
+
+  if (logoutFailed && loggedIn) {
+    return (
+      <main className={styles.page}>
+        <section className={styles.card} aria-labelledby="logout-failed-title">
+          <h1 id="logout-failed-title" className={styles.title}>
+            You're still signed in
+          </h1>
+          {error ? (
+            <p className={styles.error} role="alert">
+              {error}
+            </p>
+          ) : null}
+          <button type="button" className={styles.submit} onClick={() => void logout()}>
+            Sign out again
+          </button>
           <Link className={styles.secondaryLink} to="/">
             Back to CortexAI
           </Link>

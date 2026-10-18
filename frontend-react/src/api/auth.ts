@@ -1,4 +1,4 @@
-import { get, post } from "./client";
+import { del, get, post } from "./client";
 import type { AuthenticatedUser, CognitoConfig, WhoAmIResponse } from "../types";
 
 export async function fetchCognitoConfig(): Promise<CognitoConfig> {
@@ -70,4 +70,26 @@ export function logoutSession(): Promise<LogoutResponse> {
 /** Same-origin URL that starts Google sign-in (the backend redirects to Google via Cognito). */
 export function googleLoginUrl(nextPath: string): string {
   return `/v1/auth/google/start?next=${encodeURIComponent(nextPath)}`;
+}
+
+export interface AuthSession {
+  id: string;
+  auth_method: "password" | "google" | "cognito_token" | "dev";
+  created_at: string;
+  last_seen_at: string;
+  expires_at: string;
+  user_agent: string | null;
+  current: boolean;
+}
+
+export function listSessions(): Promise<{ sessions: AuthSession[] }> {
+  return get("/v1/auth/sessions");
+}
+
+export function revokeSession(sessionId: string): Promise<{ ok: boolean }> {
+  return del(`/v1/auth/sessions/${encodeURIComponent(sessionId)}`);
+}
+
+export function revokeOtherSessions(): Promise<{ ok: boolean; revoked: number }> {
+  return post("/v1/auth/sessions/revoke-others", {});
 }

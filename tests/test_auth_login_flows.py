@@ -35,6 +35,8 @@ def app(monkeypatch):
     monkeypatch.setenv("COGNITO_CLIENT_ID", "client-id")
     monkeypatch.setenv("COGNITO_REGION", "us-east-1")
     monkeypatch.setenv("COGNITO_DOMAIN", "https://auth.example.com")
+    # Unit tests never call the real Have I Been Pwned API.
+    monkeypatch.setenv("AUTH_BREACHED_PASSWORD_CHECK", "false")
     reset_db_runtime_state(monkeypatch)
     bootstrap_auth_sqlite_schema()
     auth_security.reset_auth_rate_limits()
@@ -749,3 +751,260 @@ def test_security_headers_are_added_to_api_and_auth_responses(client):
 
     secure = TestClient(client.app, base_url="https://testserver")
     assert "max-age=" in secure.get("/health").headers["strict-transport-security"]
+
+
+# --------------------------------------------------------------------------- #
+# Hardening round 2
+# --------------------------------------------------------------------------- #
+
+
+def test_https_uses_host_prefixed_cookies_and_ignores_unprefixed_ones(app, monkeypatch):
+    secure = TestClient(app, base_url="https://testserver")
+    _stub_login(monkeypatch)
+    r = secure.post(
+        "/v1/auth/login/password", json={"email": "ada@example.com", "password": "x" * 14}
+    )
+    assert r.status_code == 200
+    cookie = r.headers["set-cookie"]
+    assert cookie.startswith("__Host-cortex_session=")
+    assert "secure" in cookie.lower() and "domain" not in cookie.lower()
+    assert secure.get("/v1/auth/me").status_code == 200
+
+    # A sibling subdomain can set an unprefixed cookie; over HTTPS it is never read.
+    token = _issue(_create_user("grace@example.com", subject="sub-2"))
+    planted = TestClient(app, base_url="https://testserver")
+    planted.cookies.set("cortex_session", token)
+    assert planted.get("/v1/auth/me").status_code == 401
+
+
+def test_google_transaction_cookie_is_host_prefixed_on_https(app):
+    secure = TestClient(app, base_url="https://testserver")
+    r = secure.get("/v1/auth/google/start", follow_redirects=False)
+    assert r.headers["set-cookie"].startswith("__Host-cortex_oauth_tx=")
+
+
+def test_idle_sessions_end_and_the_timeout_is_configurable(app, monkeypatch):
+    from db.tables import get_table
+    from server.persistence import db_uow
+
+    user_id = _create_user()
+    token = _issue(user_id)
+    sessions = get_table("auth_sessions")
+    with db_uow() as session:
+        session.execute(
+            update(sessions).values(last_seen_at=datetime.now(timezone.utc) - timedelta(days=4))
+        )
+    assert sa.parse_session(token) is None  # default idle timeout is 3 days
+    monkeypatch.setenv("SESSION_IDLE_TIMEOUT_SECONDS", "0")
+    assert sa.parse_session(token) == user_id
+    monkeypatch.setenv("SESSION_IDLE_TIMEOUT_SECONDS", str(5 * 24 * 3600))
+    assert sa.parse_session(token) == user_id
+
+
+def test_sessions_api_lists_and_revokes_only_the_users_own_sessions(client):
+    user_id = _create_user()
+    current, other = _issue(user_id), _issue(user_id, "google")
+    stranger = _issue(_create_user("grace@example.com", subject="sub-2"))
+    client.cookies.set("cortex_session", current)
+
+    listed = client.get("/v1/auth/sessions")
+    assert listed.status_code == 200
+    rows = listed.json()["sessions"]
+    assert len(rows) == 2
+    assert sum(row["current"] for row in rows) == 1
+    assert all("token" not in key and "ip" not in key for row in rows for key in row)
+    other_id = next(row["id"] for row in rows if not row["current"])
+
+    # Another user's session id is indistinguishable from a missing one.
+    from db.tables import get_table
+    from server.persistence import db_uow
+
+    with db_uow(commit_on_success=False) as session:
+        stranger_id = session.execute(
+            select(get_table("auth_sessions").c.id).where(
+                get_table("auth_sessions").c.token_hash == sa.hash_value(stranger)
+            )
+        ).scalar_one()
+    assert client.delete(f"/v1/auth/sessions/{stranger_id}").status_code == 404
+    assert sa.parse_session(stranger) is not None
+
+    assert client.delete(f"/v1/auth/sessions/{other_id}").status_code == 200
+    assert sa.parse_session(other) is None
+    assert sa.parse_session(current) == user_id
+
+    third = _issue(user_id)
+    r = client.post("/v1/auth/sessions/revoke-others")
+    assert r.json() == {"ok": True, "revoked": 1}
+    assert sa.parse_session(third) is None
+    assert sa.parse_session(current) == user_id
+
+    client.cookies.clear()
+    assert client.get("/v1/auth/sessions").status_code == 401
+
+
+def test_rate_limits_are_stored_in_the_shared_table(client, monkeypatch):
+    from db.tables import get_table
+    from server.persistence import db_uow
+
+    monkeypatch.setenv("AUTH_RATE_LIMIT_IDENTITY_PER_5_MIN", "2")
+    monkeypatch.setenv("AUTH_RATE_LIMIT_IP_PER_MINUTE", "0")
+    monkeypatch.setattr(cognito_idp, "forgot_password", lambda e: None)
+    body = {"email": "ada@example.com"}
+    assert client.post("/v1/auth/password/forgot", json=body).status_code == 202
+    # Another API instance has no shared in-process memory; the table still counts.
+    auth_security.reset_auth_rate_limits()
+    assert client.post("/v1/auth/password/forgot", json=body).status_code == 202
+    assert client.post("/v1/auth/password/forgot", json=body).status_code == 429
+    with db_uow(commit_on_success=False) as session:
+        hits = session.execute(select(get_table("auth_rate_limits").c.hits)).scalars().all()
+    assert hits == [3]
+
+
+def test_rate_limits_fall_back_to_bounded_memory_without_the_table(client, monkeypatch):
+    def broken(*args, **kwargs):
+        raise RuntimeError("table missing")
+
+    monkeypatch.setattr(auth_security, "_db_hit", broken)
+    monkeypatch.setenv("AUTH_RATE_LIMIT_IDENTITY_PER_5_MIN", "1")
+    monkeypatch.setenv("AUTH_RATE_LIMIT_IP_PER_MINUTE", "0")
+    monkeypatch.setattr(cognito_idp, "forgot_password", lambda e: None)
+    body = {"email": "ada@example.com"}
+    assert client.post("/v1/auth/password/forgot", json=body).status_code == 202
+    assert client.post("/v1/auth/password/forgot", json=body).status_code == 429
+
+
+class _FakeResponse:
+    def __init__(self, body: str):
+        self._body = body.encode()
+
+    def read(self):
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def test_breached_passwords_are_rejected_using_only_a_hash_prefix(client, monkeypatch):
+    import hashlib
+
+    monkeypatch.setenv("AUTH_BREACHED_PASSWORD_CHECK", "true")
+    password = "correct horse battery"
+    digest = hashlib.sha1(password.encode()).hexdigest().upper()
+    requested: list[str] = []
+
+    def fake_urlopen(request, timeout):
+        requested.append(request.full_url)
+        assert request.headers["Add-padding"] == "true"
+        return _FakeResponse(f"0000000000000000000000000000000000A:0\r\n{digest[5:]}:42\r\n")
+
+    monkeypatch.setattr(auth_security.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(cognito_idp, "sign_up", lambda e, p: pytest.fail("must not sign up"))
+    r = client.post("/v1/auth/signup", json={"email": "ada@example.com", "password": password})
+    assert r.status_code == 422
+    assert r.json()["detail"]["code"] == "breached_password"
+    assert requested == [f"https://api.pwnedpasswords.com/range/{digest[:5]}"]
+    assert password not in requested[0] and digest not in requested[0]
+
+    reset = client.post(
+        "/v1/auth/password/reset",
+        json={"email": "ada@example.com", "code": "123456", "new_password": password},
+    )
+    assert reset.json()["detail"]["code"] == "breached_password"
+
+
+def test_breach_check_fails_open_and_can_be_disabled(client, monkeypatch):
+    calls: list[str] = []
+    monkeypatch.setattr(cognito_idp, "sign_up", lambda e, p: calls.append(e))
+    monkeypatch.setenv("AUTH_BREACHED_PASSWORD_CHECK", "true")
+
+    def outage(request, timeout):
+        raise OSError("unreachable")
+
+    monkeypatch.setattr(auth_security.urllib.request, "urlopen", outage)
+    body = {"email": "ada@example.com", "password": "correct horse battery"}
+    assert client.post("/v1/auth/signup", json=body).status_code == 202
+
+    monkeypatch.setenv("AUTH_BREACHED_PASSWORD_CHECK", "false")
+    monkeypatch.setattr(
+        auth_security.urllib.request, "urlopen", lambda *a, **k: pytest.fail("no call")
+    )
+    assert client.post("/v1/auth/signup", json=body).status_code == 202
+    assert calls == ["ada@example.com", "ada@example.com"]
+
+
+def test_credentialed_cors_only_for_trusted_origins(client, monkeypatch):
+    headers = {"Origin": "https://evil.example"}
+    r = client.get("/health", headers=headers)
+    assert r.headers["access-control-allow-origin"] == "*"
+    assert "access-control-allow-credentials" not in r.headers
+
+    preflight = client.options(
+        "/v1/auth/me",
+        headers={**headers, "Access-Control-Request-Method": "GET"},
+    )
+    assert "access-control-allow-credentials" not in preflight.headers
+
+    monkeypatch.setenv("AUTH_ALLOWED_ORIGINS", "https://app.example.com")
+    trusted = client.get("/health", headers={"Origin": "https://app.example.com"})
+    assert trusted.headers["access-control-allow-origin"] == "https://app.example.com"
+    assert trusted.headers["access-control-allow-credentials"] == "true"
+
+
+def test_loopback_origins_are_trusted_only_outside_production(monkeypatch):
+    assert auth_security.is_trusted_browser_origin("http://localhost:5173")
+    assert auth_security.is_trusted_browser_origin("http://127.0.0.1:8000")
+    assert not auth_security.is_trusted_browser_origin("http://localhost.evil.example")
+    monkeypatch.setenv("APP_ENV", "production")
+    assert not auth_security.is_trusted_browser_origin("http://localhost:5173")
+
+
+def test_audit_events_hash_email_and_ip(client, monkeypatch, caplog):
+    import logging
+
+    def reject(email, password):
+        raise cognito_idp.CognitoFlowError(
+            "invalid_credentials", 401, "Incorrect email or password."
+        )
+
+    monkeypatch.setattr(cognito_idp, "password_login", reject)
+    with caplog.at_level(logging.INFO, logger="server.auth_security"):
+        client.post(
+            "/v1/auth/login/password", json={"email": "ada@example.com", "password": "x" * 14}
+        )
+    records = [
+        r.extra_fields
+        for r in caplog.records
+        if getattr(r, "extra_fields", {}).get("event") == "auth.login.failed"
+    ]
+    assert records and records[0]["email_hash"] == sa.hash_value("ada@example.com")
+    assert records[0]["code"] == "invalid_credentials"
+    assert "ada@example.com" not in caplog.text
+
+
+def test_maintenance_purges_long_ended_sessions_and_old_windows(app):
+    from db.tables import get_table
+    from server.auth_maintenance import run_auth_maintenance_cycle
+    from server.persistence import db_uow
+
+    user_id = _create_user()
+    live, old = _issue(user_id), _issue(user_id)
+    sessions = get_table("auth_sessions")
+    windows = get_table("auth_rate_limits")
+    long_ago = datetime.now(timezone.utc) - timedelta(days=40)
+    with db_uow() as session:
+        session.execute(
+            update(sessions)
+            .where(sessions.c.token_hash == sa.hash_value(old))
+            .values(expires_at=long_ago, created_at=long_ago - timedelta(days=1))
+        )
+        session.execute(windows.insert().values(bucket_key="a" * 64, window_start=long_ago, hits=3))
+        session.execute(
+            windows.insert().values(
+                bucket_key="b" * 64, window_start=datetime.now(timezone.utc), hits=1
+            )
+        )
+    assert run_auth_maintenance_cycle() == {"sessions_deleted": 1, "rate_limit_windows_deleted": 1}
+    assert sa.parse_session(live) == user_id

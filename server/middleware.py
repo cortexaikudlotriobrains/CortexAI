@@ -138,3 +138,48 @@ class SecurityHeadersMiddleware:
             await send(message)
 
         await self.app(scope, receive, send_with_headers)
+
+
+class CredentialAwareCORSMiddleware:
+    """CORS that only lets trusted origins make credentialed (cookie) requests.
+
+    Every other origin still gets ``Access-Control-Allow-Origin: *`` for
+    API-key/Bearer calls, but no ``Access-Control-Allow-Credentials``, so browsers
+    refuse to expose cookie-authenticated responses to it. The React app calls
+    the API on its own origin and never needs credentialed CORS; separately
+    hosted frontends are trusted through ``AUTH_ALLOWED_ORIGINS`` or the origin
+    of ``COGNITO_SUCCESS_REDIRECT_URI`` (and loopback outside production).
+    """
+
+    def __init__(self, app) -> None:
+        from starlette.middleware.cors import CORSMiddleware
+
+        # Only origins that pass is_trusted_browser_origin reach this instance, so
+        # it may reflect the origin with credentials.
+        self.trusted = CORSMiddleware(
+            app,
+            allow_origins=["*"],
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+        self.public = CORSMiddleware(
+            app,
+            allow_origins=["*"],
+            allow_credentials=False,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] == "http":
+            from server.auth_security import is_trusted_browser_origin
+
+            origin = next(
+                (value.decode("latin-1") for name, value in scope["headers"] if name == b"origin"),
+                None,
+            )
+            if origin and is_trusted_browser_origin(origin):
+                await self.trusted(scope, receive, send)
+                return
+        await self.public(scope, receive, send)

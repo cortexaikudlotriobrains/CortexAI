@@ -6,6 +6,7 @@ export type LoginErrorCode =
   | "password_reset_required"
   | "challenge_unsupported"
   | "weak_password"
+  | "breached_password"
   | "invalid_email"
   | "invalid_code"
   | "expired_code"
@@ -22,6 +23,8 @@ const COPY: Record<LoginErrorCode, string> = {
   password_reset_required: "For your security, reset your password to continue.",
   challenge_unsupported: "This account needs extra steps. Reset your password to continue.",
   weak_password: "Choose a stronger password that meets the requirements below.",
+  breached_password:
+    "This password has appeared in a known data breach, so it isn't safe to use. Choose a different one.",
   invalid_email: "Enter a valid email address.",
   invalid_code: "That code isn't correct. Check the 6-digit code from your email.",
   expired_code: "That code has expired. Request a new one.",
@@ -44,6 +47,7 @@ const OAUTH_REDIRECT_COPY: Record<string, string> = {
   email_not_verified: "Your Google account's email address isn't verified.",
   account_exists: COPY.account_exists_other_method,
   account_disabled: COPY.account_disabled,
+  logout_failed: "We couldn't sign you out. Check your connection and try again.",
 };
 
 function isLoginErrorCode(code: string | null): code is LoginErrorCode {

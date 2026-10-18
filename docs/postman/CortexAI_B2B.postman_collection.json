@@ -96,6 +96,10 @@
     {
       "key": "cognito_id_token",
       "value": ""
+    },
+    {
+      "key": "auth_session_id",
+      "value": ""
     }
   ],
   "item": [
@@ -621,6 +625,80 @@
                   "pm.test('auth responses are not cacheable', function () { pm.expect(pm.response.headers.get('Cache-Control')).to.eql('no-store'); });",
                   "var body = pm.response.json();",
                   "pm.test('logged out', function () { pm.expect(body.ok).to.eql(true); pm.expect(body).to.have.property('cognito_logout_url'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/auth/sessions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/v1/auth/sessions",
+            "description": "Signed-in devices of the current user. Token and IP hashes are never returned."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+                  "var body = pm.response.json();",
+                  "pm.test('one current session', function () { pm.expect(body.sessions.filter(function (s) { return s.current; }).length).to.eql(1); });",
+                  "var other = body.sessions.find(function (s) { return !s.current; });",
+                  "if (other) { pm.collectionVariables.set('auth_session_id', other.id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "DELETE /v1/auth/sessions/{session_id}",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{base_url}}/v1/auth/sessions/{{auth_session_id}}",
+            "description": "Signs out one of the user's own sessions; unknown or foreign ids return 404 session_not_found."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200 or 404', function () { pm.expect([200, 404]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/auth/sessions/revoke-others",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/v1/auth/sessions/revoke-others",
+            "description": "Signs out every other device and keeps the current session.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('reports revoked count', function () { pm.expect(pm.response.json()).to.have.property('revoked'); });"
                 ]
               }
             }

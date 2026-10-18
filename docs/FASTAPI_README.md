@@ -330,8 +330,9 @@ multi-model identity fails closed before the task is sent or settled.
 - `POST /v1/auth/dev-login`
 - `POST /v1/auth/logout` (server-side revocation; returns `cognito_logout_url` for Google sessions)
 - `GET /v1/auth/me`
+- `GET /v1/auth/sessions`, `DELETE /v1/auth/sessions/{session_id}`, `POST /v1/auth/sessions/revoke-others`
 
-The React app signs users in on its own `/login` page; the contract, error codes, Cognito app-client requirements and security model are in [auth login](runbooks/auth-login.md). Browser sessions are opaque server-side tokens (`auth_sessions`), not signed user IDs, and `SESSION_SECRET` (>= 32 characters) is required in production.
+The React app signs users in on its own `/login` page; the contract, error codes, Cognito app-client requirements and security model are in [auth login](runbooks/auth-login.md). Browser sessions are opaque server-side tokens (`auth_sessions`), not signed user IDs, and `SESSION_SECRET` (>= 32 characters) is required in production. On HTTPS the cookie is `__Host-cortex_session`. Credentialed CORS is limited to trusted origins (`AUTH_ALLOWED_ORIGINS`, the `COGNITO_SUCCESS_REDIRECT_URI` origin, loopback outside production); other origins get non-credentialed CORS.
 
 ### Direct attachment upload contract
 
@@ -892,7 +893,7 @@ psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20261007_add_
 psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20261018_add_auth_sessions.sql
 ```
 
-`20261018_add_auth_sessions.sql` adds `auth_sessions` (hashed opaque browser-session tokens with expiry and revocation). PostgreSQL startup validates it; existing signed-cookie sessions end once when this build ships.
+`20261018_add_auth_sessions.sql` adds `auth_sessions` (hashed opaque browser-session tokens with expiry and revocation) and `auth_rate_limits` (shared auth throttles). PostgreSQL startup validates it; existing signed-cookie sessions end once when this build ships.
 
 The first Cortex Analysis migration adds Compare response revision metadata and
 the append-only `cortex_analysis_runs` table; the `20260802` attribution
