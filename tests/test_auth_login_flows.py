@@ -1068,3 +1068,35 @@ def test_password_login_token_failures_are_not_reported_as_wrong_passwords(clien
     r = client.post("/v1/auth/login/password", json=body)
     assert (r.status_code, r.json()["detail"]["code"]) == (401, "invalid_credentials")
     assert "set-cookie" not in r.headers
+
+
+def test_sign_up_rejections_are_not_reported_as_wrong_passwords(monkeypatch, caplog):
+    import logging
+
+    from botocore.exceptions import ClientError
+
+    def stub(message):
+        class Stub:
+            def sign_up(self, **kwargs):
+                raise ClientError(
+                    {"Error": {"Code": "NotAuthorizedException", "Message": message}}, "SignUp"
+                )
+
+        return Stub()
+
+    monkeypatch.setattr(
+        cognito_idp, "_client", lambda: stub("SignUp is not permitted for this user pool")
+    )
+    with caplog.at_level(logging.INFO, logger="server.cognito_idp"):
+        with pytest.raises(cognito_idp.CognitoFlowError) as exc:
+            cognito_idp.sign_up("ada@example.com", "correct horse battery")
+    assert (exc.value.code, exc.value.status_code) == ("signup_unavailable", 403)
+    assert any(
+        getattr(r, "extra_fields", {}).get("reason") == "self_signup_disabled"
+        for r in caplog.records
+    )
+
+    monkeypatch.setattr(cognito_idp, "_client", lambda: stub("Something else"))
+    with pytest.raises(cognito_idp.CognitoFlowError) as exc:
+        cognito_idp.sign_up("ada@example.com", "correct horse battery")
+    assert (exc.value.code, exc.value.status_code) == ("auth_unavailable", 502)

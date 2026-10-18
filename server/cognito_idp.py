@@ -198,6 +198,38 @@ def _refine_not_authorized(exc: ClientError, *, operation: str) -> CognitoFlowEr
             502,
             "Sign-in is temporarily unavailable. Please try again shortly.",
         )
+    if "not permitted" in message:
+        # "SignUp is not permitted for this user pool": self-registration is off.
+        logger.error(
+            "Cognito user pool does not allow self sign-up",
+            extra={
+                "extra_fields": {
+                    "event": "auth.cognito.misconfigured",
+                    "operation": operation,
+                    "reason": "self_signup_disabled",
+                }
+            },
+        )
+        return CognitoFlowError(
+            "signup_unavailable", 403, "Creating an account isn't available right now."
+        )
+    if operation != "initiate_auth":
+        # Outside sign-in, NotAuthorized is never "wrong password"; surface it as config.
+        logger.error(
+            "Cognito rejected a non-login call as not authorized",
+            extra={
+                "extra_fields": {
+                    "event": "auth.cognito.misconfigured",
+                    "operation": operation,
+                    "reason": "not_authorized",
+                }
+            },
+        )
+        return CognitoFlowError(
+            "auth_unavailable",
+            502,
+            "Sign-in is temporarily unavailable. Please try again shortly.",
+        )
     if "attempts exceeded" in message:
         return CognitoFlowError(*_COMMON_ERRORS["TooManyFailedAttemptsException"])
     if "disabled" in message:

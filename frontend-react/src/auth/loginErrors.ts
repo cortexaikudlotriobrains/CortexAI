@@ -15,6 +15,7 @@ export type LoginErrorCode =
   | "account_exists_other_method"
   | "account_disabled"
   | "auth_method_disabled"
+  | "signup_unavailable"
   | "origin_not_allowed"
   | "auth_unavailable";
 
@@ -36,6 +37,8 @@ const COPY: Record<LoginErrorCode, string> = {
     "An account with this email already exists. Sign in the way you did before, for example with Google.",
   account_disabled: "This account isn't available. Contact support if you think this is a mistake.",
   auth_method_disabled: "This sign-in method isn't available right now.",
+  signup_unavailable:
+    "Creating an account isn't available right now. Try Continue with Google, or contact support.",
   origin_not_allowed: "This request couldn't be completed. Reload the page and try again.",
   auth_unavailable: "Sign-in is temporarily unavailable. Please try again shortly.",
 };

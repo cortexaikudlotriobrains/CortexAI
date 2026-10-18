@@ -229,6 +229,9 @@ Rollback: deploy the previous build; the extra table is harmless. Users sign in 
   `email_mismatch` means the account's email differs from what was typed.
 - **Google token exchange**: `auth.oauth.token_exchange_failed` shows Cognito's status and error
   (`invalid_grant`, `invalid_client`, ...).
+- **Sign-up fails**: `auth.cognito.misconfigured` with `reason=self_signup_disabled` means the
+  pool only allows admin-created users; enable self-registration (Cognito → Sign-up → Self-service
+  sign-up). The page shows "Creating an account isn't available right now."
 - **"Incorrect email or password" for a known account**: the email may belong to a Google-only
   user (federated users have no Cognito password; use Continue with Google), or the account was
   created under a different username in the pool. Cognito lockouts show as `rate_limited` and
