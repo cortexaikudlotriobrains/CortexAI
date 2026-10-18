@@ -80,7 +80,7 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from sqlalchemy import Boolean, Column, MetaData, String, Table, Uuid, text
+from sqlalchemy import Boolean, Column, DateTime, MetaData, String, Table, Uuid, text
 
 from config.provider_catalog import get_provider_catalog, get_provider_ids
 from orchestrator.model_registry import ModelRegistry
@@ -294,7 +294,35 @@ def _bootstrap_dev_auth_sqlite_schema() -> None:
         Column("auth_subject", String),
         Column("auth_issuer", String),
     )
+    Table(
+        "auth_sessions",
+        metadata,
+        Column(
+            "id",
+            Uuid,
+            primary_key=True,
+            nullable=False,
+            server_default=text("(lower(hex(randomblob(16))))"),
+        ),
+        Column("user_id", Uuid, nullable=False),
+        Column("token_hash", String, nullable=False, unique=True),
+        Column("auth_method", String, nullable=False),
+        Column("created_at", DateTime(timezone=True)),
+        Column("last_seen_at", DateTime(timezone=True)),
+        Column("expires_at", DateTime(timezone=True), nullable=False),
+        Column("revoked_at", DateTime(timezone=True)),
+        Column("revoked_reason", String),
+        Column("user_agent", String),
+        Column("ip_hash", String),
+    )
     metadata.create_all(engine)
+
+    # StaticPool shares one SQLite connection; reflecting lazily inside a
+    # transaction would roll it back, so warm the table cache up front.
+    from db.tables import get_table
+
+    get_table("users")
+    get_table("auth_sessions")
 
 
 # -------------------------------------------------------------------

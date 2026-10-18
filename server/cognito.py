@@ -79,6 +79,7 @@ class CognitoClaims:
     iss: str
     aud: str
     token_use: str
+    nonce: str | None = None
 
     @property
     def display_email(self) -> str:
@@ -143,6 +144,7 @@ def verify_cognito_id_token(token: str) -> CognitoClaims | None:
         iss=str(payload.get("iss", "")),
         aud=str(payload.get("aud", "")),
         token_use=str(token_use),
+        nonce=payload.get("nonce"),
     )
 
 
@@ -154,7 +156,7 @@ def cognito_enabled() -> bool:
 def get_cognito_config_for_frontend() -> dict[str, Any]:
     """
     Return public Cognito config for frontend (no secrets).
-    Used by /v1/auth/cognito-config and frontend to init Hosted UI / Amplify.
+    Used by /v1/auth/cognito-config; the in-app login page reads the enabled-method flags.
     """
     if not _cognito_enabled():
         return {}
@@ -188,10 +190,21 @@ def get_cognito_domain() -> str:
     return domain
 
 
-def get_cognito_authorize_url(redirect_uri: str, state: str | None = None) -> str:
+def get_cognito_authorize_url(
+    redirect_uri: str,
+    state: str | None = None,
+    *,
+    code_challenge: str | None = None,
+    nonce: str | None = None,
+    identity_provider: str | None = None,
+) -> str:
     """
-    Build Cognito Hosted UI authorize URL (authorization code flow).
-    redirect_uri must match the value configured in the Cognito app client.
+    Build the Cognito ``/oauth2/authorize`` URL (authorization code flow).
+
+    ``identity_provider`` (e.g. ``Google``) sends the browser straight to that
+    provider so the Cognito-hosted login page is never shown. ``code_challenge``
+    enables PKCE (S256); ``state`` and ``nonce`` bind the response to the browser
+    that started the flow. redirect_uri must match the Cognito app client.
     """
     domain = get_cognito_domain()
     client_id = (os.getenv("COGNITO_CLIENT_ID") or "").strip()
@@ -200,16 +213,25 @@ def get_cognito_authorize_url(redirect_uri: str, state: str | None = None) -> st
     params = [
         ("client_id", client_id),
         ("response_type", "code"),
-        ("scope", "openid email"),
+        ("scope", "openid email profile"),
         ("redirect_uri", redirect_uri),
     ]
+    if identity_provider:
+        params.append(("identity_provider", identity_provider))
     if state:
         params.append(("state", state))
-    qs = "&".join(f"{k}={urllib.parse.quote(v)}" for k, v in params)
-    return f"{domain}/login?{qs}"
+    if nonce:
+        params.append(("nonce", nonce))
+    if code_challenge:
+        params.append(("code_challenge", code_challenge))
+        params.append(("code_challenge_method", "S256"))
+    qs = "&".join(f"{k}={urllib.parse.quote(v, safe='')}" for k, v in params)
+    return f"{domain}/oauth2/authorize?{qs}"
 
 
-def exchange_code_for_tokens(code: str, redirect_uri: str) -> dict[str, Any] | None:
+def exchange_code_for_tokens(
+    code: str, redirect_uri: str, code_verifier: str | None = None
+) -> dict[str, Any] | None:
     """
     Exchange authorization code for tokens via Cognito /oauth2/token.
     Returns token response dict (id_token, access_token, etc.) or None on failure.
@@ -227,6 +249,8 @@ def exchange_code_for_tokens(code: str, redirect_uri: str) -> dict[str, Any] | N
         f"client_id={urllib.parse.quote(client_id)}",
         f"redirect_uri={urllib.parse.quote(redirect_uri)}",
     ]
+    if code_verifier:
+        body_parts.append(f"code_verifier={urllib.parse.quote(code_verifier, safe='')}")
     if client_secret:
         body_parts.append(f"client_secret={urllib.parse.quote(client_secret)}")
     body = "&".join(body_parts).encode("utf-8")

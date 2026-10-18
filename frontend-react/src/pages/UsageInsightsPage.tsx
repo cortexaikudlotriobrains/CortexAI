@@ -234,6 +234,7 @@ export function UsageInsightsPage() {
                 onToggleTheme={toggleTheme}
                 onUsageInsights={() => navigate("/usage")}
                 onCredits={() => navigate("/credits")}
+                onSecurity={() => navigate("/account/security")}
               />
             </div>
           </div>

@@ -16,6 +16,8 @@ interface AccountMenuProps {
   onModels?: () => void;
   onUsageInsights?: () => void;
   onCredits?: () => void;
+  /** Signed-in devices; shown only to signed-in users. */
+  onSecurity?: () => void;
   theme?: AppTheme;
   onToggleTheme?: () => void;
 }
@@ -26,6 +28,7 @@ type AccountMenuActionKey =
   | "login"
   | "logout"
   | "models"
+  | "security"
   | "theme"
   | "usage";
 
@@ -51,6 +54,7 @@ export function AccountMenu({
   onModels,
   onUsageInsights,
   onCredits,
+  onSecurity,
   theme,
   onToggleTheme,
 }: AccountMenuProps) {
@@ -63,6 +67,7 @@ export function AccountMenu({
   const canOpenModels = getRuntimeConfig().modelsCatalogEnabled === true && !!onModels;
   const canOpenUsage = !!onUsageInsights;
   const canOpenCredits = !!onCredits;
+  const canOpenSecurity = loggedIn && !!onSecurity;
   const canToggleTheme = !!theme && !!onToggleTheme;
   const nextTheme = theme === "dark" ? "light" : "dark";
   const menuActions: AccountMenuAction[] = [];
@@ -109,6 +114,13 @@ export function AccountMenu({
       label: "Models",
       subtitle: "Current model catalogue",
       icon: "models",
+    });
+  }
+  if (canOpenSecurity) {
+    menuActions.push({
+      key: "security",
+      label: "Signed-in devices",
+      icon: "settings",
     });
   }
   if (canToggleTheme) {
@@ -192,6 +204,8 @@ export function AccountMenu({
       onUsageInsights?.();
     } else if (action === "credits") {
       onCredits?.();
+    } else if (action === "security") {
+      onSecurity?.();
     } else {
       onLogin?.();
     }

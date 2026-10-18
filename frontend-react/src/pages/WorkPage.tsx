@@ -404,7 +404,7 @@ export function WorkPage() {
           <span className={styles.mobileBrand}><img src={brandMarkUrl} alt="" /><span>CortexAI</span></span>
           <div className={styles.mobileHeaderActions}>
             <button type="button" className={styles.iconButton} aria-label="New work" onClick={handleNewWork}><CortexIcon name="new-chat" /></button>
-            <AccountMenu authEnabled={authEnabled} loggedIn={loggedIn} onLogin={login} onLogout={handleLogout} planLabel={accountSubscription.planLabel} billingActionLabel={accountSubscription.billingActionLabel} billingPastDue={accountSubscription.billingPastDue} onBilling={accountSubscription.billingDestination ? () => navigate(accountSubscription.billingDestination!) : undefined} onModels={() => navigate("/models")} onUsageInsights={() => navigate("/usage")} onCredits={() => navigate("/credits")} theme={theme} onToggleTheme={toggleTheme} />
+            <AccountMenu authEnabled={authEnabled} loggedIn={loggedIn} onLogin={login} onLogout={handleLogout} planLabel={accountSubscription.planLabel} billingActionLabel={accountSubscription.billingActionLabel} billingPastDue={accountSubscription.billingPastDue} onBilling={accountSubscription.billingDestination ? () => navigate(accountSubscription.billingDestination!) : undefined} onModels={() => navigate("/models")} onUsageInsights={() => navigate("/usage")} onCredits={() => navigate("/credits")} onSecurity={() => navigate("/account/security")} theme={theme} onToggleTheme={toggleTheme} />
           </div>
         </header>
         <header className={styles.topbar}>
@@ -424,7 +424,7 @@ export function WorkPage() {
           </nav>
           <div className={styles.topActions} aria-label="Workspace actions">
             <button type="button" className={styles.iconButton} aria-label="New work" onClick={handleNewWork}><CortexIcon name="plus" /></button>
-            <AccountMenu authEnabled={authEnabled} loggedIn={loggedIn} onLogin={login} onLogout={handleLogout} planLabel={accountSubscription.planLabel} billingActionLabel={accountSubscription.billingActionLabel} billingPastDue={accountSubscription.billingPastDue} onBilling={accountSubscription.billingDestination ? () => navigate(accountSubscription.billingDestination!) : undefined} onModels={() => navigate("/models")} onUsageInsights={() => navigate("/usage")} onCredits={() => navigate("/credits")} theme={theme} onToggleTheme={toggleTheme} />
+            <AccountMenu authEnabled={authEnabled} loggedIn={loggedIn} onLogin={login} onLogout={handleLogout} planLabel={accountSubscription.planLabel} billingActionLabel={accountSubscription.billingActionLabel} billingPastDue={accountSubscription.billingPastDue} onBilling={accountSubscription.billingDestination ? () => navigate(accountSubscription.billingDestination!) : undefined} onModels={() => navigate("/models")} onUsageInsights={() => navigate("/usage")} onCredits={() => navigate("/credits")} onSecurity={() => navigate("/account/security")} theme={theme} onToggleTheme={toggleTheme} />
           </div>
         </header>
         <SubscriptionBanner entitlements={subscription.entitlements} onManageBilling={() => navigate("/account/billing")} />

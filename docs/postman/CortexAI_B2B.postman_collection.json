@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "CortexAI B2B API (Complete)",
-    "description": "Postman collection for CortexAI API-first contract validation: health/runtime diagnostics, browser lifecycle diagnostics, display-safe billing plans/current subscription, effective entitlements, server-owned Stripe Checkout/Portal sessions and webhooks, catalog discovery, legacy and direct-to-S3 file upload/status/deletion, chat/compare (sync + streaming), durable CortexAI Work sessions/runs/events/approvals/artifacts/tool connections, unified-credit Cortex Analysis runs, BYOK, history, reporting/exports, optimize, and admin diagnostics. Unexpected API and terminal stream failures use a public code/message/retryable/request_id contract; raw exception text remains server-log-only. Cache-aware accounting preserves the existing credit economy, starts in shadow mode, and exposes cache/read/write audit fields plus informational savings. Fresh Tavily research settles as provider credits used x 5,000 Cortex credits after a 10,000-credit normal-search reservation; cached/reused research is not charged again. DATABASE_URL is required at API startup, and PostgreSQL startup fails early when required billing migrations are missing. Reverse-proxy handling defaults to ENABLE_PROXY_HEADERS=true and TRUSTED_PROXY_IPS=*. Session cookies auto-detect HTTPS for the Secure attribute and default to SESSION_MAX_AGE_SECONDS=604800; Cognito endpoint TLS verification defaults to COGNITO_SSL_VERIFY=true. Provider pricing supports MODEL_PRICING_MODE=database after the 20261007 migration and legacy seed. Pricing sync/overrides are operator CLI actions, with no pricing admin HTTP endpoint. Response pricing_snapshot preserves rate_card_id, normalized_usage, exact decimal-string cost_components_usd and usage_calculated_provider_cost_usd, pricing_source, selection_reason and calculation_version. Consumer credit policy and model enablement remain independent. Gemini Interactions completion tokens include thought tokens once. Scheduled DeepSeek snapshots retain pricing_tier and schedule_calendar_year, with provider_calls evidence for multi-call expense. Search/Maps source charges are reviewed separately from model tokens, including unchanged-token proposals with new service evidence. Imported/manual cache rates preserve missing versus explicit zero; long-context optional cache prices require tier evidence, and used unpriced dimensions fail explicitly. Retired source identities remain observations. Audio imports require normalized audio/cache partitions. Expired verified cards never resurrect legacy seeds; bounded promotions and effective-date approval require review. Known promotional identities require a verified candidate approval --effective-until or manual JSON effective_until; approval dry-runs enforce expiry safeguards without guessed dates. Gemini 3.6 Flash promotional intervals cannot exceed the documented exclusive UTC boundary 2027-01-01T00:00:00Z; unbounded imports remain candidates even with automatic activation enabled, and no successor card is created. OpenAI metered cache writes use 30m only for GPT-5.6 and later; earlier-model retention remains capability-specific. Backend CI and local pre-push include the full rate-card regression suite. No pricing flags, HTTP routes or request fields change. DeepSeek credit factors are versioned and calibrated to peak expense; historical charges remain unchanged. See docs/runbooks/model-pricing.md.",
+    "description": "Postman collection for CortexAI API-first contract validation: health/runtime diagnostics, browser lifecycle diagnostics, in-app login (email/password, Google, server-side sessions), display-safe billing plans/current subscription, effective entitlements, server-owned Stripe Checkout/Portal sessions and webhooks, catalog discovery, legacy and direct-to-S3 file upload/status/deletion, chat/compare (sync + streaming), durable CortexAI Work sessions/runs/events/approvals/artifacts/tool connections, unified-credit Cortex Analysis runs, BYOK, history, reporting/exports, optimize, and admin diagnostics. Unexpected API and terminal stream failures use a public code/message/retryable/request_id contract; raw exception text remains server-log-only. Cache-aware accounting preserves the existing credit economy, starts in shadow mode, and exposes cache/read/write audit fields plus informational savings. Fresh Tavily research settles as provider credits used x 5,000 Cortex credits after a 10,000-credit normal-search reservation; cached/reused research is not charged again. DATABASE_URL is required at API startup, and PostgreSQL startup fails early when required billing migrations are missing. Reverse-proxy handling defaults to ENABLE_PROXY_HEADERS=true and TRUSTED_PROXY_IPS=*. Session cookies auto-detect HTTPS for the Secure attribute and default to SESSION_MAX_AGE_SECONDS=604800; Cognito endpoint TLS verification defaults to COGNITO_SSL_VERIFY=true. Provider pricing supports MODEL_PRICING_MODE=database after the 20261007 migration and legacy seed. Pricing sync/overrides are operator CLI actions, with no pricing admin HTTP endpoint. Response pricing_snapshot preserves rate_card_id, normalized_usage, exact decimal-string cost_components_usd and usage_calculated_provider_cost_usd, pricing_source, selection_reason and calculation_version. Consumer credit policy and model enablement remain independent. Gemini Interactions completion tokens include thought tokens once. Scheduled DeepSeek snapshots retain pricing_tier and schedule_calendar_year, with provider_calls evidence for multi-call expense. Search/Maps source charges are reviewed separately from model tokens, including unchanged-token proposals with new service evidence. Imported/manual cache rates preserve missing versus explicit zero; long-context optional cache prices require tier evidence, and used unpriced dimensions fail explicitly. Retired source identities remain observations. Audio imports require normalized audio/cache partitions. Expired verified cards never resurrect legacy seeds; bounded promotions and effective-date approval require review. Known promotional identities require a verified candidate approval --effective-until or manual JSON effective_until; approval dry-runs enforce expiry safeguards without guessed dates. Gemini 3.6 Flash promotional intervals cannot exceed the documented exclusive UTC boundary 2027-01-01T00:00:00Z; unbounded imports remain candidates even with automatic activation enabled, and no successor card is created. OpenAI metered cache writes use 30m only for GPT-5.6 and later; earlier-model retention remains capability-specific. Backend CI and local pre-push include the full rate-card regression suite. No pricing flags, HTTP routes or request fields change. DeepSeek credit factors are versioned and calibrated to peak expense; historical charges remain unchanged. See docs/runbooks/model-pricing.md.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -91,6 +91,14 @@
     },
     {
       "key": "tool_connection_id",
+      "value": ""
+    },
+    {
+      "key": "cognito_id_token",
+      "value": ""
+    },
+    {
+      "key": "auth_session_id",
       "value": ""
     }
   ],
@@ -324,6 +332,394 @@
                   "  var setCookie = pm.response.headers.get('Set-Cookie') || '';",
                   "  pm.test('sets cortex_session cookie', function () { pm.expect(setCookie).to.include('cortex_session='); });",
                   "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "description": "In-app login: email/password, Google and server-side sessions. See docs/runbooks/auth-login.md. Session cookies are HttpOnly; Postman's cookie jar carries cortex_session between requests.",
+      "item": [
+        {
+          "name": "GET /v1/auth/cognito-config",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/v1/auth/cognito-config",
+            "description": "Public auth config. Drives which controls the /login page shows."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('auth responses are not cacheable', function () { pm.expect(pm.response.headers.get('Cache-Control')).to.eql('no-store'); });",
+                  "var body = pm.response.json();",
+                  "pm.test('advertises login methods when configured', function () { if (body.enabled) { pm.expect(body).to.have.property('passwordLoginEnabled'); pm.expect(body).to.have.property('signupEnabled'); pm.expect(body).to.have.property('googleLoginEnabled'); } });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/auth/signup",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/v1/auth/signup",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"correct horse battery\"\n}"
+            },
+            "description": "Creates an unconfirmed account and emails a 6-digit code. The response is identical when the email already exists."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 202', function () { pm.response.to.have.status(202); });",
+                  "pm.test('auth responses are not cacheable', function () { pm.expect(pm.response.headers.get('Cache-Control')).to.eql('no-store'); });",
+                  "pm.test('verification required', function () { pm.expect(pm.response.json().status).to.eql('verification_required'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/auth/signup/confirm",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/v1/auth/signup/confirm",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"code\": \"123456\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('auth responses are not cacheable', function () { pm.expect(pm.response.headers.get('Cache-Control')).to.eql('no-store'); });",
+                  "pm.test('verified', function () { pm.expect(pm.response.json().status).to.eql('verified'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/auth/signup/resend",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/v1/auth/signup/resend",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 202', function () { pm.response.to.have.status(202); });",
+                  "pm.test('auth responses are not cacheable', function () { pm.expect(pm.response.headers.get('Cache-Control')).to.eql('no-store'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/auth/login/password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/v1/auth/login/password",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"correct horse battery\"\n}"
+            },
+            "description": "Email + password sign-in. Sets the HttpOnly cortex_session cookie; Postman's cookie jar then authenticates later session-scoped requests."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('auth responses are not cacheable', function () { pm.expect(pm.response.headers.get('Cache-Control')).to.eql('no-store'); });",
+                  "pm.test('session cookie is set', function () { pm.expect(pm.response.headers.get('Set-Cookie')).to.include('cortex_session='); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/auth/password/forgot",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/v1/auth/password/forgot",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\"\n}"
+            },
+            "description": "Emails a reset code. Identical response for unknown accounts."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 202', function () { pm.response.to.have.status(202); });",
+                  "pm.test('auth responses are not cacheable', function () { pm.expect(pm.response.headers.get('Cache-Control')).to.eql('no-store'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/auth/password/reset",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/v1/auth/password/reset",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"code\": \"123456\",\n  \"new_password\": \"another long passphrase\"\n}"
+            },
+            "description": "Sets a new password and revokes every existing session of the user."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('auth responses are not cacheable', function () { pm.expect(pm.response.headers.get('Cache-Control')).to.eql('no-store'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/auth/google/start (browser redirect)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/v1/auth/google/start?next=/",
+            "description": "Browser flow: 302 to Cognito with identity_provider=Google, state, PKCE (S256) and nonce; sets the short-lived cortex_oauth_tx cookie. Disable 'Automatically follow redirects' in Postman to inspect the Location header. The return trip lands on GET /v1/auth/callback (or /auth)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('redirects to Cognito for Google', function () { pm.response.to.have.status(302); pm.expect(pm.response.headers.get('Location')).to.include('identity_provider=Google'); pm.expect(pm.response.headers.get('Location')).to.include('code_challenge_method=S256'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/auth/login (Cognito ID token)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/v1/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id_token\": \"{{cognito_id_token}}\"\n}"
+            },
+            "description": "Token clients: verifies a Cognito ID token and sets the session cookie."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('auth responses are not cacheable', function () { pm.expect(pm.response.headers.get('Cache-Control')).to.eql('no-store'); });",
+                  "pm.test('session cookie is set', function () { pm.expect(pm.response.headers.get('Set-Cookie')).to.include('cortex_session='); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/auth/logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/v1/auth/logout",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "description": "Revokes the server-side session and clears the cookie. cognito_logout_url is set only for Google sessions."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('auth responses are not cacheable', function () { pm.expect(pm.response.headers.get('Cache-Control')).to.eql('no-store'); });",
+                  "var body = pm.response.json();",
+                  "pm.test('logged out', function () { pm.expect(body.ok).to.eql(true); pm.expect(body).to.have.property('cognito_logout_url'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/auth/sessions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/v1/auth/sessions",
+            "description": "Signed-in devices of the current user. Token and IP hashes are never returned."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+                  "var body = pm.response.json();",
+                  "pm.test('one current session', function () { pm.expect(body.sessions.filter(function (s) { return s.current; }).length).to.eql(1); });",
+                  "var other = body.sessions.find(function (s) { return !s.current; });",
+                  "if (other) { pm.collectionVariables.set('auth_session_id', other.id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "DELETE /v1/auth/sessions/{session_id}",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{base_url}}/v1/auth/sessions/{{auth_session_id}}",
+            "description": "Signs out one of the user's own sessions; unknown or foreign ids return 404 session_not_found."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200 or 404', function () { pm.expect([200, 404]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/auth/sessions/revoke-others",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/v1/auth/sessions/revoke-others",
+            "description": "Signs out every other device and keeps the current session.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('reports revoked count', function () { pm.expect(pm.response.json()).to.have.property('revoked'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/auth/me",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/v1/auth/me"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('auth responses are not cacheable', function () { pm.expect(pm.response.headers.get('Cache-Control')).to.eql('no-store'); });",
+                  "pm.test('returns the signed-in user', function () { pm.expect(pm.response.json()).to.have.property('user_id'); });"
                 ]
               }
             }

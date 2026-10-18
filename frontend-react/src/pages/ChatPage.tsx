@@ -235,6 +235,7 @@ export function ChatPage() {
               onModels={() => navigate("/models")}
               onUsageInsights={() => navigate("/usage")}
               onCredits={() => navigate("/credits")}
+              onSecurity={() => navigate("/account/security")}
               theme={theme}
               onToggleTheme={toggleTheme}
             />
@@ -308,6 +309,7 @@ export function ChatPage() {
               onModels={() => navigate("/models")}
               onUsageInsights={() => navigate("/usage")}
               onCredits={() => navigate("/credits")}
+              onSecurity={() => navigate("/account/security")}
               theme={theme}
               onToggleTheme={toggleTheme}
             />

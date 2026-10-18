@@ -297,6 +297,19 @@ def get_or_create_service_user(
 COGNITO_AUTH_PROVIDER = "cognito"
 
 
+class UserEmailConflictError(Exception):
+    """Another sign-in method already owns this email address."""
+
+
+def is_user_active(db: Session, user_id: UUID) -> bool:
+    """Return True when the user exists and has not been disabled."""
+    from db.tables import get_table
+
+    users = get_table("users")
+    value = db.execute(select(users.c.is_active).where(users.c.id == user_id)).scalar_one_or_none()
+    return bool(value)
+
+
 def get_or_create_user_by_cognito(
     db: Session,
     *,
@@ -336,6 +349,17 @@ def get_or_create_user_by_cognito(
     user_id = db.execute(stmt).scalar_one_or_none()
     if user_id:
         return user_id
+
+    if email:
+        # users.email is unique. A different Cognito identity (for example Google
+        # versus email/password) with the same address is never linked silently.
+        existing = db.execute(
+            select(users.c.id).where(func.lower(users.c.email) == email.strip().lower())
+        ).first()
+        if existing is not None:
+            raise UserEmailConflictError(
+                "An account with this email already exists under a different sign-in method."
+            )
 
     display_name = (email or sub).split("@")[0] if email else sub[:16]
     stmt = (

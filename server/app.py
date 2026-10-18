@@ -5,14 +5,17 @@ from contextlib import asynccontextmanager
 import os
 
 from fastapi import FastAPI, Request, Response
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from server.frontend_runtime_config import render_frontend_runtime_config_js
 from server.billing.plan_catalog import get_plan_catalog
 from server.billing.stripe_gateway import load_stripe_billing_config
-from server.middleware import RequestIDMiddleware
+from server.middleware import (
+    CredentialAwareCORSMiddleware,
+    RequestIDMiddleware,
+    SecurityHeadersMiddleware,
+)
 from server.runtime_checks import check_claude_runtime
 from server.utils import unexpected_public_error
 from server.routes import (
@@ -117,6 +120,8 @@ async def lifespan(app: FastAPI):
     reservation_cleanup_stop_event: asyncio.Event | None = None
     work_reconciler_task: asyncio.Task | None = None
     work_reconciler_stop_event: asyncio.Event | None = None
+    auth_maintenance_task: asyncio.Task | None = None
+    auth_maintenance_stop_event: asyncio.Event | None = None
 
     plan_catalog = get_plan_catalog()
     logger.info(
@@ -151,6 +156,10 @@ async def lifespan(app: FastAPI):
         },
     )
 
+    from server.session_auth import validate_session_secret_config
+
+    validate_session_secret_config()
+
     database_url = (os.getenv("DATABASE_URL") or "").strip()
     if not database_url:
         raise RuntimeError(
@@ -172,6 +181,9 @@ async def lifespan(app: FastAPI):
         from server.billing.schema_preflight import validate_billing_schema
 
         validate_billing_schema()
+        from server.auth_schema_preflight import validate_auth_session_schema
+
+        validate_auth_session_schema()
         from server.billing.credit_calculator import max_provider_usd_per_million_credits
 
         # Fail fast on an invalid credit-calibration ceiling instead of at settlement.
@@ -490,6 +502,39 @@ async def lifespan(app: FastAPI):
     if postgres_runtime:
         from server import analysis_jobs
         synthesis_task = asyncio.create_task(analysis_jobs.worker(synthesis_stop), name="compare-synthesis-worker")
+
+    if postgres_runtime:
+        from server import auth_maintenance
+
+        auth_interval = auth_maintenance.maintenance_interval_seconds()
+        if auth_interval:
+            auth_maintenance_stop_event = asyncio.Event()
+
+            async def _auth_maintenance_loop():
+                while True:
+                    try:
+                        await asyncio.wait_for(
+                            auth_maintenance_stop_event.wait(), timeout=auth_interval
+                        )
+                        return
+                    except asyncio.TimeoutError:
+                        pass
+                    try:
+                        stats = await asyncio.to_thread(auth_maintenance.run_auth_maintenance_cycle)
+                        logger.info(
+                            "Auth maintenance completed",
+                            extra={"extra_fields": {"event": "auth.maintenance.completed", **stats}},
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Auth maintenance failed",
+                            extra={"extra_fields": {"event": "auth.maintenance.failed"}},
+                        )
+
+            auth_maintenance_task = asyncio.create_task(
+                _auth_maintenance_loop(), name="auth-maintenance-worker"
+            )
+
     yield
     synthesis_stop.set()
     if synthesis_task is not None:
@@ -497,6 +542,14 @@ async def lifespan(app: FastAPI):
             await asyncio.wait_for(asyncio.shield(synthesis_task), timeout=30)
         except TimeoutError:
             synthesis_task.cancel()
+
+    if auth_maintenance_stop_event is not None:
+        auth_maintenance_stop_event.set()
+    if auth_maintenance_task is not None:
+        try:
+            await asyncio.wait_for(auth_maintenance_task, timeout=5)
+        except Exception:
+            auth_maintenance_task.cancel()
 
     if work_reconciler_stop_event is not None:
         work_reconciler_stop_event.set()
@@ -582,22 +635,25 @@ def create_app() -> FastAPI:
             )
 
     app.add_middleware(RequestIDMiddleware)
+    if _env_bool("ENABLE_SECURITY_HEADERS", default=True):
+        app.add_middleware(SecurityHeadersMiddleware)
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    # Cookie-authenticated cross-origin reads are limited to trusted origins.
+    app.add_middleware(CredentialAwareCORSMiddleware)
 
     # API routes - registered first so /v1/* takes precedence over static files
     app.include_router(health.router)
 
     # Cognito callback at /auth (when app client callback URL is e.g. .../auth)
     @app.get("/auth")
-    async def auth_callback(request: Request, response: Response, code: str | None = None):
-        return await auth_routes.handle_oauth_callback(request, response, code)
+    async def auth_callback(
+        request: Request,
+        response: Response,
+        code: str | None = None,
+        state: str | None = None,
+        error: str | None = None,
+    ):
+        return await auth_routes.handle_oauth_callback(request, response, code, state, error)
 
     app.include_router(auth_routes.router)
     app.include_router(chat.router)

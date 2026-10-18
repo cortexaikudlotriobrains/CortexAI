@@ -1,4 +1,5 @@
 import { defineConfig } from "vitest/config";
+import type { Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 
 declare const process: {
@@ -7,8 +8,26 @@ declare const process: {
 
 const apiProxyTarget = process.env.CORTEX_API_PROXY_TARGET ?? "http://localhost:8000";
 
+/**
+ * The dev server injects an inline React Refresh preamble, so index.html allows
+ * inline scripts. Production builds have none, so drop 'unsafe-inline' from
+ * script-src there: an injected <script> or inline handler will not run.
+ */
+function strictProductionCsp(): Plugin {
+  return {
+    name: "cortex-strict-production-csp",
+    apply: "build",
+    transformIndexHtml(html) {
+      return html.replace(
+        /(http-equiv="Content-Security-Policy"\s+content="[^"]*script-src 'self') 'unsafe-inline'/,
+        "$1",
+      );
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), strictProductionCsp()],
   server: {
     port: 5173,
     proxy: {

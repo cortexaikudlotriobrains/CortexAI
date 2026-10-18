@@ -86,6 +86,7 @@ psql "$env:MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260905_
 psql "$env:MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260927_add_tool_credit_transaction_item.sql
 psql "$env:MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20261007_add_versioned_model_rate_cards.sql
 psql "$env:MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20261016_add_compare_synthesis.sql
+psql "$env:MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20261018_add_auth_sessions.sql
 ```
 
 The `20260727` script alters `llm_requests`, so the migration connection must
@@ -105,6 +106,20 @@ billing/approval audit and provider-session recovery.
 output ceiling and one-time enforcement markers, actual provider/Agent/billing
 identity, and the `output_limit_reached` status. Apply it after the base Work
 migration and before deploying an API that enables Work schema preflight.
+
+### Browser session migration
+
+`20261018_add_auth_sessions.sql` creates `auth_sessions`: one row per browser
+session holding the keyed hash of an opaque cookie token, its auth method,
+expiry, last-seen time, and revocation. It also creates `auth_rate_limits`,
+fixed-window brute-force counters shared by every API instance. It is additive and idempotent. The API
+refuses to start on PostgreSQL without it (`server/auth_schema_preflight.py`), so
+apply it before deploying the matching build. Cookies issued by the previous
+build (a signed user ID) are not accepted afterwards, so every user signs in once.
+Set `SESSION_SECRET` (>= 32 characters) before the first production start. Rollback
+is a redeploy of the previous build; the tables can stay. The API purges sessions
+that ended over 30 days ago and rate-limit windows older than a day every hour
+(`AUTH_MAINTENANCE_INTERVAL_SECONDS`). See [in-app login](auth-login.md).
 
 ### Provider rate-card migration
 
