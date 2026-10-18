@@ -12,7 +12,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from server.frontend_runtime_config import render_frontend_runtime_config_js
 from server.billing.plan_catalog import get_plan_catalog
 from server.billing.stripe_gateway import load_stripe_billing_config
-from server.middleware import RequestIDMiddleware
+from server.middleware import RequestIDMiddleware, SecurityHeadersMiddleware
 from server.runtime_checks import check_claude_runtime
 from server.utils import unexpected_public_error
 from server.routes import (
@@ -151,6 +151,10 @@ async def lifespan(app: FastAPI):
         },
     )
 
+    from server.session_auth import validate_session_secret_config
+
+    validate_session_secret_config()
+
     database_url = (os.getenv("DATABASE_URL") or "").strip()
     if not database_url:
         raise RuntimeError(
@@ -172,6 +176,9 @@ async def lifespan(app: FastAPI):
         from server.billing.schema_preflight import validate_billing_schema
 
         validate_billing_schema()
+        from server.auth_schema_preflight import validate_auth_session_schema
+
+        validate_auth_session_schema()
         from server.billing.credit_calculator import max_provider_usd_per_million_credits
 
         # Fail fast on an invalid credit-calibration ceiling instead of at settlement.
@@ -571,6 +578,8 @@ def create_app() -> FastAPI:
             )
 
     app.add_middleware(RequestIDMiddleware)
+    if _env_bool("ENABLE_SECURITY_HEADERS", default=True):
+        app.add_middleware(SecurityHeadersMiddleware)
 
     app.add_middleware(
         CORSMiddleware,
@@ -585,8 +594,14 @@ def create_app() -> FastAPI:
 
     # Cognito callback at /auth (when app client callback URL is e.g. .../auth)
     @app.get("/auth")
-    async def auth_callback(request: Request, response: Response, code: str | None = None):
-        return await auth_routes.handle_oauth_callback(request, response, code)
+    async def auth_callback(
+        request: Request,
+        response: Response,
+        code: str | None = None,
+        state: str | None = None,
+        error: str | None = None,
+    ):
+        return await auth_routes.handle_oauth_callback(request, response, code, state, error)
 
     app.include_router(auth_routes.router)
     app.include_router(chat.router)

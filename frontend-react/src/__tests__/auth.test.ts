@@ -1,64 +1,113 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  buildCognitoLoginUrl,
-  buildCognitoLogoutUrl,
-  cognitoClientId,
-  cognitoRedirectUri,
+  confirmSignUp,
+  googleLoginUrl,
+  loginWithPassword,
+  logoutSession,
+  requestPasswordReset,
+  resendSignUpCode,
+  resetPassword,
+  signUp,
 } from "../api/auth";
-import type { CognitoConfig } from "../types";
+import { currentNextPath, loginPageUrl, safeNextPath } from "../auth/redirect";
 
-describe("auth helpers", () => {
-  it("accepts backend camelCase Cognito config fields", () => {
-    const config: CognitoConfig = {
-      enabled: true,
-      clientId: "client-123",
-      domain: "https://auth.example.com",
-      redirectUri: "https://app.example.com/auth",
-      logoutUrl: "https://auth.example.com/logout?client_id=client-123",
-    };
+function mockFetchOnce(body: unknown, status = 200) {
+  const fetchMock = vi.fn().mockResolvedValue(
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
 
-    expect(cognitoClientId(config)).toBe("client-123");
-    expect(cognitoRedirectUri(config)).toBe("https://app.example.com/auth");
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
-    const loginUrl = new URL(buildCognitoLoginUrl(config));
-    expect(loginUrl.origin).toBe("https://auth.example.com");
-    expect(loginUrl.pathname).toBe("/oauth2/authorize");
-    expect(loginUrl.searchParams.get("client_id")).toBe("client-123");
-    expect(loginUrl.searchParams.get("redirect_uri")).toBe("https://app.example.com/auth");
+describe("auth API client", () => {
+  const cases: Array<[string, () => Promise<unknown>, string, unknown]> = [
+    ["signUp", () => signUp("a@b.co", "pw"), "/v1/auth/signup", { email: "a@b.co", password: "pw" }],
+    [
+      "confirmSignUp",
+      () => confirmSignUp("a@b.co", "123456"),
+      "/v1/auth/signup/confirm",
+      { email: "a@b.co", code: "123456" },
+    ],
+    [
+      "resendSignUpCode",
+      () => resendSignUpCode("a@b.co"),
+      "/v1/auth/signup/resend",
+      { email: "a@b.co" },
+    ],
+    [
+      "loginWithPassword",
+      () => loginWithPassword("a@b.co", "pw"),
+      "/v1/auth/login/password",
+      { email: "a@b.co", password: "pw" },
+    ],
+    [
+      "requestPasswordReset",
+      () => requestPasswordReset("a@b.co"),
+      "/v1/auth/password/forgot",
+      { email: "a@b.co" },
+    ],
+    [
+      "resetPassword",
+      () => resetPassword("a@b.co", "123456", "new-pw"),
+      "/v1/auth/password/reset",
+      { email: "a@b.co", code: "123456", new_password: "new-pw" },
+    ],
+    ["logoutSession", () => logoutSession(), "/v1/auth/logout", {}],
+  ];
 
-    const logoutUrl = new URL(buildCognitoLogoutUrl(config));
-    expect(logoutUrl.origin).toBe("https://auth.example.com");
-    expect(logoutUrl.pathname).toBe("/logout");
-    expect(logoutUrl.searchParams.get("client_id")).toBe("client-123");
-    expect(logoutUrl.searchParams.get("redirect_uri")).toBe("https://app.example.com/auth");
+  it.each(cases)("%s posts JSON with credentials to the backend", async (_n, call, path, body) => {
+    const fetchMock = mockFetchOnce({ status: "ok" });
+    await call();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe(path);
+    expect(init.method).toBe("POST");
+    expect(init.credentials).toBe("include");
+    expect(JSON.parse(init.body as string)).toEqual(body);
   });
 
-  it("keeps snake_case Cognito config compatibility", () => {
-    const config: CognitoConfig = {
-      enabled: true,
-      client_id: "snake-client",
-      domain: "https://auth.example.com",
-      redirect_uri: "https://app.example.com/auth",
-      logout_url: "https://auth.example.com/logout?client_id=snake-client",
-    };
+  it("never puts credentials in a URL", () => {
+    expect(googleLoginUrl("/work?x=1")).toBe("/v1/auth/google/start?next=%2Fwork%3Fx%3D1");
+  });
+});
 
-    expect(cognitoClientId(config)).toBe("snake-client");
-    expect(cognitoRedirectUri(config)).toBe("https://app.example.com/auth");
-    expect(buildCognitoLogoutUrl(config)).toContain("client_id=snake-client");
+describe("post-login redirect safety", () => {
+  it.each([
+    "https://evil.example",
+    "//evil.example",
+    "/\\evil.example",
+    "javascript:alert(1)",
+    "relative",
+    "/login",
+    "/login?next=/",
+    "/auth?code=1",
+    "/v1/auth/me",
+    "/ok\nSet-Cookie: x",
+    "",
+    null,
+    undefined,
+  ])("falls back to / for %j", (value) => {
+    expect(safeNextPath(value as string | null | undefined)).toBe("/");
   });
 
-  it("falls back to the same-origin auth callback when no redirect URI is configured", () => {
-    const config: CognitoConfig = {
-      enabled: true,
-      clientId: "client-123",
-      domain: "https://auth.example.com",
-      logoutUrl: "https://auth.example.com/logout?client_id=client-123",
-    };
+  it("keeps in-app paths", () => {
+    expect(safeNextPath("/work/abc?x=1")).toBe("/work/abc?x=1");
+    expect(safeNextPath("/account/billing")).toBe("/account/billing");
+  });
 
-    const loginUrl = new URL(buildCognitoLoginUrl(config));
-    const logoutUrl = new URL(buildCognitoLogoutUrl(config));
-
-    expect(loginUrl.searchParams.get("redirect_uri")).toBe(`${window.location.origin}/auth`);
-    expect(logoutUrl.searchParams.get("redirect_uri")).toBe(`${window.location.origin}/auth`);
+  it("builds login URLs and strips the transient fresh_login param", () => {
+    expect(loginPageUrl("/")).toBe("/login");
+    expect(loginPageUrl("/usage")).toBe("/login?next=%2Fusage");
+    expect(loginPageUrl("https://evil.example")).toBe("/login");
+    expect(currentNextPath({ pathname: "/usage", search: "?fresh_login=1&tab=a" })).toBe(
+      "/usage?tab=a",
+    );
   });
 });

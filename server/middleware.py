@@ -98,3 +98,43 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
                 },
             )
             reset_request_id(request_id_token)
+
+
+class SecurityHeadersMiddleware:
+    """Add baseline browser-hardening headers to every HTTP response.
+
+    Pure ASGI (no response buffering), so streaming endpoints are unaffected.
+    Headers already set by a route or reverse proxy are left untouched.
+    """
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        https = scope.get("scheme") == "https"
+
+        async def send_with_headers(message) -> None:
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                present = {name.lower() for name, _ in headers}
+                defaults = [
+                    (b"x-content-type-options", b"nosniff"),
+                    (b"referrer-policy", b"strict-origin-when-cross-origin"),
+                    # The app is never embedded by another site (clickjacking defense
+                    # for the login form).
+                    (b"x-frame-options", b"SAMEORIGIN"),
+                    (b"content-security-policy", b"frame-ancestors 'self'"),
+                ]
+                if https:
+                    defaults.append(
+                        (b"strict-transport-security", b"max-age=31536000; includeSubDomains")
+                    )
+                headers.extend((name, value) for name, value in defaults if name not in present)
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)

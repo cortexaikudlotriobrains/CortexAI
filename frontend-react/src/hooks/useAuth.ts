@@ -1,10 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import {
-  fetchCognitoConfig,
-  fetchWhoAmI,
-  buildCognitoLoginUrl,
-  buildCognitoLogoutUrl,
-} from "../api/auth";
+import { fetchCognitoConfig, fetchWhoAmI, logoutSession } from "../api/auth";
+import { currentNextPath, loginPageUrl } from "../auth/redirect";
 import { markFreshLoginPending } from "../session/activeSession";
 import { getRuntimeConfig } from "../config/runtimeConfig";
 import type { CognitoConfig, WhoAmIResponse } from "../types";
@@ -65,32 +61,25 @@ export function useAuth() {
   }, [refresh]);
 
   const login = useCallback(() => {
-    const { cognitoConfig } = state;
-    if (!cognitoConfig?.enabled) return;
-    try {
-      const url = buildCognitoLoginUrl(cognitoConfig);
-      markFreshLoginPending();
-      window.location.href = url;
-    } catch {
-      // Cognito not fully configured
-    }
-  }, [state]);
+    if (!state.cognitoConfig?.enabled) return;
+    markFreshLoginPending();
+    window.location.assign(loginPageUrl(currentNextPath(window.location)));
+  }, [state.cognitoConfig]);
 
   const logout = useCallback(async () => {
     const { cognitoConfig } = state;
+    let cognitoLogoutUrl: string | null = null;
     try {
-      await fetch("/v1/auth/logout", { method: "POST", credentials: "include" });
+      cognitoLogoutUrl = (await logoutSession()).cognito_logout_url;
+    } catch {
+      // The session cookie may already be gone; continue clearing local state.
     } finally {
       markFreshLoginPending();
       setState((prev) => ({ ...prev, whoAmI: null, loggedIn: false }));
-      if (cognitoConfig?.enabled) {
-        try {
-          window.location.href = buildCognitoLogoutUrl(cognitoConfig);
-        } catch {
-          window.location.reload();
-        }
-      }
     }
+    if (!cognitoConfig?.enabled) return;
+    // A full navigation also drops all in-memory chat state from the page.
+    window.location.assign(cognitoLogoutUrl ?? "/login");
   }, [state]);
 
   return {

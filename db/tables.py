@@ -34,6 +34,7 @@ TABLE_NAMES = [
     "pricing_catalog_observations",
     "pricing_sync_runs",
     "users",
+    "auth_sessions",
     "api_keys",
     "api_key_settings",
     "byok_provider_keys",
