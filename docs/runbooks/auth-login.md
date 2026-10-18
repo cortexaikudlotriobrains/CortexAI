@@ -214,6 +214,22 @@ Signs out every other device and keeps the current session.
 
 Rollback: deploy the previous build; the extra table is harmless. Users sign in again.
 
+## Troubleshooting
+
+- **`502 auth_unavailable` on password login**: search the log for `auth.cognito.error`
+  (`aws_error_code`), `auth.cognito.unavailable` (`error_type`) or `auth.cognito.misconfigured`.
+  `InvalidParameterException` usually means `ALLOW_USER_PASSWORD_AUTH` is off on the app client;
+  `auth.cognito.misconfigured` with `reason=client_secret` means the app client has a secret and
+  `COGNITO_CLIENT_SECRET` is missing or wrong; `ResourceNotFoundException` means a wrong client id,
+  pool or region.
+- **"Incorrect email or password" for a known account**: the email may belong to a Google-only
+  user (federated users have no Cognito password; use Continue with Google), or the account was
+  created under a different username in the pool. Cognito lockouts show as `rate_limited` and
+  disabled users as `account_disabled`.
+- **"We couldn't sign you in with Google"**: read `auth.oauth.provider_error` (`error`,
+  `error_description`); typical causes are a missing `profile` scope (`invalid_scope`) or the
+  authorization code grant / Google provider not enabled on the app client (`unauthorized_client`).
+
 ## Known limitations / follow-ups
 
 - No MFA (TOTP) yet. Add the challenge step to `server/cognito_idp.py` and the login page.

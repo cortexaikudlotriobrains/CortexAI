@@ -138,6 +138,10 @@ def _with_secret_hash(params: dict[str, Any], username: str) -> dict[str, Any]:
 def _map_error(exc: Exception, *, operation: str) -> CognitoFlowError:
     if isinstance(exc, ClientError):
         code = str(exc.response.get("Error", {}).get("Code", "") or "")
+        if code == "NotAuthorizedException":
+            refined = _refine_not_authorized(exc, operation=operation)
+            if refined is not None:
+                return refined
         mapped = _COMMON_ERRORS.get(code)
         if mapped:
             return CognitoFlowError(*mapped)
@@ -168,6 +172,37 @@ def _map_error(exc: Exception, *, operation: str) -> CognitoFlowError:
         502,
         "Sign-in is temporarily unavailable. Please try again shortly.",
     )
+
+
+def _refine_not_authorized(exc: ClientError, *, operation: str) -> CognitoFlowError | None:
+    """Split NotAuthorizedException cases that are not a wrong password.
+
+    Cognito uses this one code for wrong credentials, a missing/incorrect app-client
+    secret, a locked-out user and a disabled user. Only fixed keywords of Cognito's
+    own message are inspected; the message itself is never logged or returned.
+    """
+    message = str(exc.response.get("Error", {}).get("Message", "") or "").lower()
+    if "secret" in message:
+        logger.error(
+            "Cognito app client secret is missing or wrong (check COGNITO_CLIENT_SECRET)",
+            extra={
+                "extra_fields": {
+                    "event": "auth.cognito.misconfigured",
+                    "operation": operation,
+                    "reason": "client_secret",
+                }
+            },
+        )
+        return CognitoFlowError(
+            "auth_unavailable",
+            502,
+            "Sign-in is temporarily unavailable. Please try again shortly.",
+        )
+    if "attempts exceeded" in message:
+        return CognitoFlowError(*_COMMON_ERRORS["TooManyFailedAttemptsException"])
+    if "disabled" in message:
+        return CognitoFlowError("account_disabled", 403, "This account is not available.")
+    return None
 
 
 def _aws_error_code(exc: Exception) -> str:

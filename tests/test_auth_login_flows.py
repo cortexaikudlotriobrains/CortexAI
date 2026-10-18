@@ -1012,3 +1012,41 @@ def test_maintenance_purges_long_ended_sessions_and_old_windows(app):
         )
     assert run_auth_maintenance_cycle() == {"sessions_deleted": 1, "rate_limit_windows_deleted": 1}
     assert sa.parse_session(live) == user_id
+
+
+@pytest.mark.parametrize(
+    "message,code,status",
+    [
+        ("Unable to verify secret hash for client abc", "auth_unavailable", 502),
+        (
+            "Client abc is configured for secret but secret was not received",
+            "auth_unavailable",
+            502,
+        ),
+        ("Password attempts exceeded", "rate_limited", 429),
+        ("User is disabled.", "account_disabled", 403),
+        ("Incorrect username or password.", "invalid_credentials", 401),
+    ],
+)
+def test_not_authorized_is_split_into_real_causes(monkeypatch, caplog, message, code, status):
+    import logging
+
+    from botocore.exceptions import ClientError
+
+    class Stub:
+        def initiate_auth(self, **kwargs):
+            raise ClientError(
+                {"Error": {"Code": "NotAuthorizedException", "Message": message}}, "InitiateAuth"
+            )
+
+    monkeypatch.setattr(cognito_idp, "_client", lambda: Stub())
+    with caplog.at_level(logging.INFO, logger="server.cognito_idp"):
+        with pytest.raises(cognito_idp.CognitoFlowError) as exc:
+            cognito_idp.password_login("ada@example.com", "pw")
+    assert (exc.value.code, exc.value.status_code) == (code, status)
+    assert message not in caplog.text
+    if "secret" in message:
+        assert any(
+            getattr(r, "extra_fields", {}).get("event") == "auth.cognito.misconfigured"
+            for r in caplog.records
+        )
