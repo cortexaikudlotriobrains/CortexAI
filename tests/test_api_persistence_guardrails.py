@@ -896,10 +896,18 @@ def db_mode_fastapi_client(monkeypatch):
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("analysis_model", "expected_credits"),
+    [("gpt-6-luna", 23), ("gpt-5.4-mini", 180)],
+)
 def test_cortex_analysis_runs_persist_and_regeneration_marks_them_stale(
     db_mode_fastapi_client,
     monkeypatch,
+    analysis_model,
+    expected_credits,
 ):
+    # Credit expectations belong to a specific model, independent of defaults/.env.
+    monkeypatch.setenv("CORTEX_ANALYSIS_MODEL", analysis_model)
     client, _ = db_mode_fastapi_client
     generated = cortex_analysis_service.AnalysisResult(
         recommended_answer="Use a staged rollout.",
@@ -945,8 +953,17 @@ def test_cortex_analysis_runs_persist_and_regeneration_marks_them_stale(
     assert first.status_code == 201
     assert second.status_code == 201
     assert first.json()["analysisId"] != second.json()["analysisId"]
-    assert first.json()["aiCredits"] == 180
+    assert first.json()["model"] == analysis_model
+    assert first.json()["aiCredits"] == expected_credits
     assert first.json()["creditUsageEstimated"] is False
+    assert second.json()["model"] == analysis_model
+    assert second.json()["aiCredits"] == expected_credits
+
+    # Saved runs must keep using their recorded model after configuration changes.
+    monkeypatch.setenv(
+        "CORTEX_ANALYSIS_MODEL",
+        "gpt-5.4-mini" if analysis_model == "gpt-6-luna" else "gpt-6-luna",
+    )
 
     saved = client.get(
         "/v1/compare/analysis-runs",
@@ -955,7 +972,8 @@ def test_cortex_analysis_runs_persist_and_regeneration_marks_them_stale(
     assert saved.status_code == 200
     assert len(saved.json()) == 2
     assert saved.json()[0]["isStale"] is False
-    assert all(item["aiCredits"] == 180 for item in saved.json())
+    assert all(item["model"] == analysis_model for item in saved.json())
+    assert all(item["aiCredits"] == expected_credits for item in saved.json())
     assert all(
         item["creditUsageEstimated"] is False for item in saved.json()
     )
@@ -2090,6 +2108,7 @@ def _synthesis_result(**kwargs):
 
 
 def test_automatic_analysis_is_once_only_and_history_reads_never_charge(db_mode_fastapi_client, monkeypatch):
+    monkeypatch.delenv("CORTEX_ANALYSIS_MAX_OUTPUT_TOKENS", raising=False)
     client, _ = db_mode_fastapi_client
     calls = []
     def generate(**kwargs):
@@ -2101,6 +2120,8 @@ def test_automatic_analysis_is_once_only_and_history_reads_never_charge(db_mode_
                 table = get_table("compare_analysis_intents")
                 intent = db.execute(select(table).where(table.c.state == "processing")).mappings().one()
                 assert intent["progress_stage"] == stage
+                assert intent["max_output_tokens"] == kwargs["max_output_tokens"] == 4000
+                assert intent["reservation_payload"]["model_estimates"][0]["output_tokens"] == 4000
             progress = client.get(f"/v1/compare/{intent['request_group_id']}/analysis-state")
             assert progress.status_code == 200
             assert progress.json()["progressStage"] == stage
@@ -2152,6 +2173,7 @@ def test_automatic_analysis_is_once_only_and_history_reads_never_charge(db_mode_
     assert updated.status_code == 201, updated.text
     assert updated.json()["analysisId"] != old_id
     assert updated.json()["isStale"] is False
+    assert calls[-1]["max_output_tokens"] == 4000
 
 
 def test_automatic_analysis_preflight_stops_before_models_when_provider_unavailable(db_mode_fastapi_client, monkeypatch):

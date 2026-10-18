@@ -32,6 +32,7 @@ from models.cortex_activity import (
     CortexActivityType,
 )
 from models.user_context import UserContext
+from orchestrator.compare_history import select_compare_messages
 from orchestrator.multi_orchestrator import MultiModelOrchestrator
 from orchestrator.cache_context import stable_context_digest
 from orchestrator.model_registry import ModelRegistry
@@ -1560,6 +1561,9 @@ Never claim you performed web browsing yourself; the system handles retrieval.
                 research_metadata = prepared_turn["research_metadata"]
                 opt_metadata = prepared_turn["optimization_metadata"]
 
+            messages = select_compare_messages(
+                messages, prompt=prompt, provider=model_type or "", model=model_name or ""
+            )
             kwargs.setdefault(
                 "_cache_scope",
                 self._cache_scope(context=context, messages=messages, mode="ask"),

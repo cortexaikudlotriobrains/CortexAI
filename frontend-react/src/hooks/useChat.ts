@@ -94,7 +94,7 @@ export function useChat() {
     const creditActivityId = createCreditActivityId();
     const requestStartedAt = new Date().toISOString();
     const attachmentItems = toAttachmentItems(attachments);
-    const conversationHistory = buildConversationHistory(state.turns);
+    const conversationHistory = buildConversationHistory(state.turns, state.mode === "compare");
     const context = buildContext({
       sessionId: state.sessionId,
       pendingNewSession: state.pendingNewSession,
@@ -224,7 +224,9 @@ export function useChat() {
 
       const requestStartedAt = new Date().toISOString();
       const attachmentItems = toAttachmentItems(sourceTurn.attachments);
-      const conversationHistory = buildRegenerationConversationHistory(state.turns, turnId);
+      const conversationHistory = buildRegenerationConversationHistory(
+        state.turns, turnId, sourceTurn.mode === "compare",
+      );
       const context = buildContext({
         sessionId: state.sessionId,
         pendingNewSession: state.pendingNewSession,
@@ -972,7 +974,9 @@ function makeUiError(response: ChatResponse, visibleError: UserFacingError): Api
   };
 }
 
-export function buildConversationHistory(turns: ChatTurn[]): ConversationHistoryItem[] {
+export function buildConversationHistory(
+  turns: ChatTurn[], includeResponseVariants = false,
+): ConversationHistoryItem[] {
   const messages: ConversationHistoryItem[] = [];
   for (const turn of turns) {
     if (
@@ -988,7 +992,17 @@ export function buildConversationHistory(turns: ChatTurn[]): ConversationHistory
       .map((response) => response.text)
       .filter(Boolean)
       .join("\n\n");
-    if (responseText) messages.push({ role: "assistant", content: responseText });
+    if (responseText) {
+      const variants = turn.responses
+        .filter((response) => response.text && !response.error && response.provider && response.model)
+        .map((response) => ({ provider: response.provider, model: response.model, content: response.text }));
+      messages.push({
+        role: "assistant", content: responseText,
+        ...(includeResponseVariants && turn.mode === "compare" && variants.length >= 2 &&
+          variants.length <= 3 && variants.map((item) => item.content).join("\n\n") === responseText
+          ? { response_variants: variants } : {}),
+      });
+    }
   }
   return messages.slice(-10);
 }
@@ -1079,9 +1093,12 @@ function clearRequestController(controller: AbortController) {
 function buildRegenerationConversationHistory(
   turns: ChatTurn[],
   turnId: string,
+  includeResponseVariants = false,
 ): ConversationHistoryItem[] {
   const turnIndex = turns.findIndex((turn) => turn.id === turnId);
-  return buildConversationHistory(turnIndex >= 0 ? turns.slice(0, turnIndex) : turns);
+  return buildConversationHistory(
+    turnIndex >= 0 ? turns.slice(0, turnIndex) : turns, includeResponseVariants,
+  );
 }
 
 function responseToExplicitTarget(response: ChatResponse): Partial<CompareTargetRequest> {

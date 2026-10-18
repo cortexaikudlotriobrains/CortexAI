@@ -70,7 +70,8 @@ def test_anonymous_response_references_are_restored_for_three_providers():
     restored = analysis_service._restore_response_labels(
         (
             "Response B and Response C emphasize specific outcomes more strongly "
-            "than Response A. Responses A, B, and C use different evidence."
+            "than Response A. Responses A, B, and C use different evidence. "
+            "C offers another perspective."
         ),
         label_map,
     )
@@ -78,7 +79,7 @@ def test_anonymous_response_references_are_restored_for_three_providers():
     assert restored == (
         "Claude (Sonnet 4.5) and Gemini (2.5 Pro) emphasize specific outcomes more "
         "strongly than ChatGPT (GPT-5.4). ChatGPT (GPT-5.4), Claude (Sonnet 4.5), "
-        "and Gemini (2.5 Pro) use different evidence."
+        "and Gemini (2.5 Pro) use different evidence. Gemini (2.5 Pro) offers another perspective."
     )
 
 
@@ -116,6 +117,52 @@ def test_anonymous_response_references_distinguish_models_from_same_provider():
         "Claude (Sonnet 4.5)",
         "Claude (Opus 4.6)",
     ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (
+            "This changes the emphasis: A suggests a small cumulative advantage, "
+            "while B suggests a more balanced year.",
+            "This changes the emphasis: ChatGPT (GPT-6.1 Sol) suggests a small "
+            "cumulative advantage, while Claude (Sonnet 5.5) suggests a more balanced year.",
+        ),
+        (
+            "A argues for caution; B emphasizes uncertainty. A and B agree on scope.",
+            "ChatGPT (GPT-6.1 Sol) argues for caution; Claude (Sonnet 5.5) emphasizes "
+            "uncertainty. ChatGPT (GPT-6.1 Sol) and Claude (Sonnet 5.5) agree on scope.",
+        ),
+        (
+            "A's estimate is higher, whereas B\u2019s estimate is lower.",
+            "ChatGPT (GPT-6.1 Sol)'s estimate is higher, whereas "
+            "Claude (Sonnet 5.5)\u2019s estimate is lower.",
+        ),
+        (
+            "Response A and B disagree on the net total.",
+            "ChatGPT (GPT-6.1 Sol) and Claude (Sonnet 5.5) disagree on the net total.",
+        ),
+        (
+            "A cautious answer mentions vitamin A and B, a Type C connector and plan B. "
+            "Grade A suggests high quality. C suggests an unlisted position.",
+            "A cautious answer mentions vitamin A and B, a Type C connector and plan B. "
+            "Grade A suggests high quality. C suggests an unlisted position.",
+        ),
+    ],
+)
+def test_short_response_references_use_model_names_without_replacing_ordinary_letters(
+    text, expected
+):
+    label_map = {
+        "Response A": analysis_service.AnalysisSource(
+            "openai-response", 1, "openai", "gpt-6.1-sol", "An answer."
+        ),
+        "Response B": analysis_service.AnalysisSource(
+            "claude-response", 1, "claude", "claude-sonnet-5-5", "Another answer."
+        ),
+    }
+    assert analysis_service._restore_response_labels(text, label_map) == expected
 
 
 @pytest.mark.unit

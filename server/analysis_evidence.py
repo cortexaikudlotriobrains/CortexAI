@@ -229,6 +229,9 @@ substrings, without ellipses or edits; whitespace may be normalized. points
 records the main supporting claims: responseLabels identifies exactly which
 responses support each claim, and evidence supplies a literal quote from EACH
 attributed response. A single-model detail must not become a shared finding.
+In generated prose, always repeat the complete label (Response A, Response B,
+Response C), including after the first mention and in comparisons. Never shorten
+a response identity to a bare letter. Literal evidence quotes remain unchanged.
 Recognize paraphrases. Matching recommendations do not establish certainty;
 two mentions of one study are not independent studies. Never infer uniqueness
 from different wording. Incorporate useful complementary detail naturally.

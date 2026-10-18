@@ -25,9 +25,25 @@ def _validate_provider(provider: str, *, field_name: str) -> str:
     return value
 
 
+class HistoryResponseVariant(BaseModel):
+    provider: str = Field(..., min_length=1, max_length=64)
+    model: str = Field(..., min_length=1, max_length=255)
+    content: str = Field(..., min_length=1)
+
+
 class ConversationHistoryItem(BaseModel):
     role: str = Field(..., pattern="^(user|assistant|system)$")
     content: str
+    response_variants: Optional[List[HistoryResponseVariant]] = Field(None, min_length=1, max_length=3)
+
+    @model_validator(mode="after")
+    def validate_response_variants(self):
+        if self.response_variants is not None:
+            if self.role != "assistant" or self.content != "\n\n".join(
+                item.content for item in self.response_variants
+            ):
+                raise ValueError("response_variants must reproduce the assistant content exactly")
+        return self
 
 
 class UserContextRequest(BaseModel):

@@ -507,7 +507,7 @@ class OpenAIClient(BaseAIClient):
         if reasoning:
             payload["reasoning"] = reasoning
         if web_search_policy:
-            payload["tools"] = [{"type": "web_search"}]
+            payload["tools"] = [{"type": "web_search", "search_context_size": "medium"}]
             payload["tool_choice"] = (
                 "required"
                 if str(web_search_policy.get("mode") or "auto") == "required"

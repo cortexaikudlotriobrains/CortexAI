@@ -4,6 +4,7 @@ from contextlib import contextmanager
 import asyncio
 import json
 from pathlib import Path
+import random
 from uuid import uuid4
 
 import pytest
@@ -209,7 +210,17 @@ def test_context_is_bounded_and_changes_reuse_fingerprint():
     assert all(item["role"] != "system" for item in result)
 
 
-def test_one_structured_call_receives_context_and_no_search(monkeypatch):
+@pytest.mark.parametrize(
+    ("configured_limit", "expected_limit"),
+    [(None, 4000), ("invalid", 4000), ("2500", 2500), ("9999", 4000), ("1200", 1800)],
+)
+def test_one_structured_call_receives_context_and_no_search(
+    monkeypatch, configured_limit, expected_limit
+):
+    if configured_limit is None:
+        monkeypatch.delenv("CORTEX_ANALYSIS_MAX_OUTPUT_TOKENS", raising=False)
+    else:
+        monkeypatch.setenv("CORTEX_ANALYSIS_MAX_OUTPUT_TOKENS", configured_limit)
     captured = {}
     stages = []
 
@@ -247,11 +258,95 @@ def test_one_structured_call_receives_context_and_no_search(monkeypatch):
     )
     assert json.loads(captured["messages"][1]["content"])["priorContext"] == context
     assert captured["web_search_policy"]["mode"] == "off"
-    assert captured["max_completion_tokens"] == 1800
+    assert captured["max_completion_tokens"] == expected_limit
     assert result.structured_result["schemaVersion"] == 2
     assert stages == ["reading", "synthesizing", "validating"]
     assert "Response A" not in result.structured_result["headline"]
     assert "Response B" not in result.structured_result["introduction"]
+
+
+def test_shuffled_short_labels_are_restored_in_every_editorial_field_but_not_quotes(monkeypatch):
+    inputs = [
+        analysis.AnalysisSource(
+            "openai-answer", 1, "openai", "gpt-6.1-sol", "B suggests a cautious estimate."
+        ),
+        analysis.AnalysisSource(
+            "claude-answer", 2, "claude", "claude-sonnet-5-5", "A suggests another emphasis."
+        ),
+    ]
+    calls = []
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        def get_completion(self, **kwargs):
+            calls.append(kwargs)
+            responses = json.loads(kwargs["messages"][1]["content"])["responses"]
+            assert [item["content"] for item in responses] == [inputs[1].content, inputs[0].content]
+            assert all("provider" not in item and "model" not in item for item in responses)
+            passages = [
+                {"responseLabel": item["label"], "quote": item["content"]}
+                for item in responses
+            ]
+            payload = {
+                "headline": "A suggests a cautious reading.",
+                "introduction": "B emphasizes scope.",
+                "takeaway": "A and B agree on the period.",
+                "passages": passages,
+                "points": [{
+                    "text": "A's framing highlights uncertainty.",
+                    "responseLabels": ["Response A"],
+                    "evidence": [passages[0]],
+                }],
+                "differences": [{
+                    "title": "Response A and B differ on the net total.",
+                    "text": "A suggests a small gain, while B suggests a balanced year.",
+                    "positions": [
+                        {"text": "A notes the emphasis.", "responseLabels": ["Response A"],
+                         "evidence": [passages[0]]},
+                        {"text": "B argues for the estimate.", "responseLabels": ["Response B"],
+                         "evidence": [passages[1]]},
+                    ],
+                }],
+                "limitations": ["B warns about scope."],
+            }
+            return UnifiedResponse(
+                request_id="synthesis", text=json.dumps(payload), provider="openai",
+                model="gpt-5.4-mini", latency_ms=1,
+                token_usage=TokenUsage(prompt_tokens=100, completion_tokens=50, total_tokens=150),
+                estimated_cost=0.001,
+            )
+
+    monkeypatch.setenv("OPENAI_API_KEY", "fake-key")
+    monkeypatch.setattr(analysis, "OpenAIClient", FakeClient)
+    result = analysis.analyze_responses(
+        question="What changes?", sources=inputs, rng=random.Random(1)
+    )
+    structured = result.structured_result
+    first, second = "Claude (Sonnet 5.5)", "ChatGPT (GPT-6.1 Sol)"
+    assert structured["headline"] == f"{first} suggests a cautious reading."
+    assert structured["introduction"] == f"{second} emphasizes scope."
+    assert result.recommended_answer == f"{first} and {second} agree on the period."
+    assert structured["points"][0]["text"] == f"{first}'s framing highlights uncertainty."
+    difference = structured["differences"][0]
+    assert difference["title"] == f"{first} and {second} differ on the net total."
+    assert difference["text"] == (
+        f"{first} suggests a small gain, while {second} suggests a balanced year."
+    )
+    assert [item["text"] for item in difference["positions"]] == [
+        f"{first} notes the emphasis.", f"{second} argues for the estimate."
+    ]
+    assert structured["limitations"] == [f"{second} warns about scope."]
+    assert [item["quote"] for item in structured["passages"]] == [
+        inputs[1].content, inputs[0].content
+    ]
+    assert structured["points"][0]["evidence"][0]["quote"] == inputs[1].content
+    assert [item["evidence"][0]["quote"] for item in difference["positions"]] == [
+        inputs[1].content, inputs[0].content
+    ]
+    assert len(calls) == 1
+    assert calls[0]["web_search_policy"]["mode"] == "off"
 
 
 def test_invalid_generation_retains_usage_for_actual_settlement(monkeypatch):

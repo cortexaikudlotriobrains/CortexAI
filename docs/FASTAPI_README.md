@@ -1,5 +1,24 @@
 # FastAPI Integration
 
+Ask/Compare credit efficiency is documented in
+[the operational runbook](runbooks/inference-credit-efficiency.md). Claude cache
+activation requires its flag and `CACHE_KEY_SECRET`; filtered Claude search has
+an independent rollback flag. No pricing, model or reasoning change is implied.
+
+Compare clients may attach `response_variants` to an assistant item in
+`context.conversation_history`: an array of one to three `{provider, model,
+content}` objects. Their contents joined with two newlines must exactly equal
+the parent `content`; a mismatch, non-assistant parent, or invalid array returns
+HTTP 422 before inference. The React Compare client supplies provenance for
+completed multi-model turns. Streaming, non-streaming and Compare regeneration
+select exact own-model prior answers on ordinary follow-ups. Cross-answer or
+ambiguous references and missing exact target matches retain the complete
+shared answer. Legacy items without provenance keep their existing behavior.
+Metadata is stripped before provider calls; truncation drops provenance so it
+cannot restore text outside the existing 10-message/20,000-character bound.
+`COMPARE_SELECTIVE_HISTORY_ENABLED=false` restores shared history. Estimates
+remain conservative over full shared input; settlement uses actual token usage.
+
 ## Quick Start
 
 1. Install dependencies:
@@ -62,7 +81,7 @@ FRONTEND_DIR=frontend-react/dist
 # PROMPT_OPTIMIZER_TEMPERATURE=0.2
 # On-demand Compare synthesis model (requires OPENAI_API_KEY)
 # CORTEX_ANALYSIS_MODEL=gpt-5.4-mini
-# CORTEX_ANALYSIS_MAX_OUTPUT_TOKENS=1800 # 1800..4000
+# CORTEX_ANALYSIS_MAX_OUTPUT_TOKENS=4000 # default 4000; 1800..4000
 # Ask/Compare provider-native web search
 # NATIVE_WEB_SEARCH_MODE=enabled
 # NATIVE_WEB_SEARCH_PROVIDERS=openai,claude,gemini,grok,deepseek
@@ -752,6 +771,7 @@ Rules:
 - Browser Ask and Compare have no Web toggle and submit `routing.web_mode=auto`. A prompt can explicitly request search or say “without browsing”; API clients can send `required|off` directly.
 - A target may provide its own `generation` object; it overrides the shared Compare generation value for that target only.
 - Each Claude target independently receives only the thinking, effort, and temperature fields supported by that model generation.
+- For required search, Claude Sonnet 5.5, Opus 5.5, Fable 5.1, and Mythos 5.1 use `tool_choice=auto` plus an explicit bounded search instruction because they reject forced tool choice. Compatible basic-search requests retain supported forced search; filtered requests use auto choice with the required-search instruction. The same rule applies to buffered and streamed Ask/Compare; only actual provider-reported operations are charged. Optional/disabled search and rollout controls are unchanged. See [provider-native search](PROVIDER_NATIVE_WEB_SEARCH.md).
 
 Subscription enforcement:
 - The effective plan, model billing classes, feature access, and meter quantities are resolved server-side; client-supplied billing identifiers are ignored.
@@ -870,20 +890,28 @@ their response-only behavior when this additive field is omitted or false.
   `differences`, contextual `limitations`, and server-resolved `linkedSources`.
   Optional nullable `headline`, `introduction` and `differences[].title` supply
   the editorial overview and difference heading; legacy runs can omit them.
+  The overview headline flows across the available reading width at 22px
+  (20px below 768px), with natural wrapping and a compact gap above body text.
   The single-call prompt supplies these fields under policy
   `cortex-analysis-v2-editorial`; existing v2 evidence/revision validation and
   token ceiling remain in force. New prose receives the same known-source URL
   checks and anonymous-label restoration as the takeaway.
+  Names restore from the actual shuffled mapping, including shorthand attribution
+  subjects (`A suggests`, `B's estimate`) and grouped labels. Ordinary uses of
+  letters and literal evidence quotes remain unchanged. Saved runs keep their
+  original text; reads never regenerate analysis to repair a label.
   `sourceResponses` includes immutable text/identity/revision snapshots;
   `contextSnapshot` records at most 10 recent user/assistant messages and 12,000
   characters. Context participates in reuse fingerprints. Existing privacy
   redaction applies. Metadata-only persistence cannot authorize automatic
   analysis because saved response text is unavailable.
-- The configured `CORTEX_ANALYSIS_MODEL` remains `gpt-5.4-mini` by default.
+- The configured `CORTEX_ANALYSIS_MODEL` is `gpt-5.4-mini` by default.
   Synthesis makes one structured call with search off, shuffled anonymous labels
   and a bounded output ceiling. `CORTEX_ANALYSIS_MAX_OUTPUT_TOKENS` defaults to
-  1800, configurable from 1800 through 4000; larger configured ceilings and the
-  complete prompt/context/evidence payload are included in reservations.
+  4000, configurable from 1800 through 4000; missing/invalid values use 4000.
+  The ceiling and complete prompt/context/evidence payload are included in reservations.
+  Backend reloads apply the default to new authorizations; existing intents keep
+  their reserved ceiling.
 - React has Cortex Analysis (Analysis on phones), Model responses and always-visible Sources tabs. An optional
   answer headline/explanation leads into the lavender **The takeaway** panel,
   optional titled differences with **See both passages**, and **In their words** quotations. Confidence badges,
@@ -966,6 +994,7 @@ GPT-5.6 and Codex-family models use the Responses API with `max_output_tokens` a
 
 ## Research Behavior
 
+- OpenAI Ask/Compare native search explicitly sends `search_context_size="medium"` whenever the Responses `web_search` tool is mounted, for buffered and streaming requests. The fixed context setting is independent of reasoning/output limits and search-call caps; it adds no request field or automatic low/high selection.
 - Ask and Compare use provider-native web search when `NATIVE_WEB_SEARCH_MODE=enabled`.
 - `routing.web_mode=auto` is the browser default. The server maps current-information or explicit search prompts to required, explicit no-browse prompts to off, and leaves ordinary prompts in provider-decides auto mode.
 - OpenAI uses Responses `web_search`; Claude uses `web_search_20250305`; Gemini uses Interactions `google_search`; Grok uses Responses `web_search`; DeepSeek receives a local search function backed by Tavily. Gemini Interactions requires `google-genai>=2.0.0`, sends `user_input`/`model_output` history steps, reads the v2 `steps` response schema, and omits the legacy `allowed_tools` selector that SDK 2.x treats as a client-function allowlist.
@@ -1030,6 +1059,10 @@ Run persistence guardrail tests:
 ```bash
 pytest tests/test_api_persistence_guardrails.py -v
 ```
+
+Cortex Analysis credit assertions explicitly select GPT-6 Luna and GPT-5.4 Mini
+rather than inheriting the runtime default or local `.env`. Saved runs retain
+their recorded model and credit calculation after the configured model changes.
 
 Run mocked Stripe billing tests (no Stripe network calls):
 ```bash
@@ -1119,3 +1152,6 @@ ledger metadata records `effective_input_credit_multiplier`,
 ceiling. No endpoint or request field changes.
 
 `MODEL_PRICING_MODE=database` selects approved PostgreSQL rates after the additive 20261007 migration and `scripts/sync_model_pricing.py --seed-legacy`. Default `legacy` is the staged rollout/rollback path. Inference never fetches external prices. Existing response `estimated_cost` remains numeric for compatibility; `pricing_snapshot` now retains `rate_card_id`, `pricing_source`, `normalized_usage`, decimal-string `cost_components_usd` and `usage_calculated_provider_cost_usd`, `selection_reason`, effective interval and `calculation_version`. Ledger metadata records provider snapshots and independent credit policy/version/multipliers. Missing database pricing fails explicitly; stale approved rates continue with audit warnings. The operator CLI supplies sync/dry-run/inspection/override/approval actions; there is no pricing HTTP route. See [pricing operations](runbooks/model-pricing.md).
+
+See [Ask and Compare credit efficiency](runbooks/inference-credit-efficiency.md) for
+Claude cache activation, rollback and provider-reported usage verification.

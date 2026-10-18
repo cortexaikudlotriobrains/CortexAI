@@ -1,4 +1,5 @@
 import importlib
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -6,6 +7,7 @@ from typing import Any
 
 from config.cache_optimization import (
     cache_friendly_prompt_ordering_enabled,
+    claude_filtered_web_search_enabled,
     claude_prompt_cache_enabled,
 )
 from config.web_search import load_native_web_search_config
@@ -229,6 +231,32 @@ class ClaudeClient(BaseAIClient):
         # Current 4.5/4.6 models still accept custom sampling when thinking is off.
         return any(marker in normalized_model for marker in ("-4-5", "-4-6"))
 
+    @staticmethod
+    def _supports_forced_tool_use(model: str) -> bool:
+        """These model families reject tool_choice any/tool, even with adaptive thinking."""
+        # Anthropic's API errors guide lists this model-specific restriction:
+        # https://platform.claude.com/docs/en/api/errors#forced-tool-use-not-supported
+        return not str(model or "").strip().lower().startswith(
+            (
+                "claude-sonnet-5-5",
+                "claude-opus-5-5",
+                "claude-fable-5-1",
+                "claude-mythos-5-1",
+            )
+        )
+
+    @staticmethod
+    def _supports_filtered_search(model: str) -> bool:
+        """Use programmatic search only for documented capable model families.
+
+        Keep legacy/unknown identities on the basic tool instead of discovering
+        incompatibility by retrying a potentially billable request.
+        """
+        return bool(re.fullmatch(
+            r"claude-(?:(?:opus|sonnet)-(?:4-[678]|5(?:-5)?)|(?:fable|mythos)-5(?:-1)?)(?:-\d{8})?",
+            str(model or "").strip().lower(),
+        ))
+
     def get_completion(
         self,
         prompt: str | None = None,
@@ -298,30 +326,47 @@ class ClaudeClient(BaseAIClient):
                 request_payload["system"] = system_instruction
             if cache_context.enabled and claude_prompt_cache_enabled():
                 request_payload["cache_control"] = {"type": "ephemeral"}
+            cache_control_sent = "cache_control" in request_payload
             if reasoning_mode == "adaptive":
                 request_payload["thinking"] = {"type": "adaptive"}
             elif reasoning_mode == "disabled":
                 request_payload["thinking"] = {"type": "disabled"}
             if reasoning_mode == "adaptive" and reasoning_effort not in {"", "none"}:
                 request_payload["output_config"] = {"effort": reasoning_effort}
+            search_tool_version = None
             if web_search_enabled:
+                search_cap = max(1, min(3, int(web_search_policy.get("max_operations") or 3)))
+                search_required = str(web_search_policy.get("mode") or "auto") == "required"
+                filtered_search = (
+                    claude_filtered_web_search_enabled() and self._supports_filtered_search(model)
+                )
+                search_tool_version = (
+                    "web_search_20260318" if filtered_search else "web_search_20250305"
+                )
+                force_search = (
+                    search_required and not filtered_search and self._supports_forced_tool_use(model)
+                )
                 request_payload["tools"] = [
                     {
-                        "type": "web_search_20250305",
+                        "type": search_tool_version,
                         "name": "web_search",
-                        "max_uses": max(
-                            1,
-                            min(3, int(web_search_policy.get("max_operations") or 3)),
-                        ),
+                        "max_uses": search_cap,
                     }
                 ]
-                request_payload["tool_choice"] = {
-                    "type": (
-                        "any"
-                        if str(web_search_policy.get("mode") or "auto") == "required"
-                        else "auto"
+                request_payload["tool_choice"] = {"type": "any" if force_search else "auto"}
+                if search_required and not force_search:
+                    # Preserve required research without sending a rejected forced
+                    # selector. This is an instruction, not evidence of a search;
+                    # only actual provider tool usage is counted below.
+                    web_instruction = (
+                        "You must use web_search before answering this request. "
+                        f"Use no more than {search_cap} web searches. "
+                        "Base current factual claims on the retrieved sources and cite them. "
+                        "If search fails, explain that you could not verify current information."
                     )
-                }
+                    request_payload["system"] = "\n\n".join(
+                        part for part in (system_instruction, web_instruction) if part
+                    )
 
             adaptive_retry = None
             try:
@@ -354,6 +399,7 @@ class ClaudeClient(BaseAIClient):
                         },
                     )
                     response = self._create_message(retry_payload, stream_observer)
+                    cache_control_sent = "cache_control" in retry_payload
                     adaptive_retry = {
                         "dropped_param": dropped_param,
                         "retry_reason": "unsupported_parameter",
@@ -432,6 +478,11 @@ class ClaudeClient(BaseAIClient):
                         "latency_ms": latency_ms,
                         "tokens": token_usage.total_tokens,
                         "cost": estimated_cost,
+                        "cache_control_sent": cache_control_sent,
+                        "normal_input_tokens": normal_input_tokens,
+                        "cached_input_tokens": cached_input_tokens,
+                        "cache_write_tokens": cache_write_tokens,
+                        "web_search_tool_version": search_tool_version,
                     }
                 },
             )

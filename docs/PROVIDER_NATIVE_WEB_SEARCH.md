@@ -24,10 +24,42 @@ itself force a new search.
 | Provider | Search integration | Required-mode control | Operation evidence |
 | --- | --- | --- | --- |
 | OpenAI | Responses `web_search` | `tool_choice=required` | `web_search_call` output items |
-| Claude | `web_search_20250305` server tool | provider tool choice | server-tool usage/result blocks |
+| Claude | filtered `web_search_20260318` on supported models; basic `web_search_20250305` otherwise | model-compatible tool choice; required-search instruction for filtered search or where forced use is unsupported | server-tool usage/result blocks |
 | Gemini | Interactions `google_search` | required-search system instruction | Google search call/result steps and grounding usage |
 | Grok | Responses `web_search` | provider tool choice | server-side tool usage and citations |
 | DeepSeek | local `web_search` function backed by Tavily | first function turn requires the tool | successful local Tavily executions |
+
+OpenAI Ask/Compare requests explicitly set `search_context_size="medium"` on
+the Responses `web_search` tool in both buffered and streaming paths. This is
+a fixed policy with no automatic low/high selection or public request override.
+It controls how much retrieved search context reaches the model, independently
+of reasoning effort, output limits and the three-call cap; it is not an exact
+token or source-count budget. Pinning the balanced provider setting does not
+establish additional savings. Search-off requests do not mount the tool.
+See [OpenAI's search-context guidance](https://developers.openai.com/api/docs/guides/tools-web-search#search-context-size).
+
+`CLAUDE_FILTERED_WEB_SEARCH_ENABLED=true` (default) selects dynamic filtering
+for Opus/Sonnet 4.6-4.8 and 5/5.5, Fable 5/5.1 and Mythos 5/5.1, including dated
+snapshots. Legacy, Haiku and unknown identities retain basic search. The provider
+provisions the code execution needed for filtering; Cortex does not execute
+local code or discard citations. Full result inclusion remains the provider
+default. Search limits, provider-reported billing and source ownership stay
+per target. Set the flag false to restore basic search. Filtered requests use
+`tool_choice=auto` plus the existing required-search instruction when applicable.
+See [Anthropic's filtering contract](https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool).
+
+Claude Sonnet 5.5, Opus 5.5, Fable 5.1, and Mythos 5.1 reject `tool_choice`
+types `any` and `tool` with HTTP 400, including with adaptive thinking. For
+these model families, Cortex sends `auto` and appends an instruction requiring
+`web_search` before answering, bounded by the tool's `max_uses` (at most three),
+while preserving the existing system prompt. The instruction asks for cited
+current claims and an honest explanation when search fails. Compatible basic-search requests
+retain `any` for required search. Optional `auto`, explicit `off`, and native
+search rollout controls retain their existing behavior. Both Messages create
+and stream use the same payload policy, including request-level model
+overrides. This instruction is not evidence of execution: only actual provider
+search usage/results contribute operations, citations, and charges. See
+[Anthropic's forced-tool-use restriction](https://platform.claude.com/docs/en/api/errors#forced-tool-use-not-supported).
 
 Gemini native search requires `google-genai>=2.0.0` after Google's June 2026
 retirement of the legacy Interactions schema. Cortex reads the v2 `steps`

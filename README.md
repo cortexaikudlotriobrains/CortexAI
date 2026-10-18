@@ -257,7 +257,7 @@ STRIPE_PORTAL_RETURN_URL=https://app.example.com/account/billing
 
 # Analyze synthesis (requires OPENAI_API_KEY and the synthesis migration)
 CORTEX_ANALYSIS_MODEL=gpt-5.4-mini
-CORTEX_ANALYSIS_MAX_OUTPUT_TOKENS=1800 # bounded 1800..4000
+CORTEX_ANALYSIS_MAX_OUTPUT_TOKENS=4000 # default 4000; bounded 1800..4000
 
 # Provider-native Ask/Compare web search
 NATIVE_WEB_SEARCH_MODE=enabled      # off|shadow|enabled
@@ -937,6 +937,20 @@ USD 0.010 card at `2026-10-09T00:00:00Z` and adds the new version.
 
 ## Cache-aware credits and reuse
 
+Claude cache activation and usage verification are covered in
+[the credit-efficiency runbook](docs/runbooks/inference-credit-efficiency.md).
+The sample environment enables its flag; a configured `CACHE_KEY_SECRET` is
+still required. Full context and reasoning are preserved, and completion logs
+distinguish a sent cache marker from actual provider-reported cache reads/writes.
+Supported modern Claude models use filtered `web_search_20260318` by default
+(`CLAUDE_FILTERED_WEB_SEARCH_ENABLED=false` restores basic search). Compare
+follow-ups carry optional exact `context.conversation_history[].response_variants`
+provenance. `COMPARE_SELECTIVE_HISTORY_ENABLED=true` retains each target's own
+prior answers for ordinary follow-ups; cross-answer/ambiguous references, unknown
+model matches, trimmed provenance and legacy clients keep shared history. User
+messages retain the existing history bounds. Models, reasoning and output caps
+are unchanged. Synthesis still receives all current target answers and sources.
+
 - `server/billing/credit_calculator.py` is the shared authority for settlement, response cards, history, and cache-savings information. Provider-reported prompt tokens are partitioned into normal input, cache reads, and cache writes; effective provider-price ratios scale the existing model input-credit multiplier. Missing pricing evidence receives no discount, quantities are clamped to the prompt total, and every component rounds up independently.
 - Reservations remain conservative: they assume no cache hit and cover a more expensive cache-write ratio when applicable. `CACHE_AWARE_CREDIT_CALCULATION_ENABLED=true` computes and records shadow totals; `CACHE_AWARE_CREDIT_SETTLEMENT_ENABLED=false` keeps legacy totals authoritative until provider invoices and shadow telemetry are validated.
 - Chat responses expose `cache_hit`, `cache_hit_ratio`, `cache_savings_ai_credits`, and `uncached_equivalent_ai_credits`; Compare adds `total_cache_savings_ai_credits`. The normal response card keeps one AI-credit total and only adds a context-reuse savings line when settlement makes the savings real. Provider dollar cost is not shown on that card.
@@ -959,9 +973,11 @@ For Compare (`/v1/compare`, `/v1/compare/stream`) requests:
 
 ## Web Research Behavior (Current)
 
+- OpenAI Ask/Compare native search explicitly sends `search_context_size="medium"` for every mounted `web_search` tool, including streaming requests. This fixed setting controls retrieved search context independently of reasoning/output limits and the three-call cap; there is no automatic low/high selection or public context-size override.
 - API contract: `routing.web_mode` accepts `off|auto|required` (`on` is an alias for `required`). The legacy `routing.research_mode` boolean remains accepted for older clients.
 - In `auto`, the server upgrades current-information and explicit search requests to `required`, downgrades explicit no-browse requests to `off`, and otherwise lets the provider decide whether to invoke search.
 - OpenAI uses Responses `web_search`, Claude uses `web_search_20250305`, Gemini uses Interactions `google_search`, and Grok uses Responses `web_search`. DeepSeek receives a local `web_search` function whose execution calls Tavily; the bounded model/tool loop is the only Tavily path in normal native mode. Gemini Interactions requires `google-genai>=2.0.0`; Cortex sends `user_input`/`model_output` history steps, reads the v2 `steps` response schema, and does not send the legacy `allowed_tools` selector for the server-side search tool.
+- Claude required search uses `tool_choice=auto` plus an explicit bounded search instruction on Sonnet 5.5, Opus 5.5, Fable 5.1, and Mythos 5.1, which reject forced tool choice. Compatible basic-search requests retain supported forced search; filtered requests use auto choice with the required-search instruction. This applies to buffered and streamed Ask/Compare; usage and charges still come only from actual provider-reported search operations.
 - Ask uses the selected model's search. Compare gives every target its own search tool and preserves each response's sources independently; no common Tavily result pack is injected across models.
 - Search is capped at three billable operations per model request. OpenAI, Claude, Grok, and DeepSeek enforce the cap at the request/tool-loop boundary. Gemini's managed Google Search tool has no exact query-count request field, so Cortex sends the same three-query instruction, audits any provider-reported overrun, and never bills above the product cap. Responses expose at most eight deduplicated source items; each DeepSeek Tavily operation requests at most five results.
 - Cortex Analysis receives each Compare response's normalized source/search metadata but has search explicitly disabled, so synthesis adds no new web operation or charge.
@@ -1031,12 +1047,23 @@ percentages or estimated durations. Status reads never start paid work. V2
 adds `structuredResult` (schema version 2), immutable evidence snapshots and
 bounded context, while legacy result fields remain readable. Optional nullable
 `headline`, `introduction` and `differences[].title` support the editorial result
-layout; older saved runs omit them and render without invented headings. Exact quotes and
-server-known safe source URLs are validated; source metadata is not independent
-verification. The configured model remains `gpt-5.4-mini` with search off and a
-default 1800-token output ceiling. `CORTEX_ANALYSIS_MAX_OUTPUT_TOKENS` may set
+layout; older saved runs omit them and render without invented headings. The
+analysis headline uses the available reading width, with compact 22px desktop
+and 20px phone type and natural wrapping to leave more response text visible.
+Exact quotes and server-known safe source URLs are validated; source metadata
+is not independent verification. The configured model remains `gpt-5.4-mini` with search off and a
+default 4000-token output ceiling. `CORTEX_ANALYSIS_MAX_OUTPUT_TOKENS` may set
 1800–4000; canonical reservations include that ceiling and all input/context.
+Missing or invalid values use the 4000-token default. New analysis authorizations
+use this limit after the backend reloads; already-authorized intents retain their
+reserved ceiling.
 Metadata-only storage cannot authorize this saved-response analysis flow.
+
+Synthesis uses shuffled anonymous response labels internally; generated prose
+restores the full provider/model names, including shorthand attribution subjects
+such as `A suggests` or `B's estimate`. Ordinary articles/letters and immutable
+evidence quotes are preserved. This normalization applies to newly generated
+analysis; reading a saved run neither rewrites it nor starts another model call.
 
 Apply `db/migrations/20261016_add_compare_synthesis.sql` and restart the API
 before this release. See [the Compare guide](docs/COMPARE_MODE_GUIDE.md) for
@@ -1458,6 +1485,10 @@ Outputs:
 - `proof_pack.html` (print to PDF if needed)
 
 ## Tests
+
+The Cortex Analysis persistence regression in `tests/test_api_persistence_guardrails.py`
+pins each tested synthesis model and its credit expectation. It covers GPT-6 Luna
+and GPT-5.4 Mini, including restored credits after the configured model changes.
 
 Run full suite:
 ```bash

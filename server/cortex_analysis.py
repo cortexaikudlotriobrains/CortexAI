@@ -25,7 +25,7 @@ from server import analysis_evidence
 from utils.token_estimation import estimate_tokens
 
 DEFAULT_CORTEX_ANALYSIS_MODEL = "gpt-5.4-mini"
-CORTEX_ANALYSIS_MAX_OUTPUT_TOKENS = 1800
+CORTEX_ANALYSIS_MAX_OUTPUT_TOKENS = 4000
 SUPPORTED_HIGH_STAKES_DOMAINS = {"financial", "medical", "legal", "safety"}
 _PROVIDER_ALIASES = {
     "anthropic": "claude",
@@ -33,8 +33,21 @@ _PROVIDER_ALIASES = {
     "google_gemini": "gemini",
 }
 _ANONYMIZED_RESPONSE_GROUP = re.compile(
-    r"\bResponses\s+([ABC])" r"(?:\s*,\s*([ABC]))?" r"(?:\s*,?\s*(and|or|&)\s*([ABC]))?\b",
+    r"\bResponses?\s+([ABC])" r"(?:\s*,\s*([ABC]))?" r"(?:\s*,?\s*(and|or|&)\s*([ABC]))?\b",
     re.IGNORECASE,
+)
+# Bare letters are references only in attribution subjects or possessives at a
+# clause boundary. Replacing every standalone A/B/C would corrupt ordinary prose.
+_ANONYMIZED_RESPONSE_SUBJECT = re.compile(
+    r"(?P<prefix>(?:^|[.!?;:,(])\s*|\b(?i:while|whereas|but)\s+)"
+    r"(?P<labels>[ABC](?:\s*,\s*[ABC])?(?:\s*,?\s*(?i:and|or|&)\s*[ABC])?)"
+    r"(?=['\u2019]s\b|\s+(?i:"
+    r"adds?|agrees?|argues?|assumes?|claims?|concludes?|describes?|differs?|"
+    r"disagrees?|emphasizes?|estimates?|explains?|focuses|frames?|highlights?|"
+    r"leans?|mentions?|notes?|offers?|omits?|presents?|projects?|provides?|"
+    r"quantif(?:y|ies)|questions?|recommends?|reports?|says?|states?|stresses|"
+    r"suggests?|supports?|treats?|uses?|warns?)\b)",
+    re.MULTILINE,
 )
 
 
@@ -355,21 +368,26 @@ def _restore_response_labels(
         return f"{first}, {second}, {connector or 'and'} {final}"
 
     restored = _ANONYMIZED_RESPONSE_GROUP.sub(replace_group, value)
-    for label, source in label_map.items():
-        restored = re.sub(
-            rf"\b{re.escape(label)}\b",
-            response_display_name(source.provider, source.model),
-            restored,
-            flags=re.IGNORECASE,
+
+    def replace_subject(match: re.Match[str]) -> str:
+        labels = re.sub(
+            r"\b[ABC]\b",
+            lambda item: display_names.get(item.group(), item.group()),
+            match["labels"],
         )
-    return restored
+        return match["prefix"] + labels
+
+    return _ANONYMIZED_RESPONSE_SUBJECT.sub(replace_subject, restored)
 
 
 def analysis_output_tokens() -> int:
     try:
-        return max(1800, min(4000, int(os.getenv("CORTEX_ANALYSIS_MAX_OUTPUT_TOKENS", "1800"))))
+        configured = int(
+            os.getenv("CORTEX_ANALYSIS_MAX_OUTPUT_TOKENS", str(CORTEX_ANALYSIS_MAX_OUTPUT_TOKENS))
+        )
+        return max(1800, min(CORTEX_ANALYSIS_MAX_OUTPUT_TOKENS, configured))
     except ValueError:
-        return 1800
+        return CORTEX_ANALYSIS_MAX_OUTPUT_TOKENS
 
 
 def reservation_input(question: str, sources: list[AnalysisSource], context: Any = None) -> str:

@@ -165,7 +165,7 @@ def _build_user_context(context_req):
     history = []
     if context_req.conversation_history:
         history = [
-            {"role": item.role, "content": item.content}
+            item.model_dump(exclude_none=True)
             for item in context_req.conversation_history
         ]
 

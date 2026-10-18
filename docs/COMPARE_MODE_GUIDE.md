@@ -64,11 +64,13 @@ their response-only behavior when this additive field is omitted or false.
   characters. Context participates in reuse fingerprints. Existing privacy
   redaction applies. Metadata-only persistence cannot authorize automatic
   analysis because saved response text is unavailable.
-- The configured `CORTEX_ANALYSIS_MODEL` remains `gpt-5.4-mini` by default.
+- The configured `CORTEX_ANALYSIS_MODEL` is `gpt-5.4-mini` by default.
   Synthesis makes one structured call with search off, shuffled anonymous labels
   and a bounded output ceiling. `CORTEX_ANALYSIS_MAX_OUTPUT_TOKENS` defaults to
-  1800, configurable from 1800 through 4000; larger configured ceilings and the
-  complete prompt/context/evidence payload are included in reservations.
+  4000, configurable from 1800 through 4000; missing/invalid values use 4000.
+  The ceiling and complete prompt/context/evidence payload are included in reservations.
+  Backend reloads apply the default to new authorizations; existing intents keep
+  their reserved ceiling.
 - React has Cortex Analysis (Analysis on phones), Model responses and always-visible Sources tabs.
   Model bylines and quotation headers reuse proper provider icons. The
   contributor/status/credits strip above the tabs is omitted.
@@ -122,6 +124,15 @@ their response-only behavior when this additive field is omitted or false.
   `cortex-analysis-v2-editorial` generates the new presentation fields with the
   existing single call and token ceiling. New overview text passes the same
   known-source URL checks and anonymous-label restoration as the takeaway.
+  The headline uses the full reading width at 22px on desktop/tablet and 20px
+  below 768px. Natural wrapping and a 12px following gap keep more of the answer
+  visible; body typography, provider bylines and the native theme are unchanged.
+- Synthesis stays provider-blind while generating. After generation, complete
+  labels and shorthand attribution subjects such as `A suggests` or `B's estimate`
+  resolve through the shuffled mapping to full provider/model names throughout
+  editorial prose. Ordinary letters/articles and immutable evidence quotations
+  are preserved. Existing saved runs retain their text; viewing them never
+  triggers a paid correction.
 - Regenerating an answer creates a new revision and marks earlier synthesis
   stale. **Update analysis** and retry show their estimated cost and need no
   second confirmation. The previous analysis stays readable during an update
@@ -395,3 +406,20 @@ COMPARE_TARGETS = [
 
 **Last Updated:** 2026-09-27
 **Applies To:** OpenAI Project v2.0+
+
+## Efficient follow-up context
+
+Compare preserves user messages under the existing history bounds. React adds
+optional exact `response_variants` (provider, model, content) to each completed
+multi-model assistant history item. For ordinary follow-ups the server selects
+the target model's own complete answer. Cross-model comparisons, named/ordinal
+or ambiguous references retain all answers; missing exact matches, old clients
+and trimmed metadata also keep shared context. The metadata is removed before
+provider calls. Current-turn targets still run independently, and automatic
+analysis reads all current answers and per-model citations afterward.
+
+Selection applies to streaming, non-streaming and regenerated Compare cards.
+The full shared history remains available in the UI; no prior answer is deleted.
+`COMPARE_SELECTIVE_HISTORY_ENABLED=false` restores the prior shared behavior.
+Claude caching and filtered search preserve model/reasoning/output settings;
+see [credit-efficiency operations](runbooks/inference-credit-efficiency.md).

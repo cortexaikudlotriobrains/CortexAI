@@ -11,6 +11,8 @@ import uuid
 from datetime import datetime, timezone
 
 from api.base_client import BaseAIClient
+from orchestrator.cache_context import stable_context_digest
+from orchestrator.compare_history import select_compare_messages
 from models.multi_unified_response import MultiUnifiedResponse
 from models.unified_response import NormalizedError, TokenUsage, UnifiedResponse
 from utils.logger import get_logger
@@ -118,6 +120,15 @@ class MultiModelOrchestrator:
                 # Use messages directly (for research-injected context or conversation history)
                 kwargs2 = dict(kwargs)
                 kwargs2.pop("messages", None)
+                messages = select_compare_messages(
+                    messages, prompt=prompt, provider=client.provider_name,
+                    model=getattr(client, "requested_model_name", None) or client.model_name or "",
+                )
+                if isinstance(kwargs2.get("_cache_scope"), dict):
+                    kwargs2["_cache_scope"] = {
+                        **kwargs2["_cache_scope"],
+                        "stable_context_hash": stable_context_digest(messages[:-1]),
+                    }
 
                 # DO NOT pass prompt= when using messages
                 call_fn = lambda: client.get_completion(messages=messages, **kwargs2)

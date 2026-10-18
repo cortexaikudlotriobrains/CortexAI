@@ -5,6 +5,7 @@ from collections.abc import Mapping
 import hashlib
 import os
 import re
+from typing import Any
 
 from config.cache_optimization import (
     CONTEXT_SUMMARY_POLICY_VERSION,
@@ -106,7 +107,7 @@ def _history_role(item) -> str:
 def _copy_history_item(item, *, role: str, content: str):
     model_copy = getattr(item, "model_copy", None)
     if callable(model_copy):
-        return model_copy(update={"role": role, "content": content})
+        return model_copy(update={"role": role, "content": content, "response_variants": None})
     copy = replace(item)
     copy.role = role
     copy.content = content
@@ -216,7 +217,10 @@ def context_summary_payload(context_req) -> dict[str, str] | None:
 def _copy_history_item_with_content(item, content: str):
     model_copy = getattr(item, "model_copy", None)
     if callable(model_copy):
-        return model_copy(update={"content": content})
+        updates: dict[str, Any] = {"content": content}
+        if content != _history_content(item):
+            updates["response_variants"] = None
+        return model_copy(update=updates)
     copy = replace(item)
     copy.content = content
     return copy

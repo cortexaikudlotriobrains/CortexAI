@@ -5,6 +5,7 @@ export type MessageRole = "user" | "assistant" | "system";
 export interface ConversationHistoryItem {
   role: MessageRole;
   content: string;
+  response_variants?: { provider: string; model: string; content: string }[];
 }
 
 export interface UserContextRequest {

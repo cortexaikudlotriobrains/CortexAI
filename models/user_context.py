@@ -32,7 +32,7 @@ class UserContext:
     user_id: str | None = None
     preferences: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
-    conversation_history: list[dict[str, str]] = field(default_factory=list)
+    conversation_history: list[dict[str, Any]] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.utcnow)
 
     def add_message(self, role: str, content: str) -> "UserContext":
@@ -81,7 +81,7 @@ class UserContext:
             created_at=self.created_at,
         )
 
-    def get_messages(self) -> list[dict[str, str]]:
+    def get_messages(self) -> list[dict[str, Any]]:
         """
         Get conversation messages in API format.
 
