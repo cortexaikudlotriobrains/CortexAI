@@ -706,6 +706,10 @@ def test_google_callback_conflict_cancel_and_direct_visit(client, monkeypatch):
 
     cancelled = client.get("/v1/auth/callback?error=access_denied", follow_redirects=False)
     assert cancelled.headers["location"] == "/login?error=google_cancelled"
+    misconfigured = client.get(
+        "/v1/auth/callback?error=invalid_scope&error_description=bad+scope", follow_redirects=False
+    )
+    assert misconfigured.headers["location"] == "/login?error=google_failed"
     direct = client.get("/auth", follow_redirects=False)
     assert direct.headers["location"] == "/login"
 

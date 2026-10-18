@@ -125,7 +125,10 @@ the PKCE verifier with the code exchange, requires the ID token `nonce` to match
 `email_verified=true`, then sets the session cookie and redirects to the validated `next` path
 with `fresh_login=1`. Every failure redirects to `/login?error=<reason>` with one of
 `google_cancelled`, `google_failed`, `session_expired`, `email_not_verified`,
-`account_exists`, `account_disabled`.
+`account_exists`, `account_disabled`. Only Cognito's `error=access_denied` (the user backed
+out) maps to `google_cancelled`; any other provider error (for example `invalid_scope`,
+`unauthorized_client`, `invalid_request`) is a configuration problem, shown as `google_failed`
+and logged as `auth.oauth.provider_error` with Cognito's `error` and `error_description`.
 
 ### `POST /v1/auth/logout` → `200 {"ok": true, "cognito_logout_url": string | null}`
 

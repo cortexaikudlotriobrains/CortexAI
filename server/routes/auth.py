@@ -335,6 +335,7 @@ async def handle_oauth_callback(
     code: str | None = None,
     state: str | None = None,
     error: str | None = None,
+    error_description: str | None = None,
 ) -> RedirectResponse:
     """
     Shared OAuth2 code callback for GET /auth and GET /v1/auth/callback.
@@ -349,11 +350,20 @@ async def handle_oauth_callback(
 
     tx = decode_oauth_transaction(request.cookies.get(oauth_tx_cookie_name(request)))
     if error:
-        logger.info(
+        # Only access_denied means the user backed out; anything else (invalid_scope,
+        # unauthorized_client, invalid_request, ...) is a configuration problem.
+        logger.warning(
             "OAuth provider returned an error",
-            extra={"extra_fields": {"event": "auth.oauth.provider_error", "error": error[:64]}},
+            extra={
+                "extra_fields": {
+                    "event": "auth.oauth.provider_error",
+                    "error": error[:64],
+                    "error_description": (error_description or "")[:300],
+                }
+            },
         )
-        return _login_error_redirect("google_cancelled", request)
+        reason = "google_cancelled" if error == "access_denied" else "google_failed"
+        return _login_error_redirect(reason, request)
     if not code or not code.strip():
         # Someone opened the callback URL directly.
         return RedirectResponse(
@@ -407,9 +417,10 @@ async def auth_callback(
     code: str | None = None,
     state: str | None = None,
     error: str | None = None,
+    error_description: str | None = None,
 ):
     """OAuth2 authorization code callback at /v1/auth/callback."""
-    return await handle_oauth_callback(request, response, code, state, error)
+    return await handle_oauth_callback(request, response, code, state, error, error_description)
 
 
 # --------------------------------------------------------------------------- #
