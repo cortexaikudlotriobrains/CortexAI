@@ -339,7 +339,9 @@ ENABLE_MODELS_CATALOG=false                          # hides rich Models UI/API;
 ENABLE_PROXY_HEADERS=true          # trust X-Forwarded-Proto/Host from upstream proxy (default: true)
 TRUSTED_PROXY_IPS=*                # comma-separated trusted upstream IPs, or '*' for all (default: *)
 # SESSION_COOKIE_SECURE=           # optional explicit Secure flag; leave unset to auto-detect HTTPS
-SESSION_MAX_AGE_SECONDS=604800     # session cookie lifetime in seconds (default: 7 days; 0 = session cookie)
+SESSION_SECRET=                    # REQUIRED in production: random, >= 32 chars (keys the session-token hash); startup fails otherwise
+SESSION_MAX_AGE_SECONDS=604800     # server-side session + cookie lifetime in seconds (default: 7 days; 0 = browser-session cookie, 12h server cap)
+SESSION_IDLE_TIMEOUT_SECONDS=259200 # sessions unused this long end (default: 3 days; 0 disables)
 COGNITO_SSL_VERIFY=true            # set false to skip TLS verification for Cognito endpoints (not recommended)
 ```
 
@@ -628,9 +630,18 @@ Response includes:
 - `GET /v1/byok/status`
 - `DELETE /v1/byok?provider=<provider-id>` (or omit provider to delete all)
 - `GET /v1/admin/request-groups/{request_group_id}/failed-attempts`
-- `GET /v1/auth/cognito-config` (no auth; returns public Cognito config for frontend)
+- `GET /v1/auth/cognito-config` (no auth; public Cognito config plus `passwordLoginEnabled`, `signupEnabled`, `googleLoginEnabled`)
+- `POST /v1/auth/signup`, `POST /v1/auth/signup/confirm`, `POST /v1/auth/signup/resend` (in-app account creation and email verification)
+- `POST /v1/auth/login/password` (email + password; sets the `cortex_session` cookie)
+- `POST /v1/auth/password/forgot`, `POST /v1/auth/password/reset` (reset by emailed code; reset revokes every existing session)
+- `GET /v1/auth/google/start?next=/path` (redirects to Google through Cognito with state, PKCE and nonce; callback is `GET /v1/auth/callback` or `GET /auth`)
+- `POST /v1/auth/login` (token clients: verify a Cognito ID token and set the session cookie)
 - `POST /v1/auth/dev-login` (local-development helper; gated by env flags)
-- `POST /v1/auth/logout` (clears the session cookie)
+- `POST /v1/auth/logout` (revokes the server-side session, clears the cookie, and returns `cognito_logout_url` for Google sessions)
+- `GET /v1/auth/me` (current session user)
+- `GET /v1/auth/sessions`, `DELETE /v1/auth/sessions/{session_id}`, `POST /v1/auth/sessions/revoke-others` (signed-in devices; React `/account/security`)
+
+See `docs/runbooks/auth-login.md` for request/response shapes, error codes, Cognito app-client requirements and the security model.
 
 ### Subscription entitlement snapshot
 
@@ -693,18 +704,20 @@ Composer and catalogue gating is explanatory UX over the same backend authority.
 
 Structured subscription denials open an accessible contextual dialog and keep the current prompt and attachments editable. Once a submission passes client-side checks, the composer clears immediately while the optimistic user bubble and any Improve status remain visible; if optimization is cancelled or the request is rejected before the stream is accepted, React restores the cleared draft and attachments. An HTTP `model_not_in_plan`, `feature_not_in_plan`, `insufficient_credits`, or `subscription_payment_required` response also removes the optimistic placeholder and restores no client-side authority. Existing premium history is never filtered or deleted after downgrade. The dedicated AI credits page renders the unified balance/reset date and recent itemized credit activity, while Usage & insights stays focused on provider-usage analytics and export; both layouts remain responsive on narrow screens. Response cards display actual AI credits, and Compare also displays the aggregate total.
 
-### Cognito (Gmail) sign-in
+### Sign-in (in-app login page, Amazon Cognito, Google)
 
-To enable "Sign in with Google" via Amazon Cognito:
+CortexAI has its own `/login` page (sign in, create account, email verification, forgot/reset password, and Continue with Google). Users never see a Cognito-hosted page. Amazon Cognito remains the identity store: the FastAPI backend calls the user-pool APIs server-side and issues its own opaque, server-side session cookie. Full details, API shapes, and the security model are in [`docs/runbooks/auth-login.md`](docs/runbooks/auth-login.md).
 
-1. **AWS Cognito**: Create a User Pool, add an App client, configure the Cognito domain, and add Google as an identity provider (see [AWS docs](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools-social-idp.html)).
+1. **AWS Cognito**: Use a User Pool whose username is the email address, with an App client that allows `ALLOW_USER_PASSWORD_AUTH` and `ALLOW_REFRESH_TOKEN_AUTH`, **Prevent user existence errors** enabled, a Cognito domain, and (for Google) the Google identity provider (see the runbook and the [AWS docs](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools-social-idp.html)).
 2. **Environment** (see `.env.example`):
-   - `COGNITO_USER_POOL_ID` – User pool ID (e.g. `us-east-1_xxxxxxxxx`)
-   - `COGNITO_CLIENT_ID` – App client ID
-   - `COGNITO_REGION` – AWS region
-   - `COGNITO_DOMAIN` – Hosted UI base URL (e.g. `https://your-prefix.auth.us-east-1.amazoncognito.com`)
-   - `COGNITO_REDIRECT_URI` – **Required in production**. Must exactly match the callback URL registered in the Cognito App Client (e.g. `https://app.example.com/auth`). Without this, the backend computes the redirect URI from the incoming request; behind CloudFront or an ALB the scheme may be resolved as `http://` instead of `https://`, causing a token-exchange failure and an auth redirect loop that looks like an automatic page refresh.
-3. **Frontend**: Load the app; signed-out Cognito users see a `Sign in to use CortexAI` gate in the workspace and the React top-right account icon remains a secondary account menu. Cognito guests can `Sign in`, the theme switch toggles the React `data-theme` between light and dark and persists the browser preference, and `Log off` remains available as a session-clear fallback even when the icon is labelled `Guest account`. Log off posts to `/v1/auth/logout`, clears the active React session/history state, then redirects to the Cognito `logoutUrl` when the backend provides one. After sign-in, sessions/history are tied to the authenticated user identity.
+   - `COGNITO_USER_POOL_ID`, `COGNITO_CLIENT_ID`, `COGNITO_REGION` – pool and app client (`COGNITO_CLIENT_SECRET` if the client has a secret; the backend adds `SECRET_HASH`).
+   - `COGNITO_DOMAIN` – Cognito domain base URL, used only for the Google redirect and token exchange (e.g. `https://your-prefix.auth.us-east-1.amazoncognito.com`).
+   - `COGNITO_REDIRECT_URI` – **Required in production**. Must exactly match the callback URL registered in the Cognito App Client (e.g. `https://app.example.com/v1/auth/callback` or `https://app.example.com/auth`). Without this, the backend uses `<request origin>/v1/auth/callback`; behind CloudFront or an ALB the scheme may be resolved as `http://` instead of `https://`, causing a mismatch.
+   - `SESSION_SECRET` – **Required in production** (`APP_ENV=production`): random value of at least 32 characters. Startup fails with the dev default or a short value.
+   - Optional: `AUTH_PASSWORD_LOGIN_ENABLED`, `AUTH_SIGNUP_ENABLED`, `AUTH_GOOGLE_LOGIN_ENABLED` (all default `true`), `AUTH_ALLOWED_ORIGINS` (trusted origins of a separately hosted frontend: auth POSTs and credentialed CORS), `AUTH_RATE_LIMIT_IP_PER_MINUTE` (20) and `AUTH_RATE_LIMIT_IDENTITY_PER_5_MIN` (8), `AUTH_BREACHED_PASSWORD_CHECK` (default `true`), `SESSION_IDLE_TIMEOUT_SECONDS` (3 days), `AUTH_MAINTENANCE_INTERVAL_SECONDS` (3600), `COGNITO_LOGOUT_REDIRECT_URI` (registered Cognito sign-out URL; default `<origin>/login`), `ENABLE_SECURITY_HEADERS` (default `true`). None of these is required; defaults are safe.
+3. **Database**: apply `db/migrations/20261018_add_auth_sessions.sql` before deploying; PostgreSQL startup validates the `auth_sessions` and `auth_rate_limits` tables. Existing signed-user-id cookies stop working once, so users sign in again. On HTTPS the cookie is named `__Host-cortex_session`.
+   - Security behavior without extra configuration: credentialed CORS only for trusted origins (other origins still get non-credentialed CORS), sign-up/reset passwords checked against known breaches (fails open), shared rate limits across API instances, a 3-day idle timeout, a "Signed-in devices" page, a stricter production CSP (no inline scripts), hashed auth audit log events, and hourly cleanup of ended sessions.
+4. **Frontend**: signed-out users still see the `Sign in to use CortexAI` gate; its **Sign in** button (and the account menu's **Sign in**) opens `/login?next=<current page>`. After sign-in React returns to a validated same-origin `next` path and starts a fresh chat session. The theme switch toggles the React `data-theme`. `Log off` posts to `/v1/auth/logout` (server-side revocation, so a copied cookie stops working), clears the React session/history state, then navigates to the Cognito logout URL for Google sessions or to `/login` otherwise.
 
 `/v1/model-options` is always registered for session-authenticated Ask/Compare clients and returns active selectable models from the canonical registry. It is not controlled by `ENABLE_MODELS_CATALOG`.
 
@@ -1301,14 +1314,14 @@ The UI page can appear to refresh automatically in production for these reasons:
 
 1. **Cognito auth redirect loop (most common)**
 
-   Behind CloudFront or an ALB, HTTPS is terminated at the load balancer. FastAPI sees plain HTTP, so `request.base_url` returns `http://…` unless proxy header forwarding is enabled. The computed Cognito redirect URI (`http://…/auth`) then mismatches the registered `https://…/auth` callback, causing every token exchange to fail and redirecting the browser back to the Cognito login page repeatedly. Fix:
+   Behind CloudFront or an ALB, HTTPS is terminated at the load balancer. FastAPI sees plain HTTP, so `request.base_url` returns `http://…` unless proxy header forwarding is enabled. The computed Google callback URI (`http://…/v1/auth/callback`) then mismatches the registered `https://…` callback, so every Google sign-in ends on `/login?error=google_failed`. Fix:
 
-   - Set `COGNITO_REDIRECT_URI=https://app.example.com/auth` explicitly, **and**
+   - Set `COGNITO_REDIRECT_URI` to the exact registered HTTPS callback (for example `https://app.example.com/v1/auth/callback`), **and**
    - Ensure `ENABLE_PROXY_HEADERS=true` (default) so `request.base_url` / `runtime-config.js` reflect HTTPS.
 
 2. **Session cookie not persisting across browser sessions**
 
-   Without an explicit `max_age`, the `cortex_session` cookie is a session cookie that is deleted when the browser closes. On mobile, background/resume cycles and low-memory tab discards trigger this frequently. The default is now 7 days (`SESSION_MAX_AGE_SECONDS=604800`). Increase or decrease to match your security policy.
+   Without an explicit `max_age`, the `cortex_session` cookie is a session cookie that is deleted when the browser closes. On mobile, background/resume cycles and low-memory tab discards trigger this frequently. The default is 7 days (`SESSION_MAX_AGE_SECONDS=604800`), enforced both by the cookie and by the server-side `auth_sessions.expires_at`. Increase or decrease to match your security policy.
 
 3. **Session cookie `Secure` flag**
 
@@ -1348,9 +1361,10 @@ psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260829_add_
 psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260905_add_subscription_grants.sql
 psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260927_add_tool_credit_transaction_item.sql
 psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20261007_add_versioned_model_rate_cards.sql
+psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20261018_add_auth_sessions.sql
 ```
 
-- `20260718` creates the billing foundation; `20260727` adds Compare revisions and append-only Cortex runs; `20260729` creates the immutable `credit_transactions` ledger and unified `ai_credits` contract; `20260730` adds reservation heartbeats; `20260731` adds model/pricing audit evidence; `20260802` adds Cortex disagreement attribution; `20260804` adds generation-budget/reasoning audit fields plus normalized completion status; `20260807` adds cache-aware ledger columns, reusable optimizer/research/Cortex/context-summary persistence, and the `cache_reuse_events` telemetry table; `20260811` permits checksum-free upload intents and adds `uploading`/`deleting` attachment states; `20260820` adds durable Work sessions/runs/events, files, tool connections/calls, approvals, OAuth state, and reconciliation leases; `20260829` adds Work Web/output/model-identity audit fields plus the output-limit terminal status; `20260905` adds Cortex-issued subscription grants; and `20260927` permits provider web-search `tool` items in the immutable credit ledger. The scripts are additive/idempotent. Alteration scripts require ownership of the affected tables. Restart the API after apply. PostgreSQL startup validates the required billing, pricing-audit, Cortex, generation-budget, and cache-accounting columns before provider traffic; when direct upload or Work is enabled it also validates the corresponding additive schema.
+- `20260718` creates the billing foundation; `20260727` adds Compare revisions and append-only Cortex runs; `20260729` creates the immutable `credit_transactions` ledger and unified `ai_credits` contract; `20260730` adds reservation heartbeats; `20260731` adds model/pricing audit evidence; `20260802` adds Cortex disagreement attribution; `20260804` adds generation-budget/reasoning audit fields plus normalized completion status; `20260807` adds cache-aware ledger columns, reusable optimizer/research/Cortex/context-summary persistence, and the `cache_reuse_events` telemetry table; `20260811` permits checksum-free upload intents and adds `uploading`/`deleting` attachment states; `20260820` adds durable Work sessions/runs/events, files, tool connections/calls, approvals, OAuth state, and reconciliation leases; `20260829` adds Work Web/output/model-identity audit fields plus the output-limit terminal status; `20260905` adds Cortex-issued subscription grants; `20260927` permits provider web-search `tool` items in the immutable credit ledger; and `20261018` adds `auth_sessions` (hashed opaque browser-session tokens with expiry and revocation) and `auth_rate_limits` (shared brute-force counters) for the in-app login. The scripts are additive/idempotent. Alteration scripts require ownership of the affected tables. Restart the API after apply. PostgreSQL startup validates the required billing, pricing-audit, Cortex, generation-budget, and cache-accounting columns before provider traffic; when direct upload or Work is enabled it also validates the corresponding additive schema.
 
 ## Release Gate
 

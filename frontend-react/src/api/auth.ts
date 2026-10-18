@@ -1,4 +1,4 @@
-import { get } from "./client";
+import { del, get, post } from "./client";
 import type { AuthenticatedUser, CognitoConfig, WhoAmIResponse } from "../types";
 
 export async function fetchCognitoConfig(): Promise<CognitoConfig> {
@@ -25,45 +25,71 @@ export async function devLogin(token?: string): Promise<{ session_id: string }> 
   return res.json() as Promise<{ session_id: string }>;
 }
 
-export function cognitoClientId(config: CognitoConfig): string {
-  return (config.client_id ?? config.clientId ?? "").trim();
+export interface PasswordLoginResponse {
+  user_id: string;
+  email: string | null;
 }
 
-export function cognitoRedirectUri(config: CognitoConfig): string {
-  return (config.redirect_uri ?? config.redirectUri ?? "").trim();
+export interface LogoutResponse {
+  ok: boolean;
+  cognito_logout_url: string | null;
 }
 
-function defaultCognitoRedirectUri(): string {
-  return `${window.location.origin}/auth`;
+export function signUp(email: string, password: string): Promise<{ status: string }> {
+  return post("/v1/auth/signup", { email, password });
 }
 
-export function cognitoLogoutUrl(config: CognitoConfig): string {
-  return (config.logout_url ?? config.logoutUrl ?? "").trim();
+export function confirmSignUp(email: string, code: string): Promise<{ status: string }> {
+  return post("/v1/auth/signup/confirm", { email, code });
 }
 
-export function buildCognitoLoginUrl(config: CognitoConfig): string {
-  const clientId = cognitoClientId(config);
-  const redirectUri = cognitoRedirectUri(config) || defaultCognitoRedirectUri();
-  if (!config.enabled || !config.domain || !clientId || !redirectUri) {
-    throw new Error("Cognito is not fully configured");
-  }
-  const params = new URLSearchParams({
-    response_type: "code",
-    client_id: clientId,
-    redirect_uri: redirectUri,
-    scope: "openid email profile",
-  });
-  return `${config.domain}/oauth2/authorize?${params.toString()}`;
+export function resendSignUpCode(email: string): Promise<{ status: string }> {
+  return post("/v1/auth/signup/resend", { email });
 }
 
-export function buildCognitoLogoutUrl(config: CognitoConfig): string {
-  const logoutUrl = cognitoLogoutUrl(config);
-  if (!config.enabled || !logoutUrl) {
-    throw new Error("Cognito logout is not configured");
-  }
-  const redirectUri = cognitoRedirectUri(config) || defaultCognitoRedirectUri();
-  const separator = logoutUrl.includes("?") ? "&" : "?";
-  return `${logoutUrl}${separator}response_type=code&scope=email+openid&redirect_uri=${encodeURIComponent(
-    redirectUri,
-  )}`;
+export function loginWithPassword(email: string, password: string): Promise<PasswordLoginResponse> {
+  return post("/v1/auth/login/password", { email, password });
+}
+
+export function requestPasswordReset(email: string): Promise<{ status: string }> {
+  return post("/v1/auth/password/forgot", { email });
+}
+
+export function resetPassword(
+  email: string,
+  code: string,
+  newPassword: string,
+): Promise<{ status: string }> {
+  return post("/v1/auth/password/reset", { email, code, new_password: newPassword });
+}
+
+export function logoutSession(): Promise<LogoutResponse> {
+  return post("/v1/auth/logout", {});
+}
+
+/** Same-origin URL that starts Google sign-in (the backend redirects to Google via Cognito). */
+export function googleLoginUrl(nextPath: string): string {
+  return `/v1/auth/google/start?next=${encodeURIComponent(nextPath)}`;
+}
+
+export interface AuthSession {
+  id: string;
+  auth_method: "password" | "google" | "cognito_token" | "dev";
+  created_at: string;
+  last_seen_at: string;
+  expires_at: string;
+  user_agent: string | null;
+  current: boolean;
+}
+
+export function listSessions(): Promise<{ sessions: AuthSession[] }> {
+  return get("/v1/auth/sessions");
+}
+
+export function revokeSession(sessionId: string): Promise<{ ok: boolean }> {
+  return del(`/v1/auth/sessions/${encodeURIComponent(sessionId)}`);
+}
+
+export function revokeOtherSessions(): Promise<{ ok: boolean; revoked: number }> {
+  return post("/v1/auth/sessions/revoke-others", {});
 }

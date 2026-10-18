@@ -46,6 +46,8 @@ FRONTEND_DIR=frontend-react/dist
 # Session cookie policy: leave the Secure override unset to auto-detect HTTPS; 0 max age uses a browser-session cookie
 # SESSION_COOKIE_SECURE=
 # SESSION_MAX_AGE_SECONDS=604800
+# Required in production (>= 32 random characters); see docs/runbooks/auth-login.md for all AUTH_* settings
+# SESSION_SECRET=
 # Cognito JWKS/token endpoint certificate verification; keep true in production
 # COGNITO_SSL_VERIFY=true
 # Optional stream keep-alive interval; set 0 to disable heartbeat events
@@ -110,7 +112,7 @@ If `FRONTEND_DIR` is unset, `server/app.py` serves `frontend-react/dist`. Set th
 - Swagger UI: `http://127.0.0.1:8000/docs`
 - ReDoc: `http://127.0.0.1:8000/redoc`
 - Frontend composer keyboard UX: desktop `Enter` sends and `Shift+Enter` inserts a newline; in the mobile shell (up to 900px), `Enter` inserts a newline and the visible up-arrow button sends the prompt.
-- React startup waits for Cognito/local dev-session bootstrap before fetching session-scoped model and history data. Signed-out Cognito users see a workspace sign-in gate instead of the Ask/Compare composer, while authenticated and local dev-session users restore the persisted active `session_id` transcript when the page was reloaded, resumed, or silently reauthenticated in the same browser.
+- React startup waits for Cognito/local dev-session bootstrap before fetching session-scoped model and history data. Signed-out Cognito users see a workspace sign-in gate (its Sign in button opens the in-app `/login` page) instead of the Ask/Compare composer, while authenticated and local dev-session users restore the persisted active `session_id` transcript when the page was reloaded, resumed, or silently reauthenticated in the same browser.
 - React Ask/Compare turns send `context.session_id`, bounded `conversation_history`, and `new_session` to preserve selected-thread continuity while allowing explicit New Chat resets.
 - The React sidebar uses a compact navigation rail for Usage, AI credits, optional Models, and current history. Above 1024px, Ask/Compare/Work are available only from the icon-labelled top mode tabs; removing those duplicate rail entries raises the `Recent` block and exposes more history. The 1024px iPad landscape rail, iPad portrait shell, and mobile navigation remain unchanged. Its shared controller loads chat and run-backed Work history consistently across routed pages, opens a selected item in its owning workspace, sends `New chat` from secondary routes to a clean Ask workspace, preserves the collapsed state across route changes, limits current-row highlighting to the active workspace, and applies the signed-out gate consistently. Models appears only when `ENABLE_MODELS_CATALOG=true`; it is absent from the default desktop rail and mobile account menu. A submitted chat appears immediately as a UI-only current row before response persistence completes, then yields to the persisted row without duplication. Chat history precedes Work history outside Work mode; Work mode keeps Work history first. Work remains hidden only when its runtime feature flag is disabled. Desktop has an icon-only top-right control that collapses the sidebar to a narrow action rail and expands it back to the full history view; mobile remains on the separate Ask/Compare/History bottom navigation, with Usage and AI credits reached from the account menu. The expanded desktop `Recent` list displays up to the 100 newest grouped chat threads by Today, Yesterday, and month/day, with one 36px row per session: compact 11.5px ellipsized title and a narrowed `MODE · time` caption, with no leading mode glyph, to preserve substantially more identifying title text. Hover/focus replaces the caption with a Rename/Delete menu; renamed titles persist in `sessions.title`, Delete retains the short in-row confirmation, and keyboard rows support arrows, Enter, R, D, and Escape. The separate mobile History surface remains unchanged.
 - Selecting a React history row reloads the complete session transcript. Ask rows are restored chronologically and Compare target rows are grouped into one turn by `request_group_id`.
@@ -319,9 +321,18 @@ multi-model identity fails closed before the task is sent or settled.
 - `GET /v1/byok/status`
 - `DELETE /v1/byok?provider=<provider-id>`
 - `GET /v1/admin/request-groups/{request_group_id}/failed-attempts`
-- `GET /v1/auth/cognito-config`
+- `GET /v1/auth/cognito-config` (public Cognito config plus `passwordLoginEnabled`, `signupEnabled`, `googleLoginEnabled`)
+- `POST /v1/auth/signup`, `POST /v1/auth/signup/confirm`, `POST /v1/auth/signup/resend`
+- `POST /v1/auth/login/password`
+- `POST /v1/auth/password/forgot`, `POST /v1/auth/password/reset`
+- `GET /v1/auth/google/start` and its callbacks `GET /v1/auth/callback` / `GET /auth`
+- `POST /v1/auth/login` (Cognito ID token)
 - `POST /v1/auth/dev-login`
-- `POST /v1/auth/logout`
+- `POST /v1/auth/logout` (server-side revocation; returns `cognito_logout_url` for Google sessions)
+- `GET /v1/auth/me`
+- `GET /v1/auth/sessions`, `DELETE /v1/auth/sessions/{session_id}`, `POST /v1/auth/sessions/revoke-others`
+
+The React app signs users in on its own `/login` page; the contract, error codes, Cognito app-client requirements and security model are in [auth login](runbooks/auth-login.md). Browser sessions are opaque server-side tokens (`auth_sessions`), not signed user IDs, and `SESSION_SECRET` (>= 32 characters) is required in production. On HTTPS the cookie is `__Host-cortex_session`. Credentialed CORS is limited to trusted origins (`AUTH_ALLOWED_ORIGINS`, the `COGNITO_SUCCESS_REDIRECT_URI` origin, loopback outside production); other origins get non-credentialed CORS.
 
 ### Direct attachment upload contract
 
@@ -509,7 +520,7 @@ When `SERVE_FRONTEND=true`, backend serves `GET /runtime-config.js` dynamically:
 - Optional override for browser config: `FRONTEND_RUNTIME_ENABLE_DEV_SESSION_LOGIN`.
 - In production-like runtimes (`APP_ENV/ENVIRONMENT/ENV=prod|production`), dev-login bootstrap is forced off.
 - Frontend startup completes Cognito/local dev-session bootstrap before calling session-scoped startup endpoints. React loads `/v1/model-options` for Ask/Compare in every rich-catalogue flag state; when the catalogue is disabled it skips `/v1/models`, hides Models navigation, and still hydrates history normally.
-- The React workspace shows a `Sign in to use CortexAI` gate for signed-out Cognito users, and the top-right account icon remains a secondary menu with Cognito `Sign in` when available, a persisted light/dark theme switch, and `Log off` as a session-clear fallback, including when the icon is still labelled `Guest account`. Log off clears the local session cookie through `/v1/auth/logout`, resets the active React chat/history state, then follows the Cognito Hosted UI `logoutUrl` when available.
+- The React workspace shows a `Sign in to use CortexAI` gate for signed-out Cognito users, and the top-right account icon remains a secondary menu with `Sign in` (opens the in-app `/login` page) when available, a persisted light/dark theme switch, and `Log off` as a session-clear fallback, including when the icon is still labelled `Guest account`. Log off revokes the server-side session and clears the cookie through `/v1/auth/logout`, resets the active React chat/history state, then follows the returned `cognito_logout_url` (Google sessions) or lands on `/login`.
 - Response is sent with no-cache headers so config changes apply immediately.
 
 React/Vite frontend notes:
@@ -879,7 +890,10 @@ psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260829_add_
 psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260905_add_subscription_grants.sql
 psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260927_add_tool_credit_transaction_item.sql
 psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20261007_add_versioned_model_rate_cards.sql
+psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20261018_add_auth_sessions.sql
 ```
+
+`20261018_add_auth_sessions.sql` adds `auth_sessions` (hashed opaque browser-session tokens with expiry and revocation) and `auth_rate_limits` (shared auth throttles). PostgreSQL startup validates it; existing signed-cookie sessions end once when this build ships.
 
 The first Cortex Analysis migration adds Compare response revision metadata and
 the append-only `cortex_analysis_runs` table; the `20260802` attribution

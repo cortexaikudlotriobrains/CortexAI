@@ -1,38 +1,85 @@
-"""Auth-related endpoints (Cognito config + cookie login + code callback)."""
+"""Auth endpoints: in-app email/password + Google sign-in, sessions, dev login."""
 
+import asyncio
 import hmac
 import os
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
-from sqlalchemy import select
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import func, select
 
 from db import get_or_create_cli_user, get_or_create_user_by_cognito
+from db.repository import UserEmailConflictError, is_user_active
 from db.tables import get_table
+from server import cognito_idp
+from server.auth_security import (
+    OAUTH_TX_COOKIE_NAME,
+    OAUTH_TX_TTL_SECONDS,
+    SECURE_OAUTH_TX_COOKIE_NAME,
+    audit_event,
+    client_ip,
+    decode_oauth_transaction,
+    encode_oauth_transaction,
+    enforce_auth_rate_limit,
+    error_detail,
+    new_oauth_transaction,
+    normalize_email,
+    oauth_tx_cookie_name,
+    pkce_challenge,
+    reject_breached_password,
+    require_same_origin,
+    states_match,
+    validate_code,
+    validate_login_password,
+    validate_new_password,
+)
 from server.cognito import (
+    CognitoClaims,
+    cognito_enabled,
     exchange_code_for_tokens,
     get_cognito_authorize_url,
     get_cognito_config_for_frontend,
-    cognito_enabled,
+    get_cognito_domain,
     verify_cognito_id_token,
 )
-from server.session_auth import SESSION_COOKIE_NAME, sign_session
 from server.dependencies import get_session_user_id
 from server.persistence import db_uow
+from server.session_auth import (
+    SECURE_SESSION_COOKIE_NAME,
+    SESSION_COOKIE_NAME,
+    issue_session,
+    list_user_sessions,
+    revoke_session,
+    revoke_user_session_by_id,
+    revoke_user_sessions,
+    runtime_environment,
+    session_cookie_name,
+    session_cookie_secure,
+    session_cookie_value,
+    session_max_age_seconds,
+)
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/v1/auth", tags=["Auth"])
+
+def _no_store(response: Response) -> None:
+    """Auth responses carry credentials-adjacent data and must never be cached."""
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+
+
+router = APIRouter(prefix="/v1/auth", tags=["Auth"], dependencies=[Depends(_no_store)])
 PRODUCTION_ENV_VALUES = {"prod", "production"}
 
-# Session cookie lifetime in seconds.  Defaults to 7 days so users are not
-# logged out when the browser session ends (e.g. mobile background, tab close).
-# Set SESSION_MAX_AGE_SECONDS=0 to fall back to a browser-session cookie.
-_DEFAULT_SESSION_MAX_AGE = 7 * 24 * 3600
+_ACCOUNT_EXISTS = error_detail(
+    "account_exists_other_method",
+    "An account with this email already exists. Sign in with the method you used before.",
+)
+_ACCOUNT_DISABLED = error_detail("account_disabled", "This account is not available.")
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -43,38 +90,27 @@ def _env_bool(name: str, default: bool = False) -> bool:
 
 
 def _runtime_environment() -> str:
-    for key in ("APP_ENV", "ENVIRONMENT", "ENV"):
-        value = str(os.getenv(key, "") or "").strip().lower()
-        if value:
-            return value
-    return ""
+    return runtime_environment()
 
 
 def _session_max_age() -> int | None:
-    raw = str(os.getenv("SESSION_MAX_AGE_SECONDS", "") or "").strip()
-    if not raw:
-        return _DEFAULT_SESSION_MAX_AGE
-    try:
-        val = int(raw)
-        return val if val > 0 else None
-    except ValueError:
-        return _DEFAULT_SESSION_MAX_AGE
+    return session_max_age_seconds()
 
 
 def _session_cookie_secure(request: Request) -> bool:
-    """Return True if the session cookie should have the Secure flag set.
+    return session_cookie_secure(request)
 
-    In production HTTPS deployments (CloudFront/ALB), the ``Secure`` flag must
-    be set so the browser sends the cookie on HTTPS requests.  We detect HTTPS
-    from the actual request scheme (which is correct when ProxyHeadersMiddleware
-    is active) and fall back to an explicit SESSION_COOKIE_SECURE env override.
-    """
-    explicit = os.getenv("SESSION_COOKIE_SECURE")
-    if explicit is not None:
-        return str(explicit).strip().lower() in {"1", "true", "yes", "on"}
-    # With ProxyHeadersMiddleware in place request.url.scheme already reflects
-    # X-Forwarded-Proto, so this correctly returns True for HTTPS deployments.
-    return request.url.scheme == "https"
+
+def _set_session_cookie(response: Response, request: Request, token: str) -> None:
+    response.set_cookie(
+        key=session_cookie_name(request),
+        value=token,
+        httponly=True,
+        secure=_session_cookie_secure(request),
+        samesite="lax",
+        path="/",
+        max_age=_session_max_age(),
+    )
 
 
 def _dev_login_enabled() -> bool:
@@ -113,37 +149,80 @@ def _ensure_dev_login_allowed(request: Request) -> None:
         )
 
 
+# --------------------------------------------------------------------------- #
+# Public configuration
+# --------------------------------------------------------------------------- #
+
+
+def _password_login_enabled() -> bool:
+    return cognito_enabled() and _env_bool("AUTH_PASSWORD_LOGIN_ENABLED", default=True)
+
+
+def _signup_enabled() -> bool:
+    return _password_login_enabled() and _env_bool("AUTH_SIGNUP_ENABLED", default=True)
+
+
+def _google_login_enabled() -> bool:
+    return (
+        cognito_enabled()
+        and bool(get_cognito_domain())
+        and _env_bool("AUTH_GOOGLE_LOGIN_ENABLED", default=True)
+    )
+
+
+def _require_flow(enabled: bool) -> None:
+    if not enabled:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=error_detail("auth_method_disabled", "This sign-in method is not available."),
+        )
+
+
 @router.get("/cognito-config")
 async def cognito_config():
     """
-    Return public Cognito configuration for frontend (no auth required).
-    Used to bootstrap Hosted UI or Amplify Auth (e.g. Sign in with Google).
+    Return public auth configuration for the frontend (no auth required).
+    ``passwordLoginEnabled`` / ``signupEnabled`` / ``googleLoginEnabled`` drive
+    which controls the in-app login page shows.
     """
-    return get_cognito_config_for_frontend()
+    config = get_cognito_config_for_frontend()
+    if not config:
+        return config
+    return {
+        **config,
+        "passwordLoginEnabled": _password_login_enabled(),
+        "signupEnabled": _signup_enabled(),
+        "googleLoginEnabled": _google_login_enabled(),
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Shared helpers
+# --------------------------------------------------------------------------- #
+
+
+def _flow_http_error(exc: cognito_idp.CognitoFlowError) -> HTTPException:
+    headers = {"Retry-After": "60"} if exc.status_code == 429 else None
+    return HTTPException(
+        status_code=exc.status_code,
+        detail=error_detail(exc.code, exc.message),
+        headers=headers,
+    )
 
 
 def _redirect_uri_from_request(request: Request) -> str:
-    """Build callback URL for Cognito (must match app client allowed callback).
+    """Callback URL sent to Cognito (must match the app client's allowed callback).
 
-    Explicit ``COGNITO_REDIRECT_URI`` env var always wins.  When not set, the
-    URI is derived from the current request.  With ``ProxyHeadersMiddleware``
-    active, ``request.base_url`` already reflects the correct scheme/host from
-    ``X-Forwarded-Proto`` / ``X-Forwarded-Host``, so the computed URI will be
-    ``https://`` even when FastAPI itself is running on HTTP behind an ALB.
-
-    Without ``ProxyHeadersMiddleware`` and without the explicit env var, the
-    computed URI may be ``http://`` in HTTPS deployments, causing a mismatch
-    with the ``https://`` callback URL registered in the Cognito app client and
-    a redirect-loop that looks like an automatic page refresh.
+    ``COGNITO_REDIRECT_URI`` always wins and should be set in production to the
+    exact registered HTTPS callback. Otherwise it is this API's
+    ``/v1/auth/callback`` on the effective request origin; behind CloudFront/ALB
+    that origin is only ``https://`` when ``ProxyHeadersMiddleware`` trusts the
+    forwarded scheme, so an unset value can cause a redirect mismatch there.
     """
     configured = (os.getenv("COGNITO_REDIRECT_URI") or "").strip()
     if configured:
         return configured.rstrip("/")
-    base = str(request.base_url).rstrip("/")
-    path = (request.scope.get("path") or "/v1/auth/callback").strip() or "/v1/auth/callback"
-    if not path.startswith("/"):
-        path = "/" + path
-    return f"{base}{path}"
+    return f"{str(request.base_url).rstrip('/')}/v1/auth/callback"
 
 
 def _with_query_param(url: str, key: str, value: str) -> str:
@@ -154,33 +233,44 @@ def _with_query_param(url: str, key: str, value: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(pairs), parts.fragment))
 
 
-async def handle_oauth_callback(
-    request: Request,
-    response: Response,
-    code: str | None = None,
-) -> RedirectResponse:
-    """
-    Shared OAuth2 code callback: exchange code for tokens, verify user,
-    set session cookie, redirect to index.html. On failure redirect to Cognito login.
-    Used by both GET /auth and GET /v1/auth/callback.
-    """
-    redirect_uri = _redirect_uri_from_request(request)
-    login_url = get_cognito_authorize_url(redirect_uri)
-    if not cognito_enabled() or not login_url:
-        return RedirectResponse(url="/index.html", status_code=status.HTTP_302_FOUND)
+def _frontend_origin() -> str:
+    """Origin of a separately hosted frontend (from COGNITO_SUCCESS_REDIRECT_URI), else ''."""
+    configured = (os.getenv("COGNITO_SUCCESS_REDIRECT_URI") or "").strip()
+    parts = urlsplit(configured)
+    if parts.scheme in {"http", "https"} and parts.netloc:
+        return f"{parts.scheme}://{parts.netloc}"
+    return ""
 
-    if not code or not code.strip():
-        return RedirectResponse(url=login_url, status_code=status.HTTP_302_FOUND)
 
-    tokens = exchange_code_for_tokens(code.strip(), redirect_uri)
-   
-    if not tokens or not tokens.get("id_token"):
-        return RedirectResponse(url=login_url, status_code=status.HTTP_302_FOUND)
-    
-    claims = verify_cognito_id_token(tokens["id_token"])
-    if not claims:
-        return RedirectResponse(url=login_url, status_code=status.HTTP_302_FOUND)
+def _login_error_redirect(reason: str, request: Request | None = None) -> RedirectResponse:
+    if request is not None:
+        audit_event(request, "auth.login.failed", auth_method="google", code=reason)
+    redirect = RedirectResponse(
+        url=f"{_frontend_origin()}/login?error={quote(reason)}",
+        status_code=status.HTTP_302_FOUND,
+    )
+    _clear_oauth_tx_cookies(redirect)
+    return redirect
 
+
+def _clear_oauth_tx_cookies(response: Response) -> None:
+    response.delete_cookie(OAUTH_TX_COOKIE_NAME, path="/")
+    response.delete_cookie(SECURE_OAUTH_TX_COOKIE_NAME, path="/", secure=True)
+
+
+def _clear_session_cookies(response: Response) -> None:
+    response.delete_cookie(SESSION_COOKIE_NAME, path="/")
+    response.delete_cookie(SECURE_SESSION_COOKIE_NAME, path="/", secure=True)
+
+
+def _user_agent(request: Request) -> str | None:
+    return request.headers.get("user-agent")
+
+
+def _establish_session(
+    request: Request, claims: CognitoClaims, *, auth_method: str
+) -> tuple[UUID, str]:
+    """Upsert the user, refuse disabled/conflicting accounts, and issue a session."""
     with db_uow() as session:
         user_id: UUID = get_or_create_user_by_cognito(
             session,
@@ -188,25 +278,324 @@ async def handle_oauth_callback(
             email=claims.email,
             issuer=claims.iss,
         )
+        if not is_user_active(session, user_id):
+            raise PermissionError("account_disabled")
+        token = issue_session(
+            session,
+            user_id=user_id,
+            auth_method=auth_method,
+            user_agent=_user_agent(request),
+            client_ip=client_ip(request),
+        )
+    return user_id, token
 
-    cookie_val = sign_session(user_id)
-    success_url = _with_query_param(
-        (os.getenv("COGNITO_SUCCESS_REDIRECT_URI") or "").strip() or "/index.html",
-        "fresh_login",
-        "1",
+
+# --------------------------------------------------------------------------- #
+# Google sign-in (Cognito federated, authorization code + PKCE + state + nonce)
+# --------------------------------------------------------------------------- #
+
+
+@router.get("/google/start")
+async def google_start(
+    request: Request, next_path: str | None = Query(None, alias="next")
+) -> RedirectResponse:
+    """Send the browser straight to Google through Cognito, skipping the hosted page."""
+    _require_flow(_google_login_enabled())
+    await asyncio.to_thread(enforce_auth_rate_limit, request, action="google_start")
+
+    tx = new_oauth_transaction(next_path or "/")
+    authorize_url = get_cognito_authorize_url(
+        _redirect_uri_from_request(request),
+        tx.state,
+        code_challenge=pkce_challenge(tx.code_verifier),
+        nonce=tx.nonce,
+        identity_provider="Google",
     )
-    redir = RedirectResponse(url=success_url, status_code=status.HTTP_302_FOUND)
-    max_age = _session_max_age()
-    redir.set_cookie(
-        key=SESSION_COOKIE_NAME,
-        value=cookie_val,
+    if not authorize_url:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=error_detail("auth_unavailable", "Sign-in is temporarily unavailable."),
+        )
+    redirect = RedirectResponse(url=authorize_url, status_code=status.HTTP_302_FOUND)
+    redirect.set_cookie(
+        key=oauth_tx_cookie_name(request),
+        value=encode_oauth_transaction(tx),
         httponly=True,
         secure=_session_cookie_secure(request),
-        samesite="lax",
+        samesite="lax",  # the Cognito redirect back is a top-level GET
         path="/",
-        max_age=max_age,
+        max_age=OAUTH_TX_TTL_SECONDS,
     )
-    return redir
+    return redirect
+
+
+async def handle_oauth_callback(
+    request: Request,
+    response: Response,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+) -> RedirectResponse:
+    """
+    Shared OAuth2 code callback for GET /auth and GET /v1/auth/callback.
+
+    Requires the one-shot transaction cookie set by ``/v1/auth/google/start``:
+    ``state`` must match (login CSRF), the PKCE verifier is sent with the code
+    exchange, and the ID token ``nonce`` must match (token replay). Every failure
+    ends on the in-app login page, never on a Cognito-hosted page.
+    """
+    if not cognito_enabled():
+        return RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
+
+    tx = decode_oauth_transaction(request.cookies.get(oauth_tx_cookie_name(request)))
+    if error:
+        logger.info(
+            "OAuth provider returned an error",
+            extra={"extra_fields": {"event": "auth.oauth.provider_error", "error": error[:64]}},
+        )
+        return _login_error_redirect("google_cancelled", request)
+    if not code or not code.strip():
+        # Someone opened the callback URL directly.
+        return RedirectResponse(
+            url=f"{_frontend_origin()}/login", status_code=status.HTTP_302_FOUND
+        )
+    if tx is None or not states_match(tx.state, state):
+        logger.warning(
+            "OAuth callback rejected: missing or mismatched state",
+            extra={"extra_fields": {"event": "auth.oauth.state_mismatch"}},
+        )
+        return _login_error_redirect("session_expired", request)
+
+    redirect_uri = _redirect_uri_from_request(request)
+    tokens = await asyncio.to_thread(
+        exchange_code_for_tokens, code.strip(), redirect_uri, tx.code_verifier
+    )
+    if not tokens or not tokens.get("id_token"):
+        return _login_error_redirect("google_failed", request)
+    claims = await asyncio.to_thread(verify_cognito_id_token, tokens["id_token"])
+    if not claims or not claims.nonce or not states_match(tx.nonce, claims.nonce):
+        logger.warning(
+            "OAuth callback rejected: ID token failed verification or nonce check",
+            extra={"extra_fields": {"event": "auth.oauth.token_rejected"}},
+        )
+        return _login_error_redirect("google_failed", request)
+    if not claims.email_verified:
+        return _login_error_redirect("email_not_verified", request)
+
+    try:
+        user_id, token = await asyncio.to_thread(
+            _establish_session, request, claims, auth_method="google"
+        )
+    except UserEmailConflictError:
+        return _login_error_redirect("account_exists", request)
+    except PermissionError:
+        return _login_error_redirect("account_disabled", request)
+
+    base = (os.getenv("COGNITO_SUCCESS_REDIRECT_URI") or "").strip()
+    success_url = _with_query_param(base or tx.next_path, "fresh_login", "1")
+    redirect = RedirectResponse(url=success_url, status_code=status.HTTP_302_FOUND)
+    _set_session_cookie(redirect, request, token)
+    _clear_oauth_tx_cookies(redirect)
+    audit_event(request, "auth.login.succeeded", auth_method="google", user_id=user_id)
+    return redirect
+
+
+@router.get("/callback")
+async def auth_callback(
+    request: Request,
+    response: Response,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+):
+    """OAuth2 authorization code callback at /v1/auth/callback."""
+    return await handle_oauth_callback(request, response, code, state, error)
+
+
+# --------------------------------------------------------------------------- #
+# Email + password
+# --------------------------------------------------------------------------- #
+
+
+class _StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class SignUpRequest(_StrictModel):
+    email: str = Field(max_length=254)
+    password: str = Field(max_length=256)
+
+
+class ConfirmSignUpRequest(_StrictModel):
+    email: str = Field(max_length=254)
+    code: str = Field(max_length=16)
+
+
+class EmailRequest(_StrictModel):
+    email: str = Field(max_length=254)
+
+
+class PasswordLoginRequest(_StrictModel):
+    email: str = Field(max_length=254)
+    password: str = Field(max_length=256)
+
+
+class PasswordResetRequest(_StrictModel):
+    email: str = Field(max_length=254)
+    code: str = Field(max_length=16)
+    new_password: str = Field(max_length=256)
+
+
+@router.post("/signup", status_code=status.HTTP_202_ACCEPTED)
+async def signup(body: SignUpRequest, request: Request) -> dict:
+    """Create an account and email a verification code. Identical for existing emails."""
+    require_same_origin(request)
+    _require_flow(_signup_enabled())
+    email = normalize_email(body.email)
+    await asyncio.to_thread(enforce_auth_rate_limit, request, action="signup", identity=email)
+    validate_new_password(body.password, email=email)
+    await asyncio.to_thread(reject_breached_password, body.password)
+    try:
+        await asyncio.to_thread(cognito_idp.sign_up, email, body.password)
+    except cognito_idp.CognitoFlowError as exc:
+        raise _flow_http_error(exc) from exc
+    audit_event(request, "auth.signup.requested", email=email)
+    return {"status": "verification_required"}
+
+
+@router.post("/signup/confirm")
+async def signup_confirm(body: ConfirmSignUpRequest, request: Request) -> dict:
+    """Confirm an email address with the emailed 6-digit code."""
+    require_same_origin(request)
+    _require_flow(_signup_enabled())
+    email = normalize_email(body.email)
+    await asyncio.to_thread(enforce_auth_rate_limit, request, action="confirm", identity=email)
+    code = validate_code(body.code)
+    try:
+        await asyncio.to_thread(cognito_idp.confirm_sign_up, email, code)
+    except cognito_idp.CognitoFlowError as exc:
+        raise _flow_http_error(exc) from exc
+    return {"status": "verified"}
+
+
+@router.post("/signup/resend", status_code=status.HTTP_202_ACCEPTED)
+async def signup_resend(body: EmailRequest, request: Request) -> dict:
+    """Re-send the verification code. Identical for unknown emails."""
+    require_same_origin(request)
+    _require_flow(_signup_enabled())
+    email = normalize_email(body.email)
+    await asyncio.to_thread(enforce_auth_rate_limit, request, action="resend", identity=email)
+    try:
+        await asyncio.to_thread(cognito_idp.resend_confirmation_code, email)
+    except cognito_idp.CognitoFlowError as exc:
+        raise _flow_http_error(exc) from exc
+    return {"status": "code_sent"}
+
+
+@router.post("/login/password")
+async def login_with_password(
+    body: PasswordLoginRequest, request: Request, response: Response
+) -> dict:
+    """Authenticate with email + password and set the session cookie."""
+    require_same_origin(request)
+    _require_flow(_password_login_enabled())
+    email = normalize_email(body.email)
+    await asyncio.to_thread(enforce_auth_rate_limit, request, action="login", identity=email)
+    validate_login_password(body.password)
+
+    try:
+        result = await asyncio.to_thread(cognito_idp.password_login, email, body.password)
+    except cognito_idp.CognitoFlowError as exc:
+        audit_event(
+            request, "auth.login.failed", auth_method="password", email=email, code=exc.code
+        )
+        raise _flow_http_error(exc) from exc
+
+    claims = await asyncio.to_thread(verify_cognito_id_token, result.id_token)
+    # Only the ID token is needed; drop the refresh token so it cannot outlive us.
+    await asyncio.to_thread(cognito_idp.revoke_refresh_token, result.refresh_token)
+    if not claims or not claims.email_verified or (claims.email or "").lower() != email:
+        audit_event(
+            request, "auth.login.failed", auth_method="password", email=email, code="token_rejected"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=error_detail("invalid_credentials", "Incorrect email or password."),
+        )
+
+    try:
+        user_id, token = await asyncio.to_thread(
+            _establish_session, request, claims, auth_method="password"
+        )
+    except UserEmailConflictError as exc:
+        audit_event(
+            request, "auth.login.failed", auth_method="password", email=email, code="account_exists"
+        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_ACCOUNT_EXISTS) from exc
+    except PermissionError as exc:
+        audit_event(
+            request,
+            "auth.login.failed",
+            auth_method="password",
+            email=email,
+            code="account_disabled",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=_ACCOUNT_DISABLED
+        ) from exc
+
+    _set_session_cookie(response, request, token)
+    audit_event(request, "auth.login.succeeded", auth_method="password", user_id=user_id)
+    return {"user_id": str(user_id), "email": claims.email}
+
+
+@router.post("/password/forgot", status_code=status.HTTP_202_ACCEPTED)
+async def password_forgot(body: EmailRequest, request: Request) -> dict:
+    """Email a reset code. The response is identical whether or not the account exists."""
+    require_same_origin(request)
+    _require_flow(_password_login_enabled())
+    email = normalize_email(body.email)
+    await asyncio.to_thread(enforce_auth_rate_limit, request, action="forgot", identity=email)
+    try:
+        await asyncio.to_thread(cognito_idp.forgot_password, email)
+    except cognito_idp.CognitoFlowError as exc:
+        raise _flow_http_error(exc) from exc
+    return {"status": "code_sent"}
+
+
+def _revoke_sessions_for_email(email: str, *, reason: str) -> int:
+    with db_uow() as session:
+        users = get_table("users")
+        user_id = session.execute(
+            select(users.c.id).where(func.lower(users.c.email) == email)
+        ).scalar_one_or_none()
+        if user_id is None:
+            return 0
+        return revoke_user_sessions(session, user_id, reason=reason)
+
+
+@router.post("/password/reset")
+async def password_reset(body: PasswordResetRequest, request: Request) -> dict:
+    """Set a new password with the emailed code and sign out every existing session."""
+    require_same_origin(request)
+    _require_flow(_password_login_enabled())
+    email = normalize_email(body.email)
+    await asyncio.to_thread(enforce_auth_rate_limit, request, action="reset", identity=email)
+    code = validate_code(body.code)
+    validate_new_password(body.new_password, email=email)
+    await asyncio.to_thread(reject_breached_password, body.new_password)
+    try:
+        await asyncio.to_thread(cognito_idp.confirm_forgot_password, email, code, body.new_password)
+    except cognito_idp.CognitoFlowError as exc:
+        raise _flow_http_error(exc) from exc
+    revoked = await asyncio.to_thread(_revoke_sessions_for_email, email, reason="password_reset")
+    audit_event(request, "auth.password.reset", email=email, sessions_revoked=revoked)
+    return {"status": "password_reset"}
+
+
+# --------------------------------------------------------------------------- #
+# Sessions
+# --------------------------------------------------------------------------- #
 
 
 @router.post("/dev-login")
@@ -225,18 +614,15 @@ async def dev_login(request: Request, response: Response) -> dict:
         ).first()
         email = row[0] if row else "cli@cortexai.local"
         display_name = row[1] if row else "CLI User"
+        token = issue_session(
+            session,
+            user_id=user_id,
+            auth_method="dev",
+            user_agent=_user_agent(request),
+            client_ip=client_ip(request),
+        )
 
-    cookie_val = sign_session(user_id)
-    max_age = _session_max_age()
-    response.set_cookie(
-        key=SESSION_COOKIE_NAME,
-        value=cookie_val,
-        httponly=True,
-        secure=_session_cookie_secure(request),
-        samesite="lax",
-        path="/",
-        max_age=max_age,
-    )
+    _set_session_cookie(response, request, token)
     logger.info(
         "Dev session login completed",
         extra={
@@ -255,16 +641,6 @@ async def dev_login(request: Request, response: Response) -> dict:
     }
 
 
-@router.get("/callback")
-async def auth_callback(
-    request: Request,
-    response: Response,
-    code: str | None = None,
-):
-    """OAuth2 authorization code callback at /v1/auth/callback."""
-    return await handle_oauth_callback(request, response, code)
-
-
 class LoginRequest(BaseModel):
     id_token: str
 
@@ -272,38 +648,32 @@ class LoginRequest(BaseModel):
 @router.post("/login")
 async def login(body: LoginRequest, request: Request, response: Response) -> dict:
     """
-    Verify Cognito ID token, upsert user in DB, and set a signed session cookie.
+    Verify a Cognito ID token, upsert the user in the DB, and set a session cookie.
+    Kept for token-based clients; the login page uses ``/login/password`` and
+    ``/google/start``.
     """
-    claims = verify_cognito_id_token(body.id_token)
+    require_same_origin(request)
+    await asyncio.to_thread(enforce_auth_rate_limit, request, action="token_login")
+    claims = await asyncio.to_thread(verify_cognito_id_token, body.id_token)
     if not claims:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired ID token",
         )
 
-    # Upsert user via Cognito identity
-    with db_uow() as session:
-        user_id: UUID = get_or_create_user_by_cognito(
-            session,
-            sub=claims.sub,
-            email=claims.email,
-            issuer=claims.iss,
+    try:
+        user_id, token = await asyncio.to_thread(
+            _establish_session, request, claims, auth_method="cognito_token"
         )
+    except UserEmailConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_ACCOUNT_EXISTS) from exc
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=_ACCOUNT_DISABLED
+        ) from exc
 
-    # Set cookie
-    cookie_val = sign_session(user_id)
-    max_age = _session_max_age()
-    response.set_cookie(
-        key=SESSION_COOKIE_NAME,
-        value=cookie_val,
-        httponly=True,
-        secure=_session_cookie_secure(request),
-        samesite="lax",
-        path="/",
-        max_age=max_age,
-    )
-
-    logger.info("User logged in via Cognito", extra={"extra_fields": {"user_id": str(user_id)}})
+    _set_session_cookie(response, request, token)
+    audit_event(request, "auth.login.succeeded", auth_method="cognito_token", user_id=user_id)
 
     return {
         "user_id": str(user_id),
@@ -312,13 +682,82 @@ async def login(body: LoginRequest, request: Request, response: Response) -> dic
     }
 
 
+def _cognito_logout_url(request: Request) -> str | None:
+    """Hosted-UI logout URL that also clears Cognito's own cookie (Google users)."""
+    domain = get_cognito_domain()
+    client_id = (os.getenv("COGNITO_CLIENT_ID") or "").strip()
+    if not domain or not client_id:
+        return None
+    if not domain.startswith("http"):
+        domain = "https://" + domain
+    configured = (os.getenv("COGNITO_LOGOUT_REDIRECT_URI") or "").strip()
+    logout_uri = configured or f"{str(request.base_url).rstrip('/')}/login"
+    return f"{domain}/logout?client_id={quote(client_id, safe='')}&logout_uri={quote(logout_uri, safe='')}"
+
+
 @router.post("/logout")
-async def logout(response: Response) -> dict:
-    """
-    Clear the session cookie (local logout).
-    """
-    response.delete_cookie(SESSION_COOKIE_NAME, path="/")
+async def logout(request: Request, response: Response) -> dict:
+    """Revoke the server-side session and clear the cookie."""
+    require_same_origin(request)
+    method = await asyncio.to_thread(revoke_session, session_cookie_value(request))
+    _clear_session_cookies(response)
+    if method:
+        audit_event(request, "auth.logout", auth_method=method)
+    return {
+        "ok": True,
+        # Only federated (Google) sessions have a Cognito cookie worth clearing.
+        "cognito_logout_url": _cognito_logout_url(request) if method == "google" else None,
+    }
+
+
+def _list_sessions(user_id: UUID, current_token: str | None) -> list[dict]:
+    with db_uow(commit_on_success=False) as session:
+        return list_user_sessions(session, user_id, current_token=current_token)
+
+
+@router.get("/sessions")
+async def list_sessions(request: Request, user_id: UUID = Depends(get_session_user_id)) -> dict:
+    """Signed-in browser sessions of the current user (no tokens or IPs are returned)."""
+    sessions = await asyncio.to_thread(_list_sessions, user_id, session_cookie_value(request))
+    return {"sessions": sessions}
+
+
+def _revoke_one(user_id: UUID, session_id: UUID) -> bool:
+    with db_uow() as session:
+        return revoke_user_session_by_id(session, user_id, session_id)
+
+
+@router.delete("/sessions/{session_id}")
+async def revoke_one_session(
+    session_id: UUID, request: Request, user_id: UUID = Depends(get_session_user_id)
+) -> dict:
+    """Sign out one of the user's own sessions (another device, or this one)."""
+    require_same_origin(request)
+    if not await asyncio.to_thread(_revoke_one, user_id, session_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=error_detail("session_not_found", "That session is no longer active."),
+        )
+    audit_event(request, "auth.session.revoked", user_id=user_id, scope="one")
     return {"ok": True}
+
+
+def _revoke_others(user_id: UUID, keep_token: str | None) -> int:
+    with db_uow() as session:
+        return revoke_user_sessions(
+            session, user_id, reason="signed_out_elsewhere", keep_token=keep_token
+        )
+
+
+@router.post("/sessions/revoke-others")
+async def revoke_other_sessions(
+    request: Request, user_id: UUID = Depends(get_session_user_id)
+) -> dict:
+    """Sign out every other device, keeping the current session."""
+    require_same_origin(request)
+    revoked = await asyncio.to_thread(_revoke_others, user_id, session_cookie_value(request))
+    audit_event(request, "auth.session.revoked", user_id=user_id, scope="others", count=revoked)
+    return {"ok": True, "revoked": revoked}
 
 
 @router.get("/me")
@@ -340,4 +779,3 @@ async def me(user_id: UUID = Depends(get_session_user_id)) -> dict:
         "email": email,
         "display_name": display_name,
     }
-

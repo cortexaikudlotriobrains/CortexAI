@@ -96,6 +96,7 @@ def test_reconciliation_cycle_processes_each_active_run_and_isolates_failures(mo
 
 
 def test_postgres_lifespan_runs_work_reconciliation_without_a_browser(monkeypatch):
+    from server import auth_schema_preflight
     from server.billing import schema_preflight as billing_schema_preflight
     from server.work import reconciler, schema_preflight as work_schema_preflight
 
@@ -108,6 +109,7 @@ def test_postgres_lifespan_runs_work_reconciliation_without_a_browser(monkeypatc
     monkeypatch.setenv("ENABLE_ATTACHMENTS_CLEANUP_WORKER", "false")
     monkeypatch.setenv("ENABLE_BILLING_RESERVATION_CLEANUP_WORKER", "false")
     monkeypatch.setattr(billing_schema_preflight, "validate_billing_schema", lambda: None)
+    monkeypatch.setattr(auth_schema_preflight, "validate_auth_session_schema", lambda: None)
     monkeypatch.setattr(work_schema_preflight, "validate_work_schema", lambda: None)
     monkeypatch.setattr(
         reconciler,

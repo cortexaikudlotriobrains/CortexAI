@@ -328,7 +328,33 @@ describe("AccountMenu", () => {
     expect(screen.queryByRole("menuitem", { name: "Log off" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Sign in" })).not.toBeInTheDocument();
   });
+
+  it("links signed-in users to their signed-in devices", async () => {
+    const user = userEvent.setup();
+    const onSecurity = vi.fn();
+    render(<AccountMenu authEnabled loggedIn onLogout={vi.fn()} onSecurity={onSecurity} />);
+
+    await user.click(screen.getByRole("button", { name: "Account" }));
+    await user.click(screen.getByRole("menuitem", { name: "Signed-in devices" }));
+    expect(onSecurity).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides signed-in devices from guests", async () => {
+    const user = userEvent.setup();
+    render(
+      <AccountMenu
+        authEnabled
+        loggedIn={false}
+        onLogin={vi.fn()}
+        onLogout={vi.fn()}
+        onSecurity={vi.fn()}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Guest account" }));
+    expect(screen.queryByRole("menuitem", { name: "Signed-in devices" })).not.toBeInTheDocument();
+  });
 });
+
 
 function setRuntimeConfig(value: Record<string, unknown>): void {
   (

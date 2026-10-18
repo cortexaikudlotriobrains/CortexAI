@@ -567,6 +567,10 @@ export interface CognitoConfig {
   redirectUri?: string;
   logout_url?: string;
   logoutUrl?: string;
+  /** Which sign-in methods the login page offers (absent on older backends = enabled). */
+  passwordLoginEnabled?: boolean;
+  signupEnabled?: boolean;
+  googleLoginEnabled?: boolean;
 }
 
 export interface AuthenticatedUser {

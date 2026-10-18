@@ -110,6 +110,7 @@ def test_postgres_startup_fails_before_serving_when_billing_schema_is_missing(
 
 
 def test_postgres_startup_runs_one_reservation_cleanup_cycle(monkeypatch):
+    from server import auth_schema_preflight
     from server.billing import reservation_cleanup, schema_preflight
 
     cleanup_calls: list[int] = []
@@ -120,6 +121,7 @@ def test_postgres_startup_runs_one_reservation_cleanup_cycle(monkeypatch):
     monkeypatch.setenv("BILLING_RESERVATION_STALE_AFTER_SECONDS", "1800")
     monkeypatch.setenv("BILLING_RESERVATION_HEARTBEAT_INTERVAL_SECONDS", "3600")
     monkeypatch.setattr(schema_preflight, "validate_billing_schema", lambda: None)
+    monkeypatch.setattr(auth_schema_preflight, "validate_auth_session_schema", lambda: None)
     monkeypatch.setattr(
         reservation_cleanup,
         "run_cleanup_cycle",
