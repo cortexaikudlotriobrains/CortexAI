@@ -1,6 +1,18 @@
 import { get, post } from "./client";
 import type { CortexAnalysisRun } from "../types";
 
+export interface AnalysisState {
+  state: "idle" | "waiting" | "queued" | "processing" | "complete" | "failed";
+  automatic: boolean;
+  analysisId?: string | null;
+  progressStage?: "comparing" | "reading" | "synthesizing" | "validating" | null;
+  errorCode?: string | null;
+  estimatedAiCredits: number | null;
+}
+export function fetchAnalysisState(group: string, signal?: AbortSignal) {
+  return get<AnalysisState>(`/v1/compare/${encodeURIComponent(group)}/analysis-state`, signal);
+}
+
 export async function createCortexAnalysis(
   requestGroupId: string,
   signal?: AbortSignal,

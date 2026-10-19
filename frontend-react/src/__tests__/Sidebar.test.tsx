@@ -45,14 +45,14 @@ describe("Sidebar", () => {
       true,
     );
 
-    await user.click(screen.getByRole("button", { name: "Compare" }));
+    await user.click(screen.getByRole("button", { name: "Analyze" }));
     expect(useChatStore.getState().mode).toBe("compare");
 
     await user.click(screen.getByRole("button", { name: "Filter chats" }));
     expect(screen.getByRole("textbox", { name: "Search chats" })).toHaveFocus();
     await user.type(screen.getByRole("textbox", { name: "Search chats" }), "vendors");
     expect(screen.queryByText("Quarterly planning")).not.toBeInTheDocument();
-    const compareThread = screen.getByRole("button", { name: /Compare vendors\. Compare,/ });
+    const compareThread = screen.getByRole("button", { name: /Compare vendors\. Analyze,/ });
     expect(compareThread).toBeInTheDocument();
 
     await user.click(compareThread);
@@ -172,7 +172,7 @@ describe("Sidebar", () => {
     );
     expect(screen.queryByRole("textbox", { name: "Search chats" })).toBeNull();
 
-    await user.click(screen.getByRole("button", { name: "Compare" }));
+    await user.click(screen.getByRole("button", { name: "Analyze" }));
     expect(useChatStore.getState().mode).toBe("compare");
 
     await user.click(screen.getByRole("button", { name: "New chat" }));
@@ -224,7 +224,7 @@ describe("Sidebar", () => {
     expect(screen.getByRole("button", { name: "Usage" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("button", { name: "Ask" })).not.toHaveAttribute("aria-current");
 
-    await user.click(screen.getByRole("button", { name: "Compare" }));
+    await user.click(screen.getByRole("button", { name: "Analyze" }));
 
     expect(useChatStore.getState().mode).toBe("compare");
     expect(onNavigateChat).toHaveBeenCalledWith("compare");
@@ -311,7 +311,7 @@ describe("Sidebar", () => {
     expect(screen.queryByRole("textbox", { name: "Search chats" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "New chat" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Ask" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Compare" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Analyze" })).toBeDisabled();
   });
 
   it("deletes every persisted entry in a history thread", async () => {

@@ -100,7 +100,7 @@ This map is the quick "where do I change X?" reference for the current API-first
 - B2C billing/Cortex/pricing/generation/cache, provider-tool line items, and direct-upload lifecycle persistence plus transaction-neutral repository operations: `db/migrations/20260718_add_b2c_billing_foundation.sql`, `db/migrations/20260727_add_cortex_analysis_runs.sql`, `db/migrations/20260729_add_unified_ai_credits.sql`, `db/migrations/20260730_add_usage_reservation_activity.sql`, `db/migrations/20260731_add_model_pricing_audit.sql`, `db/migrations/20260802_add_cortex_analysis_attribution.sql`, `db/migrations/20260804_add_generation_budget_audit.sql`, `db/migrations/20260807_add_cache_aware_credit_accounting.sql`, `db/migrations/20260811_add_direct_s3_attachment_upload.sql`, `db/migrations/20260927_add_tool_credit_transaction_item.sql`, `db/billing_repository.py`, `db/repository.py`, `db/tables.py`
 - Credit arithmetic, schema preflight, lifecycle, entitlement, supplemental metering, Stripe, legacy/direct file routes and S3 policy normalization, and opt-in PostgreSQL concurrency coverage: `tests/test_credit_calculator.py`, `tests/test_billing_schema_preflight.py`, `tests/test_billing_repository.py`, `tests/test_billing_entitlements.py`, `tests/test_billing_metering.py`, `tests/test_stripe_billing.py`, `tests/test_stripe_webhooks.py`, `tests/test_baseline_safety_rails.py`, `tests/test_fastapi_contract_and_guardrails.py`, `tests/test_files_routes.py`, `tests/test_files_service.py`, `tests/test_object_storage.py`, `tests/test_billing_postgres_integration.py`
 - Persistence service: `server/persistence.py`
-- Cortex Analysis source normalization, anonymized GPT-5.4-mini call, structured validation, and source fingerprinting: `server/cortex_analysis.py`
+- Cortex Analysis source normalization, anonymized GPT-5.4-mini call, provider/model-name restoration for full and shorthand attribution labels, structured validation, and source fingerprinting: `server/cortex_analysis.py`
 - Cortex Analysis persistence/revision and attributed-result migrations: `db/migrations/20260727_add_cortex_analysis_runs.sql`, `db/migrations/20260802_add_cortex_analysis_attribution.sql`
 - Provider cache affinity and stable prompt ordering: `orchestrator/cache_context.py`, `orchestrator/core.py`, and adapters under `api/`; persistent research reuse: `tools/web/persistent_research_store.py`; deterministic optimizer/Cortex reuse: `utils/prompt_optimizer.py`, `server/routes/optimize.py`, `server/routes/cortex_analysis.py`; context compaction/reusable summaries: `server/utils.py`, `server/persistence.py`; SHA-deduplicated extraction and query-relevant chunk reuse: `server/files_service.py`, `server/attachments.py`
 - Usage reporting, including cache token/credit, reservation, reasoning, research, and measured reuse metrics: `server/usage_reporting.py`; per-request research/optimizer/Cortex reuse audit writes: `server/persistence.py`, `server/routes/optimize.py`, `server/routes/cortex_analysis.py`, and `db/repository.py`
@@ -302,3 +302,56 @@ Last updated: 2026-08-20
 - `server/billing/subscription_service.py`: guarded local > enabled valid Stripe > valid grant > Free; existing entitlement, Work and credit services consume the catalogue unchanged.
 - `frontend-react/src/pages/PricingPage.tsx`, `BillingPage.tsx`: granted current-plan display, CortexAI-provided access and usage-reset wording.
 - `docs/runbooks/subscription-grants.md`: operator commands, coordinated deployment and audit policy.
+
+## Analyze redesign ownership
+
+- `server/analysis_jobs.py`: automatic/manual synthesis, wallet lifecycle,
+  durable authorization and startup queue recovery.
+- `server/analysis_evidence.py`: versioned schema, exact evidence validation,
+  context bounds and safe attributed source metadata.
+- `db/analysis_repository.py`, `20261016_add_compare_synthesis.sql`: atomic
+  owned job transitions and additive provenance snapshots.
+- `frontend-react/src/components/results/AnalyzeTurn.tsx`: responsive
+  Analysis/Responses/Sources state, immutable evidence navigation and real cards.
+- `AnalysisSources.tsx` / `.module.css`: screenshot source cards, Cited for
+  passages, provider/revision identity, original-source links and model-answer
+  navigation. `analysis/analysisSources.ts` merges safe source metadata and
+  immutable response snapshots without mixing per-model citation numbering.
+  `markdown/sourcePassages.ts` uses the existing unified/remark Markdown stack
+  to locate explicit citations/links outside code, definitions and bibliographies.
+  It parses passages only in the Sources view; no provider calls or storage changes.
+- `CompareResponses.tsx`: original model-response grid, aggregate summary,
+  equal-height desktop/tablet cards with independent scrolling and horizontal
+  sticky phone provider tabs. It reuses the unchanged `ResultsSection.module.css`;
+  Cortex Analysis is the default view on entry/re-entry to Analyze; Model responses retains its separate original layout and selected model.
+- `CortexAnalysisZone.tsx`: takeaway, quotations, differences, limits, saved runs
+  and shared `AnalysisPassages` attribution/context controls. Its CSS module and
+  `AnalyzeTurn.module.css` use the existing Cortex theme tokens; shared shell,
+  branding, provider icons and composer styling retain their original theme.
+  `AnalysisModelName` reuses provider logos throughout the result views. The
+  result-only lavender takeaway, editorial overview, difference disclosure,
+  quote grid and source-count strip follow the supplied screenshots. The shared
+  `CortexIcon.tsx` adds layers/sparkles/split/book-open glyphs for these results
+  without replacing existing glyphs or global styling.
+- Cortex Analysis loading uses a live model-status ledger and three-step
+  workflow in `CortexAnalysisZone.tsx`, fed by response activity and read-only
+  `AnalyzeTurn.tsx` polling. `server/analysis_jobs.py` persists `progress_stage`
+  on the owned intent; `server/cortex_analysis.py` reports payload preparation,
+  synthesis and quote-validation milestones. The status DTO exposes nullable
+  `progressStage`. No demo timers, extra provider calls or paid view changes.
+- `hooks/useAnalyzeEstimate.ts`, `config/productLabels.ts`,
+  `store/responseUiStore.ts`: combined-estimate Send authorization, mode naming
+  and local votes. The composer estimate footer and above-tab contributor/status
+  strip are omitted; provider identity remains in the analysis and response cards.
+
+See [Ask and Compare credit efficiency](runbooks/inference-credit-efficiency.md) for
+Claude cache activation, rollback and provider-reported usage verification.
+
+- Selective Compare history: `orchestrator/compare_history.py` owns conservative
+  per-model answer selection and provenance removal; `server/schemas/requests.py`
+  validates exact `response_variants`; `server/utils.py` drops provenance on
+  truncation/compaction; `useChat.ts` carries identities for live/restored turns
+  and regeneration. `orchestrator/core.py` and `multi_orchestrator.py` apply the
+  same selector before provider calls. Claude cache/search payloads and usage
+  telemetry stay in `api/claude_client.py`; rollout flags are in
+  `config/cache_optimization.py`. Operations: `docs/runbooks/inference-credit-efficiency.md`.

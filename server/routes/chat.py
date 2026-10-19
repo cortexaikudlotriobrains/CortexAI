@@ -486,7 +486,7 @@ def _build_user_context(context_req):
     history = []
     if context_req.conversation_history:
         history = [
-            {"role": item.role, "content": item.content}
+            item.model_dump(exclude_none=True)
             for item in context_req.conversation_history
         ]
 
@@ -1015,6 +1015,12 @@ async def chat(
             )
         except Exception:
             logger.exception("Chat persistence failed in DB mode")
+
+    if regeneration_context is not None and API_DB_ENABLED and persistence_resolution is not None:
+        from server import analysis_jobs
+        await asyncio.shield(analysis_jobs.track_task(asyncio.create_task(analysis_jobs.continue_initial(
+            persistence_resolution.user_id, regeneration_context.request_group_id,
+        ))))
 
     dto = ChatResponseDTO.from_unified_response(
         response,
@@ -1558,6 +1564,12 @@ async def chat_stream(
                     )
                 except Exception:
                     logger.exception("Chat stream persistence failed in DB mode")
+
+            if regeneration_context is not None and API_DB_ENABLED and persistence_resolution is not None:
+                from server import analysis_jobs
+                analysis_jobs.track_task(asyncio.create_task(analysis_jobs.continue_initial(
+                    persistence_resolution.user_id, regeneration_context.request_group_id,
+                )))
 
             dto = ChatResponseDTO.from_unified_response(
                 response,

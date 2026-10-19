@@ -1,3 +1,6 @@
+import asyncio
+from threading import Event
+
 from fastapi.testclient import TestClient
 import pytest
 from sqlalchemy import create_engine, text
@@ -140,3 +143,56 @@ def test_postgres_startup_runs_one_reservation_cleanup_cycle(monkeypatch):
         pass
 
     assert cleanup_calls == [1800]
+
+
+@pytest.mark.parametrize("auth_interval", [0, 0.01])
+def test_postgres_lifespan_preserves_synthesis_and_auth_workers(monkeypatch, auth_interval):
+    from server import analysis_jobs, auth_maintenance, auth_schema_preflight
+    from server.billing import schema_preflight
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://unused:unused@localhost/unused")
+    monkeypatch.setenv("BILLING_ENABLED", "false")
+    monkeypatch.setenv("SESSION_SECRET", "unit-test-secret-unit-test-secret-1234")
+    monkeypatch.setenv("CORTEX_WORK_ENABLED", "false")
+    monkeypatch.setenv("ENABLE_ATTACHMENTS_CLEANUP_WORKER", "false")
+    monkeypatch.setenv("ENABLE_BILLING_RESERVATION_CLEANUP_WORKER", "false")
+    monkeypatch.setattr(schema_preflight, "validate_billing_schema", lambda: None)
+    monkeypatch.setattr(auth_schema_preflight, "validate_auth_session_schema", lambda: None)
+    monkeypatch.setattr(auth_maintenance, "maintenance_interval_seconds", lambda: auth_interval)
+
+    synthesis_started = Event()
+    synthesis_stopped = Event()
+    maintenance_ran = Event()
+    worker_tasks = []
+
+    async def synthesis_worker(stop):
+        worker_tasks.append(asyncio.current_task())
+        synthesis_started.set()
+        await stop.wait()
+        synthesis_stopped.set()
+
+    def maintenance_cycle():
+        maintenance_ran.set()
+        return {"sessions_deleted": 0, "rate_limit_windows_deleted": 0}
+
+    async def active_auth_workers():
+        return [
+            task for task in asyncio.all_tasks()
+            if task.get_name() == "auth-maintenance-worker"
+        ]
+
+    monkeypatch.setattr(analysis_jobs, "worker", synthesis_worker)
+    monkeypatch.setattr(auth_maintenance, "run_auth_maintenance_cycle", maintenance_cycle)
+
+    with TestClient(create_app()) as client:
+        assert synthesis_started.wait(timeout=2)
+        auth_tasks = client.portal.call(active_auth_workers)
+        assert len(auth_tasks) == int(bool(auth_interval))
+        assert not worker_tasks[0].done()
+        if auth_interval:
+            assert maintenance_ran.wait(timeout=2)
+        else:
+            assert not maintenance_ran.is_set()
+
+    assert synthesis_stopped.is_set()
+    assert all(task.done() and not task.cancelled() for task in worker_tasks + auth_tasks)

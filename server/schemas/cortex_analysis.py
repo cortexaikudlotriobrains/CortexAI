@@ -1,6 +1,7 @@
 """API contracts for persisted Cortex Analysis runs."""
 
 from typing import Literal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -11,6 +12,23 @@ class CortexAnalysisSourceDTO(BaseModel):
     request_id: str = Field(alias="requestId")
     response_version: int = Field(alias="responseVersion", ge=1)
     response_name: str = Field(alias="responseName")
+    provider: str = ""
+    model: str = ""
+    content: str | None = None
+    web_sources: list[dict[str, Any]] = Field(default_factory=list, alias="webSources")
+
+
+class CortexAnalysisStateDTO(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    state: Literal["idle", "waiting", "queued", "processing", "complete", "failed"]
+    automatic: bool
+    progress_stage: Literal["comparing", "reading", "synthesizing", "validating"] | None = Field(
+        default=None, alias="progressStage"
+    )
+    analysis_id: str | None = Field(default=None, alias="analysisId")
+    error_code: str | None = Field(default=None, alias="errorCode")
+    estimated_ai_credits: int | None = Field(default=None, alias="estimatedAiCredits", ge=0)
 
 
 class CortexAnalysisUniqueInsightDTO(BaseModel):
@@ -38,6 +56,8 @@ class CortexAnalysisRunDTO(BaseModel):
     session_id: str = Field(alias="sessionId")
     model: str
     recommended_answer: str = Field(alias="recommendedAnswer")
+    structured_result: dict[str, Any] | None = Field(default=None, alias="structuredResult")
+    context_snapshot: list[dict[str, str]] = Field(default_factory=list, alias="contextSnapshot")
     agreements: list[str] = Field(default_factory=list)
     disagreements: list[CortexAnalysisDisagreementDTO] = Field(default_factory=list)
     disagreement_note: str | None = Field(default=None, alias="disagreementNote")

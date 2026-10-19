@@ -67,8 +67,8 @@ test("desktop and iPad empty Ask, Compare, and Work composers share one vertical
         const askCenter = await verticalCenter(chatComposer);
 
         const modeNavigation = page.getByRole("navigation", { name: "Workspace mode" });
-        await modeNavigation.getByRole("button", { name: "Compare", exact: true }).click();
-        await expect(page.getByText("Hi, what would you like to compare?", { exact: true })).toBeVisible();
+        await modeNavigation.getByRole("button", { name: "Analyze", exact: true }).click();
+        await expect(page.getByText("Hi, what would you like to analyze?", { exact: true })).toBeVisible();
         const compareCenter = await verticalCenter(chatComposer);
 
         await modeNavigation.getByRole("button", { name: "Work", exact: true }).click();

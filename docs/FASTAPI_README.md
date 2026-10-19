@@ -1,5 +1,24 @@
 # FastAPI Integration
 
+Ask/Compare credit efficiency is documented in
+[the operational runbook](runbooks/inference-credit-efficiency.md). Claude cache
+activation requires its flag and `CACHE_KEY_SECRET`; filtered Claude search has
+an independent rollback flag. No pricing, model or reasoning change is implied.
+
+Compare clients may attach `response_variants` to an assistant item in
+`context.conversation_history`: an array of one to three `{provider, model,
+content}` objects. Their contents joined with two newlines must exactly equal
+the parent `content`; a mismatch, non-assistant parent, or invalid array returns
+HTTP 422 before inference. The React Compare client supplies provenance for
+completed multi-model turns. Streaming, non-streaming and Compare regeneration
+select exact own-model prior answers on ordinary follow-ups. Cross-answer or
+ambiguous references and missing exact target matches retain the complete
+shared answer. Legacy items without provenance keep their existing behavior.
+Metadata is stripped before provider calls; truncation drops provenance so it
+cannot restore text outside the existing 10-message/20,000-character bound.
+`COMPARE_SELECTIVE_HISTORY_ENABLED=false` restores shared history. Estimates
+remain conservative over full shared input; settlement uses actual token usage.
+
 ## Quick Start
 
 1. Install dependencies:
@@ -64,6 +83,7 @@ FRONTEND_DIR=frontend-react/dist
 # PROMPT_OPTIMIZER_TEMPERATURE=0.2
 # On-demand Compare synthesis model (requires OPENAI_API_KEY)
 # CORTEX_ANALYSIS_MODEL=gpt-5.4-mini
+# CORTEX_ANALYSIS_MAX_OUTPUT_TOKENS=4000 # default 4000; 1800..4000
 # Ask/Compare provider-native web search
 # NATIVE_WEB_SEARCH_MODE=enabled
 # NATIVE_WEB_SEARCH_PROVIDERS=openai,claude,gemini,grok,deepseek
@@ -84,7 +104,7 @@ FRONTEND_DIR=frontend-react/dist
 python run_app.py
 ```
 
-This starts FastAPI on `http://127.0.0.1:8000` and the React/Vite frontend on `http://127.0.0.1:5173`. The runner starts the API with `SERVE_FRONTEND=false`, launches `npm run --prefix frontend-react dev`, and sets Vite's proxy target plus `FRONTEND_RUNTIME_API_BASE` from the selected API host/port.
+This starts FastAPI on `http://127.0.0.1:8000` and the React/Vite frontend on `http://127.0.0.1:5174`. The runner starts the API with `SERVE_FRONTEND=false`, launches `npm run --prefix frontend-react dev`, and sets Vite's proxy target plus `FRONTEND_RUNTIME_API_BASE` from the selected API host/port. Standalone `npm run --prefix frontend-react dev` uses Vite's configured port `5173`.
 
 For IntelliJ/PyCharm local plan testing, use the project virtual environment, set the script to `$ProjectFileDir$/run_app.py`, the working directory to `$ProjectFileDir$`, and choose one Program arguments value: `--subscription-plan free`, `plus`, `pro`, or `unrestricted`. The option forces local mode, disables Stripe, enables dev-session bootstrap, and is rejected for non-loopback hosts. `unrestricted` uses the normal entitlement/metering path with Pro access and very high allowances; global attachment/provider safety constraints still apply. Omit the option to use normal `.env`/Stripe state.
 
@@ -121,13 +141,14 @@ If `FRONTEND_DIR` is unset, `server/app.py` serves `frontend-react/dist`. Set th
 - React attachment UX reads `directAttachmentUploads` and `legacyAttachmentUploads` from `/runtime-config.js`, which mirror the backend rollout flags. In direct mode it validates the complete selection locally from server entitlements, renders immediate per-file Preparing/Uploading/Processing/Ready state, authorizes metadata through `POST /v1/files/upload-intents`, sends bytes to S3 with header-free `XMLHttpRequest` forms, and calls `POST /v1/files/{file_id}/complete` only after S3 succeeds. Two transfers run concurrently; failures and retries are per-file, polling is bounded, removal aborts and deletes, and Ask/Compare Send is blocked until all selected files are Cortex-verified `ready`. With direct mode off, the same queue UI temporarily uses multipart `POST /v1/files/upload-batch` while `ATTACHMENTS_LEGACY_PROXY_UPLOAD_ENABLED=true`. Upload/storage remains free.
 - React Ask and Compare omit a Web toggle and submit `routing.web_mode=auto`; prompt intent or an API-level override controls search. Compare streams `/v1/compare/stream` events into per-model response columns.
 - React Ask always loads active selectable models from authenticated `/v1/model-options`, independently of `ENABLE_MODELS_CATALOG`, and waits for its response plus `/v1/entitlements` before initializing its manual model. Turning Smart routing off restores the chat-scoped manual choice or the saved Smart-off model. When the saved model is unset, unavailable, or locked, the plan fallback from registry `ui_defaults.ask_by_plan` applies: Free uses `openai:gpt-6-luna`, Plus uses `claude:claude-sonnet-5-5`, and Pro uses `openai:gpt-6.1-sol`. Valid existing/manual selections remain unchanged.
-- React Compare keeps every selected response visible in a responsive grid without horizontal response scrolling on desktop and tablet widths: three columns on wide desktop, two at tablet widths, and stacked tall cards at the app's tablet/mobile shell breakpoint. Phone-sized mobile uses a segmented model switcher, shows one selected response card at a time in natural page flow, and elevates the stuck switcher into a frosted provider-tinted bar without changing model-pill horizontal positions.
+- React Analyze opens Cortex Analysis by default, including when returning from Ask, and retains separate Model responses and Sources views. It uses the original response-card presentation: equal-height desktop columns (three models in one row above 1180px; two columns at 901–1180px), stacked tall cards at 761–900px, and the original horizontal provider tabs at 760px and below. Desktop/tablet response bodies scroll independently; phone provider tabs select one natural-height answer, stick during reading and support keyboard navigation. Original response metadata/actions, code/table containment and composer clearance remain intact. The original Cortex fonts, shell palette, logos, sidebar preference and composer are preserved; the shared shell keeps its 900px mobile breakpoint.
+- Analyze model bylines and passage headers reuse provider logos. The contributor/status/credits strip above the result tabs is omitted. The Cortex Analysis tab/takeaway use layers, with sparkles for the synthesis header. An optional answer headline/introduction leads into the lavender takeaway (`#f1eefc` light, `#2d2845` dark), then titled consequential differences with **See both passages**, the responsive quotation grid, and the Sources link/count. This is scoped to results; the shared shell/composer and original fonts remain intact.
 - Model headers and action footers remain fixed inside each desktop/tablet Compare card while only the answer body scrolls. The transcript reserves bottom breathing room above the persistent composer so the input area does not compress the reading workspace.
 - React Compare uses the same right-aligned user-message bubble as Ask mode and keeps aggregate totals in a separate compact row. Model cards show a friendly model name with the exact API model ID, use compact icon actions, and reserve most of the column height for response content.
 - Smart composer preferences use per-user browser storage at `cortex.composerPrefs.v1`; there is no preferences HTTP API or device sync. The composer Smart button and Smart in new chats switch in More options both display the current Ask chat state. Toggling either immediately updates the chat and saves the setting for future chats; the model picker stays chat-scoped. Its subtitle stays New chats start with Smart on in both switch states, while When Smart is off carries the model name. New chats and Compare use the resolved saved model with entitlement-aware fallback, while restored sessions retain their own state. See [Smart composer preferences](SMART_COMPOSER_PREFERENCES.md).
 - React Ask and Compare use one rounded composer shell with a borderless textarea that starts at one line and auto-grows to a bounded height, attachment chips above a shared bottom toolbar, and a fixed-size send action. Ask orders Attach, Smart Ask, a sliders-style More options button, then Send; Compare orders Attach, the same options button, then Send. Ask omits the redundant Smart Ask and Manual Ask header captions from More options on desktop and mobile. More options begins with Smart in new chats and When Smart is off in Ask; Compare retains its caption and shows only When Smart is off. Improve prompt and Reasoning follow those preference rows. Desktop retains the descriptive five-row reasoning control; mobile uses Auto · Low · Med · High · Max segments. Desktop/tablet anchor it above the sliders trigger when space permits; phones at 760px or less use a modal bottom sheet with a backdrop, grabber, focus trap, and drag/Escape dismissal. Enabled Improve and explicit non-Auto Reasoning appear as individually removable chips; Auto has no status chip, and narrow phones place the chip stack on its own row. Ask/Compare do not render a Web control. Mode changes use the app navigation; the composer does not duplicate the Ask/Compare switch. Compare model selectors remain in a compact options row above the textarea and scroll horizontally on narrow screens when needed.
 - The React composer shell keeps a transparent structural border to prevent layout movement and uses soft elevation rather than a visible rectangular outline. Textarea focus suppresses the browser outline and increases the shell shadow on desktop and mobile.
-- Empty React Ask and Compare workspaces keep their input surfaces on one desktop/tablet vertical center line, with only a small mode-specific greeting above the composer. Mobile places that greeting one-quarter down from the viewport top while retaining the bottom-sheet composer. The greeting disappears and the composer docks after the first turn.
+- Empty React Ask keeps its greeting and centered composer. Analyze uses `Hi, what would you like to analyze?` with the original centered composer and existing controls. It omits the Models + analysis estimate footer while retaining combined-estimate Send authorization. Both modes dock the shared composer after the first turn.
 - The empty React Work workspace keeps its differently shaped goal surface on the same desktop/tablet center line while retaining the `Start a task` introduction and editable example prompts above it. Mobile keeps the compact Work introduction, aligns `Start a task` to the same one-quarter viewport line as Ask and Compare, and docks the goal composer immediately above the fixed navigation.
 - On mobile answer screens, the follow-up composer rests as a docked pill above the fixed Ask/Compare/History navigation. Tapping the pill opens the bottom-sheet composer, focuses its textarea, and places the cursor at the end of any draft so typing can begin without a second tap. Attachment chips grow upward without narrowing the textarea or displacing the send action. Answer transcripts reserve enough bottom scroll clearance for response copy, regenerate, and feedback actions to remain reachable above the dock.
 - Mobile uses a persistent square-pen header action to start a new session from Ask, Compare, or History. The action cancels active generation, clears the current thread, returns to chat, and preserves the selected mode; the History panel does not render a separate New chat button.
@@ -333,6 +354,9 @@ multi-model identity fails closed before the task is sent or settled.
 - `GET /v1/auth/sessions`, `DELETE /v1/auth/sessions/{session_id}`, `POST /v1/auth/sessions/revoke-others`
 
 The React app signs users in on its own `/login` page; the contract, error codes, Cognito app-client requirements and security model are in [auth login](runbooks/auth-login.md). Browser sessions are opaque server-side tokens (`auth_sessions`), not signed user IDs, and `SESSION_SECRET` (>= 32 characters) is required in production. On HTTPS the cookie is `__Host-cortex_session`. Credentialed CORS is limited to trusted origins (`AUTH_ALLOWED_ORIGINS`, the `COGNITO_SUCCESS_REDIRECT_URI` origin, loopback outside production); other origins get non-credentialed CORS.
+
+Trusted credentialed CORS responses reflect the exact browser origin and include
+`Vary: Origin`, including the first login request before a session cookie exists.
 
 ### Direct attachment upload contract
 
@@ -761,6 +785,7 @@ Rules:
 - Browser Ask and Compare have no Web toggle and submit `routing.web_mode=auto`. A prompt can explicitly request search or say “without browsing”; API clients can send `required|off` directly.
 - A target may provide its own `generation` object; it overrides the shared Compare generation value for that target only.
 - Each Claude target independently receives only the thinking, effort, and temperature fields supported by that model generation.
+- For required search, Claude Sonnet 5.5, Opus 5.5, Fable 5.1, and Mythos 5.1 use `tool_choice=auto` plus an explicit bounded search instruction because they reject forced tool choice. Compatible basic-search requests retain supported forced search; filtered requests use auto choice with the required-search instruction. The same rule applies to buffered and streamed Ask/Compare; only actual provider-reported operations are charged. Optional/disabled search and rollout controls are unchanged. See [provider-native search](PROVIDER_NATIVE_WEB_SEARCH.md).
 
 Subscription enforcement:
 - The effective plan, model billing classes, feature access, and meter quantities are resolved server-side; client-supplied billing identifiers are ignored.
@@ -836,38 +861,101 @@ Notes:
 
 ### Cortex Analysis API
 
-`POST /v1/compare/{request_group_id}/analysis`:
+Cortex Analysis brings the selected model answers together in **Analyze**, the
+browser display label for the existing internal `compare` mode. The browser
+shows a combined AI-credit estimate before Send and submits
+`automatic_analysis: true`. Send authorizes the selected model answers plus one
+initial synthesis once at least two answers succeed. Existing API clients keep
+their response-only behavior when this additive field is omitted or false.
 
-- Requires session-scoped auth, database mode, an owned Compare group, and two or three latest successful response revisions.
-- Calls `CORTEX_ANALYSIS_MODEL` (default `gpt-5.4-mini`) only after the user requests analysis.
-- Sends shuffled `Response A/B/C` content without provider/model metadata and
-  requests strict JSON-schema Structured Outputs. Before persistence, anonymous
-  response references in every user-visible field are restored to their real
-  provider-and-model display names, such as `Claude (Sonnet 4.6)`, so multiple
-  models from the same provider remain distinguishable.
-- Persists a run only after the provider result passes local schema validation.
-- Returns attributed disagreement positions as `disagreements: [{"who": "ChatGPT (…)", "text": "…"}]` plus nullable `disagreementNote`. The analysis model supplies only anonymous `Response A/B/C` labels; the server resolves `who` before persistence and response serialization.
-- Returns the saved run with `201`, including raw `aiCredits` and `creditUsageEstimated`; provider/validation failures return `502` and do not add history.
-- Verifies the Cortex persistence schema before provider work. Missing or
-  incomplete migration state returns
-  `503 cortex_analysis_schema_unavailable` without calling the model.
+- `POST /v1/billing/estimate-generation` accepts `include_analysis: true`, `include_native_search: true` and
+  bounded `context`; `estimated_max_ai_credits` includes the synthesis and
+  `analysis_ai_credits` reports its component. This is an estimate of the
+  temporary hold, not a guaranteed charge. Estimation creates no reservation.
+- Combined execution checks schema, provider/pricing readiness, plan access and
+  reserves both stages before provider work. Each stage uses the canonical
+  wallet and settles actual usage. Invalid structured output with reported
+  provider usage is still settled; provider failure without usage releases its
+  hold. Fewer than two successes releases the synthesis hold and retains the
+  initial authorization for an individual failed-response retry.
+- A server-owned producer completes an authorized stream after navigation.
+  `POST /v1/compare/{request_group_id}/cancel` explicitly stops an active stream
+  owned by the signed-in user through a shared cancellation flag. Normal view changes do
+  not invoke cancellation. The queue worker resumes only persisted, authorized
+  intents; it never creates an intent from a history read. Interrupted provider
+  calls with unknown outcomes become a failed, explicitly retryable analysis
+  after 15 minutes, rather than being automatically purchased again.
+- `POST /v1/compare/{request_group_id}/analysis` creates a cost-disclosed manual
+  retry, update, or legacy analysis. Automatic-intent duplicates reuse the saved result; legacy manual
+  reuse honors `CORTEX_ANALYSIS_REUSE_ENABLED`. Reuse keys include model/policy/context/revisions; `?regenerate=true` explicitly requests another paid
+  run. A concurrent run returns `409 analysis_in_progress`. Successful results
+  return `201`; invalid/failed synthesis returns `502 cortex_analysis_failed`.
+- `GET /v1/compare/{request_group_id}/analysis-state` returns read-only state
+  (`idle|waiting|queued|processing|complete|failed`), `automatic`, `analysisId`,
+  `errorCode`, `estimatedAiCredits` and nullable `progressStage`
+  (`comparing|reading|synthesizing|validating`, only while processing). Milestones
+  are persisted by the worker; polling may skip brief preparation stages. It
+  never reserves credits or calls a model. The response is typed by
+  `CortexAnalysisStateDTO`; terminal/legacy states return `progressStage: null`.
+- `GET /v1/compare/analysis-runs?request_group_id=<uuid>` (or `session_id`) lists
+  owned runs newest-first, including after a plan downgrade. Legacy fields stay
+  readable. V2 adds `structuredResult.schemaVersion=2`, `takeaway`, exact
+  attributed `passages`, internally supported `points`, optional consequential
+  `differences`, contextual `limitations`, and server-resolved `linkedSources`.
+  Optional nullable `headline`, `introduction` and `differences[].title` supply
+  the editorial overview and difference heading; legacy runs can omit them.
+  The overview headline flows across the available reading width at 22px
+  (20px below 768px), with natural wrapping and a compact gap above body text.
+  The single-call prompt supplies these fields under policy
+  `cortex-analysis-v2-editorial`; existing v2 evidence/revision validation and
+  token ceiling remain in force. New prose receives the same known-source URL
+  checks and anonymous-label restoration as the takeaway.
+  Names restore from the actual shuffled mapping, including shorthand attribution
+  subjects (`A suggests`, `B's estimate`) and grouped labels. Ordinary uses of
+  letters and literal evidence quotes remain unchanged. Saved runs keep their
+  original text; reads never regenerate analysis to repair a label.
+  `sourceResponses` includes immutable text/identity/revision snapshots;
+  `contextSnapshot` records at most 10 recent user/assistant messages and 12,000
+  characters. Context participates in reuse fingerprints. Existing privacy
+  redaction applies. Metadata-only persistence cannot authorize automatic
+  analysis because saved response text is unavailable.
+- The configured `CORTEX_ANALYSIS_MODEL` is `gpt-5.4-mini` by default.
+  Synthesis makes one structured call with search off, shuffled anonymous labels
+  and a bounded output ceiling. `CORTEX_ANALYSIS_MAX_OUTPUT_TOKENS` defaults to
+  4000, configurable from 1800 through 4000; missing/invalid values use 4000.
+  The ceiling and complete prompt/context/evidence payload are included in reservations.
+  Backend reloads apply the default to new authorizations; existing intents keep
+  their reserved ceiling.
+- React has Cortex Analysis (Analysis on phones), Model responses and always-visible Sources tabs. An optional
+  answer headline/explanation leads into the lavender **The takeaway** panel,
+  optional titled differences with **See both passages**, and **In their words** quotations. Confidence badges,
+  voting banners and forced uniqueness sections are absent. Sources separates
+  attached website metadata from model passages, including **No linked sources
+  supplied**. Quotes validate against the actual immutable inputs; generated
+  URLs cannot become new sources. HTTP(S) links retain query parameters and all
+  attributions; title/URL metadata does not establish claim support. The Sources
+  UI resolves **Cited for** passages from explicit numbered citations and matching
+  Markdown/reference links in the supplied response text. Source ordering is
+  scoped to each model and immutable revision, never the deduplicated source-card
+  list. **View the model’s answer** opens that revision and its cited context;
+  **Back to Sources** restores navigation. Metadata-only links and unavailable
+  old response text remain explicit. This is frontend interpretation of existing
+  `web_source_items` and `sourceResponses[].webSources` title/URL arrays; API and
+  Postman contracts, billing, and stored history remain unchanged.
+- Regenerating an answer creates a new revision and marks earlier synthesis
+  stale. **Update analysis** and retry show their estimated cost and need no
+  second confirmation. The previous analysis stays readable during an update
+  and after failure. Evidence opens the earlier full response and offers a
+  return to the latest version. Copy, code/table rendering, regeneration,
+  incomplete/error controls and local revision-keyed ratings remain available.
+  Tab/view changes and resizing create no paid work. Ratings are session-local,
+  not server-persisted.
 
-`GET /v1/compare/analysis-runs?session_id=<uuid>` or `?request_group_id=<uuid>`:
-
-- Requires one of the two filters and returns every owned run newest-first.
-- Each run includes `analysisId`, `requestGroupId`, `sessionId`, `model`, the structured result sections, `sourceResponses`, raw `aiCredits`, `creditUsageEstimated`, `createdAt`, and `isStale`. Credit usage is reconstructed through the shared billing calculator from the run's persisted model/token/cache/pricing evidence so restored cards match freshly generated cards; legacy rows without provider usage are explicitly marked estimated.
-- The structured result includes attributed `disagreements`, nullable `disagreementNote`, attributed `uniqueInsights`, qualitative confidence, and verification items. Legacy flat-string disagreement rows are restored as readable `One response` entries.
-- `sourceResponses` records the exact `requestId` and `responseVersion` inputs. A later Compare response regeneration changes the current source fingerprint, so earlier runs remain available with `isStale=true`.
-
-The browser hydrates these runs with session history after reload or History
-reopening. It shows the newest analysis by default and exposes all prior runs
-through Analysis history. Creation and regeneration are new synthesized model
-calls charged against the unified AI-credit wallet; there is no separate Cortex
-quota. The reservation includes the Compare question and successful source
-responses with a 1,800-token output ceiling. Existing per-response Compare sources and search metadata are reused
-with web search disabled for synthesis, so no second search charge is added. React formats `aiCredits` with the shared
-display-credit conversion and shows it in the analysis header. Historical runs
-remain readable after downgrade.
+Apply `db/migrations/20261016_add_compare_synthesis.sql` after the existing
+subscription/Cortex/pricing migrations and restart the API. It adds JSONB
+structured/context snapshots and `compare_analysis_intents`; existing runs are
+not rewritten. PostgreSQL startup checks the new schema. See
+[the migration runbook](runbooks/db-migrations.md) for operator-owned rollout.
 
 ## Schema Migrations
 
@@ -890,6 +978,7 @@ psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260829_add_
 psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260905_add_subscription_grants.sql
 psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20260927_add_tool_credit_transaction_item.sql
 psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20261007_add_versioned_model_rate_cards.sql
+psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20261016_add_compare_synthesis.sql
 psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/20261018_add_auth_sessions.sql
 ```
 
@@ -922,6 +1011,7 @@ GPT-5.6 and Codex-family models use the Responses API with `max_output_tokens` a
 
 ## Research Behavior
 
+- OpenAI Ask/Compare native search explicitly sends `search_context_size="medium"` whenever the Responses `web_search` tool is mounted, for buffered and streaming requests. The fixed context setting is independent of reasoning/output limits and search-call caps; it adds no request field or automatic low/high selection.
 - Ask and Compare use provider-native web search when `NATIVE_WEB_SEARCH_MODE=enabled`.
 - `routing.web_mode=auto` is the browser default. The server maps current-information or explicit search prompts to required, explicit no-browse prompts to off, and leaves ordinary prompts in provider-decides auto mode.
 - OpenAI uses Responses `web_search`; Claude uses `web_search_20250305`; Gemini uses Interactions `google_search`; Grok uses Responses `web_search`; DeepSeek receives a local search function backed by Tavily. Gemini Interactions requires `google-genai>=2.0.0`, sends `user_input`/`model_output` history steps, reads the v2 `steps` response schema, and omits the legacy `allowed_tools` selector that SDK 2.x treats as a client-function allowlist.
@@ -987,6 +1077,10 @@ Run persistence guardrail tests:
 pytest tests/test_api_persistence_guardrails.py -v
 ```
 
+Cortex Analysis credit assertions explicitly select GPT-6 Luna and GPT-5.4 Mini
+rather than inheriting the runtime default or local `.env`. Saved runs retain
+their recorded model and credit calculation after the configured model changes.
+
 Run mocked Stripe billing tests (no Stripe network calls):
 ```bash
 pytest tests/test_stripe_billing.py tests/test_billing_repository.py -q
@@ -1008,8 +1102,9 @@ Run React responsive browser tests without a backend or database:
 npm run --prefix e2e test:mobile
 npm run --prefix e2e test:desktop-ipad
 ```
-The suites start isolated Vite servers and mock frontend API contracts. Mobile tests cover phone navigation, composer clearance and growth, full visibility of narrow-screen feature controls, attachments, Compare model controls, history restoration, and stacked response cards. Desktop/iPad tests cover the desktop shell, iPad breakpoint behavior, model selection, and independent Compare response scrolling.
+The suites start isolated Vite servers and mock frontend API contracts. Mobile tests cover phone navigation, composer clearance and growth, attachments, model selection, history restoration, original sticky provider tabs, response actions and Analyze evidence. Desktop/iPad tests cover the original shell and response grid, equal-height cards with independent body scrolling, three-model rows/wrapping, Sources, keyboard tabs and light/dark themes. Analyze checks compare its fonts, palette, brand assets and navigation geometry with Ask. These fixtures validate UI behavior rather than live model quality.
 Mobile composer containment checks measure the feature row and buttons in a shared browser layout snapshot, retaining a one-pixel tolerance while avoiding stale bounds during asynchronous font swaps.
+Toolbar-order checks likewise measure all controls in one browser snapshot, so an asynchronous estimate resizing the shared sheet cannot mix positions from different frames.
 
 ---
 
@@ -1074,3 +1169,6 @@ ledger metadata records `effective_input_credit_multiplier`,
 ceiling. No endpoint or request field changes.
 
 `MODEL_PRICING_MODE=database` selects approved PostgreSQL rates after the additive 20261007 migration and `scripts/sync_model_pricing.py --seed-legacy`. Default `legacy` is the staged rollout/rollback path. Inference never fetches external prices. Existing response `estimated_cost` remains numeric for compatibility; `pricing_snapshot` now retains `rate_card_id`, `pricing_source`, `normalized_usage`, decimal-string `cost_components_usd` and `usage_calculated_provider_cost_usd`, `selection_reason`, effective interval and `calculation_version`. Ledger metadata records provider snapshots and independent credit policy/version/multipliers. Missing database pricing fails explicitly; stale approved rates continue with audit warnings. The operator CLI supplies sync/dry-run/inspection/override/approval actions; there is no pricing HTTP route. See [pricing operations](runbooks/model-pricing.md).
+
+See [Ask and Compare credit efficiency](runbooks/inference-credit-efficiency.md) for
+Claude cache activation, rollback and provider-reported usage verification.

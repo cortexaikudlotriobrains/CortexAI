@@ -52,6 +52,7 @@ class GenerationEstimateTargetDTO(BaseModel):
 class GenerationEstimateResponseDTO(BaseModel):
     targets: List[GenerationEstimateTargetDTO]
     estimated_max_ai_credits: int
+    analysis_ai_credits: int = 0
     remaining_ai_credits: int
     can_authorize: bool
     temporary_hold_released_after_settlement: bool = True

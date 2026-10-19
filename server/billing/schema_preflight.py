@@ -151,10 +151,17 @@ REQUIRED_BILLING_SCHEMA: Mapping[str, frozenset[str]] = {
             "source_fingerprint",
             "model",
             "analysis_policy_version",
+            "structured_result",
+            "context_snapshot",
             "recommended_answer",
             "created_at",
         }
     ),
+    "compare_analysis_intents": frozenset({
+        "request_group_id", "user_id", "state", "automatic", "cancel_requested", "context_snapshot",
+        "reservation_payload", "model", "policy_version", "max_output_tokens", "analysis_id",
+        "error_code", "progress_stage", "created_at", "updated_at",
+    }),
     "cache_reuse_events": frozenset(
         {"id", "user_id", "request_id", "operation_type", "reused", "created_at"}
     ),

@@ -15,41 +15,142 @@ This guide covers both:
 - Browser Compare mode, where provider-native search is automatic and no Web control is shown. Empty initial model slots are filled only after effective entitlements load and only from models allowed by the current plan; higher-plan models remain visible for discovery.
 - Browser Compare reasoning starts at Low and enables only levels supported by every selected target. Auto lets each model use its own managed default; unsupported levels remain visible but disabled, and changing a target recomputes the intersection.
 - Browser response headers show model names, exact model IDs, response-start duration, and AI-credit usage. Response and Cortex Analysis credit amounts use a neutral credit icon without currency symbols. Live and restored responses omit decorative category badges and fastest-response labels and highlighting on desktop, tablet, and phone layouts.
-- Browser Cortex Analysis, an on-demand synthesis of two or three completed Compare responses.
+- Browser Analyze, with automatically authorized synthesis of two or three completed model responses.
 
 ## Cortex Analysis
 
-- After at least two Compare responses complete successfully, the browser offers `Analyze responses with Cortex` below the model answers.
-- The analysis runs only when requested. `gpt-5.4-mini` is the default analysis model and can be changed with `CORTEX_ANALYSIS_MODEL`.
-- The analysis model sees shuffled `Response A/B/C` content without provider or
-  model identities. After generation, the server translates those internal
-  labels back to canonical provider-and-model names, such as
-  `Claude (Sonnet 4.6)`, throughout the recommended answer, agreements,
-  differences, unique insights, confidence explanation, and verification
-  items. Selecting multiple models from one provider therefore does not collapse
-  their attribution into a shared provider label.
-- Finished results render as one always-visible reading document: combined answer, inline qualitative confidence, attributed evidence columns, and a single verification band. No section requires a click. Strong disagreement leads visually and lowers confidence to `Limited`; attribution identifies who holds each position without naming a winner.
-- Every successful analysis is retained. Reloading or reopening a History thread restores all prior runs and selects the newest by default.
-- Regenerating one source response appends a new response revision. Earlier analyses remain readable but are marked stale until the user explicitly runs an updated analysis.
-- Re-running Cortex Analysis temporarily hides the previous combined result and
-  shows only the processing state. A failed re-run restores the saved result
-  alongside the retry state.
-- Each analysis or re-analysis is a synthesized model call charged against the
-  unified AI-credit wallet. The reservation includes the Compare question and
-  successful source responses plus the analysis output ceiling. The synthesis
-  call has search disabled, so reused Compare sources add no second search charge, and there is no separate Cortex
-  quota. Saved runs stay readable after downgrade.
-- The required subscription/Cortex migrations are
-  `20260718_add_b2c_billing_foundation.sql`,
-  `20260727_add_cortex_analysis_runs.sql`,
-  `20260729_add_unified_ai_credits.sql`, and
-  `20260730_add_usage_reservation_activity.sql`, followed by
-  `20260731_add_model_pricing_audit.sql` and
-  `20260802_add_cortex_analysis_attribution.sql`, applied in that order.
+Cortex Analysis brings the selected model answers together in **Analyze**, the
+browser display label for the existing internal `compare` mode. The browser
+shows a combined AI-credit estimate before Send and submits
+`automatic_analysis: true`. Send authorizes the selected model answers plus one
+initial synthesis once at least two answers succeed. Existing API clients keep
+their response-only behavior when this additive field is omitted or false.
+
+- `POST /v1/billing/estimate-generation` accepts `include_analysis: true`, `include_native_search: true` and
+  bounded `context`; `estimated_max_ai_credits` includes the synthesis and
+  `analysis_ai_credits` reports its component. This is an estimate of the
+  temporary hold, not a guaranteed charge. Estimation creates no reservation.
+- Combined execution checks schema, provider/pricing readiness, plan access and
+  reserves both stages before provider work. Each stage uses the canonical
+  wallet and settles actual usage. Invalid structured output with reported
+  provider usage is still settled; provider failure without usage releases its
+  hold. Fewer than two successes releases the synthesis hold and retains the
+  initial authorization for an individual failed-response retry.
+- A server-owned producer completes an authorized stream after navigation.
+  `POST /v1/compare/{request_group_id}/cancel` explicitly stops an active stream
+  owned by the signed-in user through a shared cancellation flag. Normal view changes do
+  not invoke cancellation. The queue worker resumes only persisted, authorized
+  intents; it never creates an intent from a history read. Interrupted provider
+  calls with unknown outcomes become a failed, explicitly retryable analysis
+  after 15 minutes, rather than being automatically purchased again.
+- `POST /v1/compare/{request_group_id}/analysis` creates a cost-disclosed manual
+  retry, update, or legacy analysis. Automatic-intent duplicates reuse the saved result; legacy manual
+  reuse honors `CORTEX_ANALYSIS_REUSE_ENABLED`. Reuse keys include model/policy/context/revisions; `?regenerate=true` explicitly requests another paid
+  run. A concurrent run returns `409 analysis_in_progress`. Successful results
+  return `201`; invalid/failed synthesis returns `502 cortex_analysis_failed`.
+- `GET /v1/compare/{request_group_id}/analysis-state` returns read-only state
+  (`idle|waiting|queued|processing|complete|failed`), `automatic`, `analysisId`,
+  `errorCode`, `estimatedAiCredits` and nullable `progressStage`
+  (`comparing|reading|synthesizing|validating`, only while processing). It never
+  reserves credits or calls a model. Progress is persisted worker metadata;
+  terminal/legacy states return null and polling can skip short stages.
+- `GET /v1/compare/analysis-runs?request_group_id=<uuid>` (or `session_id`) lists
+  owned runs newest-first, including after a plan downgrade. Legacy fields stay
+  readable. V2 adds `structuredResult.schemaVersion=2`, `takeaway`, exact
+  attributed `passages`, internally supported `points`, optional consequential
+  `differences`, contextual `limitations`, and server-resolved `linkedSources`.
+  `sourceResponses` includes immutable text/identity/revision snapshots;
+  `contextSnapshot` records at most 10 recent user/assistant messages and 12,000
+  characters. Context participates in reuse fingerprints. Existing privacy
+  redaction applies. Metadata-only persistence cannot authorize automatic
+  analysis because saved response text is unavailable.
+- The configured `CORTEX_ANALYSIS_MODEL` is `gpt-5.4-mini` by default.
+  Synthesis makes one structured call with search off, shuffled anonymous labels
+  and a bounded output ceiling. `CORTEX_ANALYSIS_MAX_OUTPUT_TOKENS` defaults to
+  4000, configurable from 1800 through 4000; missing/invalid values use 4000.
+  The ceiling and complete prompt/context/evidence payload are included in reservations.
+  Backend reloads apply the default to new authorizations; existing intents keep
+  their reserved ceiling.
+- React has Cortex Analysis (Analysis on phones), Model responses and always-visible Sources tabs.
+  Model bylines and quotation headers reuse proper provider icons. The
+  contributor/status/credits strip above the tabs is omitted.
+  A layers symbol identifies Cortex Analysis and the takeaway; sparkles identify
+  the synthesis header. An optional answer headline and introduction lead into
+  the lavender takeaway (`#f1eefc` light / `#2d2845` dark). Optional consequential
+  differences have a title and **See both passages** disclosure, followed by
+  the **In their words** grid and a Sources link with its real count.
+  Quotes sit side by side where space permits and stack on narrow screens. Confidence badges,
+  voting banners and forced uniqueness sections are absent. Sources separates
+  attached website metadata from model passages, including **No linked sources
+  supplied**. Quotes validate against the actual immutable inputs; generated
+  URLs cannot become new sources. HTTP(S) links retain query parameters and all
+  attributions; title/URL metadata does not establish claim support. Source cards
+  show **Cited for** only when numbered citations or matching Markdown/reference
+  links in that exact response revision identify a passage. Each model/revision
+  uses its own original source ordering, including saved snapshots after a
+  regeneration. Code and bibliography entries are excluded. **View the model’s
+  answer** opens the corresponding revision and quoted context, with **Back to
+  Sources**; absent old text is never replaced with a newer answer. Metadata-only
+  sources say no specific cited passage was supplied. This uses existing text and
+  metadata without another model/search call, schema migration or history rewrite.
+- Analyze preserves the original Cortex fonts, colors, brand assets, provider
+  icons, sidebar preference and shared composer. The existing shell switches
+  to mobile navigation/history at 900px. Empty Analyze uses the original
+  centered composer with `Hi, what would you like to analyze?`. The Models +
+  analysis estimate footer is omitted; combined-estimate Send authorization
+  remains active. Analyze-specific layouts use scoped theme tokens.
+  Cortex Analysis is the default view when opening Analyze or returning from Ask. Model responses remains available with its original layout and selected model preserved.
+
+  While model answers arrive, the Analysis tab shows the mockup's live ledger:
+  provider logos, queued/search/tool/writing activity, completed or partial
+  answers, and failed/stopped models. Read Model responses switches views without
+  starting work; failed models have their existing cost-estimated retry callback.
+  Automatic synthesis then shows the three connected workflow steps, with an
+  active spinner and completed checks driven by `progressStage`. Quote validation
+  updates the final step before saving. Reduced-motion settings stop animation.
+  Previous results remain readable during updates and failures. Preparation
+  stages can finish between polls; the UI never adds demo delays or fake progress.
+
+  The original response layout retains equal-height
+  side-by-side cards on desktop, three columns above 1180px for three models,
+  two-column wrapping at 901–1180px and stacked tall cards at 761–900px. Card
+  bodies scroll independently on desktop/tablet. At 760px and below, the original
+  horizontal provider tabs switch one natural-height answer; sticky controls,
+  keyboard navigation and composer clearance are preserved. This display is
+  independent of the Cortex Analysis layout. Wide code remains contained.
+- Structured v2 runs optionally include nullable `headline`, `introduction` and
+  `differences[].title`. Existing saved runs remain readable without them; the
+  browser does not fabricate a headline from a question or a quote. Policy
+  `cortex-analysis-v2-editorial` generates the new presentation fields with the
+  existing single call and token ceiling. New overview text passes the same
+  known-source URL checks and anonymous-label restoration as the takeaway.
+  The headline uses the full reading width at 22px on desktop/tablet and 20px
+  below 768px. Natural wrapping and a 12px following gap keep more of the answer
+  visible; body typography, provider bylines and the native theme are unchanged.
+- Synthesis stays provider-blind while generating. After generation, complete
+  labels and shorthand attribution subjects such as `A suggests` or `B's estimate`
+  resolve through the shuffled mapping to full provider/model names throughout
+  editorial prose. Ordinary letters/articles and immutable evidence quotations
+  are preserved. Existing saved runs retain their text; viewing them never
+  triggers a paid correction.
+- Regenerating an answer creates a new revision and marks earlier synthesis
+  stale. **Update analysis** and retry show their estimated cost and need no
+  second confirmation. The previous analysis stays readable during an update
+  and after failure. Evidence opens the earlier full response and offers a
+  return to the latest version. Copy, code/table rendering, regeneration,
+  incomplete/error controls and local revision-keyed ratings remain available.
+  Tab/view changes and resizing create no paid work. Ratings are session-local,
+  not server-persisted.
+
+Apply `db/migrations/20261016_add_compare_synthesis.sql` after the existing
+subscription/Cortex/pricing migrations and restart the API. It adds JSONB
+structured/context snapshots and `compare_analysis_intents`; existing runs are
+not rewritten. PostgreSQL startup checks the new schema. See
+[the migration runbook](runbooks/db-migrations.md) for operator-owned rollout.
 
 The API accepts two or three explicit targets. Subscription enforcement may reduce the effective maximum: Free and Plus allow two targets, while Pro allows three. The four-provider examples below describe the legacy CLI `COMPARE_MODE=true` flow, not the FastAPI request limit.
 
-In database-backed API mode, all target/model entitlements and monthly counters are enforced before providers start. Successful targets settle independently against their canonical requested model identity, even when a provider returns a versioned served-model snapshot; that same identity drives each response card's credits and the aggregate Compare credit total. Failed targets release their reserved model-response units. Provider-native search is reserved at up to three operations per target and settles each target's reported operations up to that product cap; legacy shared research still settles once when the rollback path is active. One unrecognized served snapshot cannot suppress inline credits or the other successful target ledger rows. On a streaming disconnect or error, only successful targets whose output started are settled, plus independently reported search usage that must not be lost; completed-but-unemitted targets are otherwise released. A finalization failure releases and unregisters the reservation rather than allowing its activity heartbeat to keep credits reserved.
+In database-backed API mode, all target/model entitlements and monthly counters are enforced before providers start. Successful targets settle independently against their canonical requested model identity, even when a provider returns a versioned served-model snapshot; that same identity drives each response card's credits and the aggregate Compare credit total. Failed targets release their reserved model-response units. Provider-native search is reserved at up to three operations per target and settles each target's reported operations up to that product cap; legacy shared research still settles once when the rollback path is active. One unrecognized served snapshot cannot suppress inline credits or the other successful target ledger rows. For response-only API streams, on a streaming disconnect or error only successful targets whose output started are settled, plus independently reported search usage that must not be lost; completed-but-unemitted targets are otherwise released. A finalization failure releases and unregisters the reservation rather than allowing its activity heartbeat to keep credits reserved.
 
 ## Release Notes (2026-02-18)
 
@@ -289,7 +390,7 @@ COMPARE_TARGETS = [
 - **Canonical Grouping**: API compare returns one `request_group_id` used consistently in logs and DB persistence
 - **Automatic Provider Search**: The frontend has no Compare Web switch and sends `routing.web_mode=auto`. Every target decides through its own native search tool and keeps its own sources; DeepSeek alone uses the Tavily-backed function loop.
 - **Plan-Aware Model Defaults**: The frontend fills empty initial Compare slots from the current `/v1/entitlements` billing-class allowlist. It does not remove locked models from the picker and does not rewrite valid existing/manual selections.
-- **Readable Multi-Turn Layout**: One desktop Compare turn fills the available transcript, and desktop/tablet comparisons keep tall visible cards with internal response-body scrolling. Phone-sized mobile uses a segmented model switcher, shows one selected response card at a time in natural page flow, and turns the stuck switcher into a frosted provider-tinted reading cue without shifting model pills horizontally.
+- **Original Multi-Turn Response Layout**: Analyze opens Model responses with the existing equal-height desktop grid and independent card scrolling, tablet wrapping/stacking and horizontal sticky provider tabs on phones. Three desktop model responses share one row above 1180px. Phone tabs select one natural-height answer with the existing responsive card controls. Cortex Analysis and Sources remain separate views; view changes retain local feedback, selected model and reading position. Evidence opens the exact immutable revision.
 - **Shared Prompt Presentation**: Compare prompts use the same right-aligned `You` bubble as Ask mode, including attachment and prompt-optimization states. While Improve is pending, the prompt and optimization status remain visible but model tabs, response cards, and aggregate totals stay hidden; they appear only after optimization resolves and model generation begins. Aggregate Compare totals render separately.
 - **New-Turn Reveal**: Submitting a Compare follow-up always smoothly reveals that new question once, even when the user was viewing an older turn. Streaming response growth does not continuously move the transcript, and the UI no longer renders a floating down-arrow jump control.
 - **Independent Response Readiness**: Every browser response card shows the shared provider/model logo treatment and owns its own calm loading state. Loading cards show live elapsed time with `Queued`, `Refining prompt`, `Connecting to model`, `Generating response`, or `Finalizing` instead of placeholder zero metrics. The skeleton body disappears and that card's timer freezes when its first renderable response content reaches the UI, while slower targets continue timing and showing their own source/improvement-aware loading treatment. Failed cards show elapsed failure time, and completed cards retain the observed response-start duration while hiding unavailable token counts.
@@ -305,3 +406,20 @@ COMPARE_TARGETS = [
 
 **Last Updated:** 2026-09-27
 **Applies To:** OpenAI Project v2.0+
+
+## Efficient follow-up context
+
+Compare preserves user messages under the existing history bounds. React adds
+optional exact `response_variants` (provider, model, content) to each completed
+multi-model assistant history item. For ordinary follow-ups the server selects
+the target model's own complete answer. Cross-model comparisons, named/ordinal
+or ambiguous references retain all answers; missing exact matches, old clients
+and trimmed metadata also keep shared context. The metadata is removed before
+provider calls. Current-turn targets still run independently, and automatic
+analysis reads all current answers and per-model citations afterward.
+
+Selection applies to streaming, non-streaming and regenerated Compare cards.
+The full shared history remains available in the UI; no prior answer is deleted.
+`COMPARE_SELECTIVE_HISTORY_ENABLED=false` restores the prior shared behavior.
+Claude caching and filtered search preserve model/reasoning/output settings;
+see [credit-efficiency operations](runbooks/inference-credit-efficiency.md).

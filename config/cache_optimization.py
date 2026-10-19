@@ -14,7 +14,7 @@ CACHE_AWARE_CREDIT_POLICY_VERSION = "cache-aware-v1"
 CORTEX_PROMPT_STRUCTURE_VERSION = "cortex-prompt-v2"
 CONTEXT_SUMMARY_POLICY_VERSION = "context-summary-v1"
 OPTIMIZER_PROMPT_VERSION = "optimizer-prompt-v1"
-CORTEX_ANALYSIS_POLICY_VERSION = "cortex-analysis-v1"
+CORTEX_ANALYSIS_POLICY_VERSION = "cortex-analysis-v2-editorial"
 
 
 def env_flag(name: str, *, default: bool = False) -> bool:
@@ -49,6 +49,10 @@ def claude_prompt_cache_enabled() -> bool:
     return env_flag("CLAUDE_PROMPT_CACHE_ENABLED", default=False)
 
 
+def claude_filtered_web_search_enabled() -> bool:
+    return env_flag("CLAUDE_FILTERED_WEB_SEARCH_ENABLED", default=True)
+
+
 def grok_prompt_cache_enabled() -> bool:
     return env_flag("GROK_PROMPT_CACHE_ENABLED", default=False)
 
@@ -71,3 +75,7 @@ def credit_aware_generation_budget_enabled() -> bool:
 
 def context_compaction_enabled() -> bool:
     return env_flag("CONTEXT_COMPACTION_ENABLED", default=False)
+
+
+def compare_selective_history_enabled() -> bool:
+    return env_flag("COMPARE_SELECTIVE_HISTORY_ENABLED", default=True)

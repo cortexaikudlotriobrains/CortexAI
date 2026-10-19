@@ -25,7 +25,7 @@ test("desktop uses the sidebar and top mode navigation", async ({ responsiveApp 
         sidebarBounds.y + sidebarBounds.height - (historyBounds.y + historyBounds.height),
     )).toBeLessThanOrEqual(1);
     await expect(sidebar.getByRole("button", { name: "Ask", exact: true })).toBeHidden();
-    await expect(sidebar.getByRole("button", { name: "Compare", exact: true })).toBeHidden();
+    await expect(sidebar.getByRole("button", { name: "Analyze", exact: true })).toBeHidden();
     await expect(sidebar.getByRole("button", { name: "Work", exact: true })).toBeHidden();
     await expect(page.getByRole("navigation", { name: "Mobile navigation" })).toBeHidden();
     await expect(page.locator("#btnSingleMode")).toBeVisible();
@@ -52,7 +52,7 @@ test("desktop keeps workspace action spacing fixed across Ask, Compare, and Work
 
     await expectFixedActionGeometry();
 
-    await modeNavigation().getByRole("button", { name: "Compare" }).click();
+    await modeNavigation().getByRole("button", { name: "Analyze" }).click();
     await expectFixedActionGeometry();
 
     await modeNavigation().getByRole("button", { name: "Work" }).click();
@@ -81,7 +81,7 @@ test("desktop sidebar collapses to an icon rail and expands again", async ({ res
 
     await page
         .getByRole("navigation", { name: "Workspace mode" })
-        .getByRole("button", { name: "Compare" })
+        .getByRole("button", { name: "Analyze" })
         .click();
     await expect(page.locator("#btnCompareMode")).toHaveClass(/activeTab/);
 
@@ -441,7 +441,7 @@ test("dark theme keeps the top Ask and Compare tabs legible", async ({ responsiv
 
     const modeNavigation = page.getByRole("navigation", { name: "Workspace mode" });
     const askTab = modeNavigation.getByRole("button", { name: "Ask" });
-    const compareTab = modeNavigation.getByRole("button", { name: "Compare" });
+    const compareTab = modeNavigation.getByRole("button", { name: "Analyze" });
 
     await expect(askTab).toHaveCSS("color", "rgb(241, 243, 246)");
     await expect(askTab).toHaveCSS("border-bottom-color", "rgb(139, 139, 240)");
@@ -468,13 +468,13 @@ test("desktop centers the empty Ask and Compare composer, then docks it after su
     await expectCenteredComposer(page);
     await expect(page.getByRole("heading", { name: "Compare answers" })).toHaveCount(0);
     await expect(
-        page.getByText("Hi, what would you like to compare?", { exact: true }),
+        page.getByText("Hi, what would you like to analyze?", { exact: true }),
     ).toBeVisible();
 
     await page.locator("#promptInput").fill("Compare two rollout strategies");
     await page.locator("#submitBtn").click();
     await expect(composer).toHaveAttribute("data-composer-placement", "bottom");
-    await expect(page.getByText("Hi, what would you like to compare?", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Hi, what would you like to analyze?", { exact: true })).toHaveCount(0);
 });
 
 test("Compare omits Web and retains the Improve control", async ({ responsiveApp }) => {
@@ -504,7 +504,7 @@ test("desktop Ask and Compare keep feature controls beside Attach", async ({ res
 
     for (const [mode, switchNames] of [
         ["Ask", ["Smart routing"]],
-        ["Compare", []],
+        ["Analyze", []],
     ]) {
         await page
             .getByRole("navigation", { name: "Workspace mode" })
@@ -729,7 +729,7 @@ test("iPad landscape keeps the desktop workspace usable", async ({ responsiveApp
     const sidebar = page.locator("aside[aria-label='Primary navigation']");
     await expect(sidebar).toBeVisible();
     await expect(sidebar.getByRole("button", { name: "Ask", exact: true })).toBeVisible();
-    await expect(sidebar.getByRole("button", { name: "Compare", exact: true })).toBeVisible();
+    await expect(sidebar.getByRole("button", { name: "Analyze", exact: true })).toBeVisible();
     await expect(sidebar.getByRole("button", { name: "Work", exact: true })).toBeVisible();
     await expect(page.locator("#btnSingleMode")).toBeVisible();
     await expect(page.locator("#btnSingleMode svg")).toBeHidden();
@@ -824,7 +824,7 @@ test("iPad portrait switches to mobile navigation without overlap", async ({ res
 
     await expect(page.locator("aside[aria-label='Primary navigation']")).toBeHidden();
     await expect(page.getByRole("navigation", { name: "Mobile navigation" })).toBeVisible();
-    await openMobilePanel(page, "Compare");
+    await openMobilePanel(page, "Analyze");
 
     const metrics = await page.evaluate(() => {
         const textarea = document.querySelector("#promptInput");

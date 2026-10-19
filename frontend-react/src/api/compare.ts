@@ -33,7 +33,7 @@ export async function* streamCompare(
 
     switch (event.type) {
       case "start":
-        yield { type: "start", session_id: asOptionalString(event.session_id) };
+        yield { type: "start", session_id: asOptionalString(event.session_id), request_group_id: asOptionalString(event.request_group_id) };
         break;
       case "response_start":
         yield {

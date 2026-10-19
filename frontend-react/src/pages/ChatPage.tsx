@@ -1,3 +1,4 @@
+import { ANALYZE_LABEL } from "../config/productLabels";
 import { type MouseEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -267,7 +268,7 @@ export function ChatPage() {
               <span className={styles.tabIcon}>
                 <CortexIcon name="compare" />
               </span>
-              <span>Compare</span>
+              <span>{ANALYZE_LABEL}</span>
             </button>
             {getRuntimeConfig().workEnabled !== false && (
               <button
@@ -374,7 +375,7 @@ export function ChatPage() {
               {centerComposer && (
                 <p className={styles.composerGreeting}>
                   {mode === "compare"
-                    ? "Hi, what would you like to compare?"
+                    ? "Hi, what would you like to analyze?"
                     : "Hi, how can I help?"}
                 </p>
               )}
@@ -424,7 +425,7 @@ export function ChatPage() {
               <span className={styles.mobileNavIcon}>
                 <CortexIcon name="compare" />
               </span>
-              <span>Compare</span>
+              <span>{ANALYZE_LABEL}</span>
             </button>
             {getRuntimeConfig().workEnabled !== false && (
               <button type="button" onClick={() => navigate(workDestination)}>
@@ -586,7 +587,7 @@ function CompareDockChip({
           );
         })}
       </span>
-      <span>Compare</span>
+      <span>{ANALYZE_LABEL}</span>
     </span>
   );
 }
@@ -779,7 +780,7 @@ function MobileHistory({
 
 function formatHistoryMode(mode: HistoryThread["mode"]): string {
   if (mode === "single") return "Ask";
-  if (mode === "compare") return "Compare";
+  if (mode === "compare") return ANALYZE_LABEL;
   return "Mixed";
 }
 

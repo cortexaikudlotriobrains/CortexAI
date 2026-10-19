@@ -276,7 +276,7 @@ describe("PromptComposer", () => {
 
     const textarea = screen.getByRole("textbox", { name: "Prompt input" });
     const card = textarea.parentElement?.parentElement;
-    expect(textarea).toHaveAttribute("placeholder", "Ask once and compare model responses");
+    expect(textarea).toHaveAttribute("placeholder", "What would you like to understand?");
     expect(textarea).toHaveAttribute("rows", "1");
     expect(card).toContainElement(screen.getByLabelText("Compare model selectors"));
     expect(card).toContainElement(screen.getByRole("button", { name: "Send message" }));

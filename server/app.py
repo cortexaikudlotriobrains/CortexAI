@@ -497,6 +497,12 @@ async def lifespan(app: FastAPI):
                 },
             )
 
+    synthesis_stop = asyncio.Event()
+    synthesis_task = None
+    if postgres_runtime:
+        from server import analysis_jobs
+        synthesis_task = asyncio.create_task(analysis_jobs.worker(synthesis_stop), name="compare-synthesis-worker")
+
     if postgres_runtime:
         from server import auth_maintenance
 
@@ -530,6 +536,12 @@ async def lifespan(app: FastAPI):
             )
 
     yield
+    synthesis_stop.set()
+    if synthesis_task is not None:
+        try:
+            await asyncio.wait_for(asyncio.shield(synthesis_task), timeout=30)
+        except TimeoutError:
+            synthesis_task.cancel()
 
     if auth_maintenance_stop_event is not None:
         auth_maintenance_stop_event.set()

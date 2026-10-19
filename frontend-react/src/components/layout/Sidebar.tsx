@@ -1,3 +1,4 @@
+import { ANALYZE_LABEL } from "../../config/productLabels";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent,
@@ -322,12 +323,12 @@ export function Sidebar({
           className={`${compareActive ? styles.navItemActive : styles.navItem} ${styles.workspaceModeItem}`}
           onClick={() => handleModeNavigation("compare")}
           aria-current={compareActive ? "page" : undefined}
-          aria-label="Compare"
-          title={isCollapsed ? "Compare" : undefined}
+          aria-label={ANALYZE_LABEL}
+          title={isCollapsed ? ANALYZE_LABEL : undefined}
           disabled={signedOut}
         >
           <CortexIcon name="compare" />
-          <span>Compare</span>
+          <span>{ANALYZE_LABEL}</span>
         </button>
         {onNavigateWork && (
           <button
@@ -489,7 +490,7 @@ export function Sidebar({
                     )}
                     {group.threads.map((thread) => {
                       const isCompare = thread.preferredMode === "compare";
-                      const modeLabel = isCompare ? "Compare" : "Ask";
+                      const modeLabel = isCompare ? ANALYZE_LABEL : "Ask";
                       const timeLabel = formatHistoryTime(thread.latestTimestamp);
                       const dateTimeLabel = formatHistoryDateTime(thread.latestTimestamp);
                       const isActive =
@@ -738,7 +739,7 @@ function buildActiveChatPreview(
 
 function formatModeLabel(mode: ChatMode | "mixed"): string {
   if (mode === "mixed") return "Mixed";
-  return mode === "compare" ? "Compare" : "Ask";
+  return mode === "compare" ? ANALYZE_LABEL : "Ask";
 }
 
 function formatHistoryGroupLabel(value: string, now = new Date()): string {

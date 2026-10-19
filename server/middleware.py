@@ -143,8 +143,8 @@ class SecurityHeadersMiddleware:
 class CredentialAwareCORSMiddleware:
     """CORS that only lets trusted origins make credentialed (cookie) requests.
 
-    Every other origin still gets ``Access-Control-Allow-Origin: *`` for
-    API-key/Bearer calls, but no ``Access-Control-Allow-Credentials``, so browsers
+    Every other origin still gets public CORS for API-key/Bearer calls, but no
+    ``Access-Control-Allow-Credentials``, so browsers
     refuse to expose cookie-authenticated responses to it. The React app calls
     the API on its own origin and never needs credentialed CORS; separately
     hosted frontends are trusted through ``AUTH_ALLOWED_ORIGINS`` or the origin
@@ -155,10 +155,11 @@ class CredentialAwareCORSMiddleware:
         from starlette.middleware.cors import CORSMiddleware
 
         # Only origins that pass is_trusted_browser_origin reach this instance, so
-        # it may reflect the origin with credentials.
+        # it may reflect the origin with credentials, even before a cookie exists.
         self.trusted = CORSMiddleware(
             app,
-            allow_origins=["*"],
+            allow_origins=[],
+            allow_origin_regex=".*",
             allow_credentials=True,
             allow_methods=["*"],
             allow_headers=["*"],

@@ -337,4 +337,3 @@ describe("LoginPage", () => {
     expect(mocks.logout).toHaveBeenCalledTimes(1);
   });
 });
-

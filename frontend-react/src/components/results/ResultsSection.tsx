@@ -1,24 +1,19 @@
 import {
-  type CSSProperties,
   memo,
   useCallback,
-  useEffect,
   useLayoutEffect,
   useRef,
   useState,
 } from "react";
 import { SparkleIcon } from "../common/SparkleIcon";
-import { getModelPresentation } from "../../config/modelPresentation";
 import { extractSuggestedFollowUps } from "../../followups/suggestedFollowups";
 import { useReducedMotion } from "../../hooks/useReducedMotion";
 import { useChat } from "../../hooks/useChat";
 import { useCortexAnalysis } from "../../hooks/useCortexAnalysis";
 import { useChatStore } from "../../store/chatStore";
 import type { ChatTurn } from "../../types";
-import { formatAiCredits } from "../../utils/aiCredits";
 import { CortexIcon } from "../shared/CortexIcon";
-import { ProviderLogo } from "../shared/ProviderLogo";
-import { CortexAnalysisZone } from "./CortexAnalysisZone";
+import { AnalyzeTurn } from "./AnalyzeTurn";
 import { ResponseCard } from "./ResponseCard";
 import styles from "./ResultsSection.module.css";
 
@@ -182,228 +177,17 @@ const SingleTurn = memo(function SingleTurn({
   );
 });
 
-const CompareTurn = memo(function CompareTurn({
-  turn,
-  turnIndex,
-  responseStartIndex,
-  registerTurn,
-  onRegenerate,
-  onRetryWithMoreRoom,
-  onAnalyze,
-}: TurnProps) {
-  const [activeResponseIndex, setActiveResponseIndex] = useState(0);
-  const [responseTabsStuck, setResponseTabsStuck] = useState(false);
-  const responseTabsRef = useRef<HTMLDivElement | null>(null);
-  const responseTabsSentinelRef = useRef<HTMLDivElement | null>(null);
-  const compareGridClass =
-    turn.responses.length >= 3
-      ? styles.compareGridThree
-      : turn.responses.length === 2
-        ? styles.compareGridTwo
-        : styles.compareGridOne;
-  const responsesVisible = !shouldHideResponsesForOptimization(turn);
-  const hasResponseTabs = responsesVisible && turn.responses.length > 1;
-
-  useEffect(() => {
-    if (activeResponseIndex >= turn.responses.length) {
-      setActiveResponseIndex(Math.max(0, turn.responses.length - 1));
-    }
-  }, [activeResponseIndex, turn.responses.length]);
-
-  useEffect(() => {
-    if (!hasResponseTabs) {
-      setResponseTabsStuck(false);
-      return;
-    }
-
-    const tabs = responseTabsRef.current;
-    const sentinel = responseTabsSentinelRef.current;
-    const scrollRoot = tabs?.closest('section[aria-label="Chat transcript"]') as HTMLElement | null;
-    if (!tabs || !sentinel || !scrollRoot) return;
-
-    let frameId: number | null = null;
-    const updateStuckState = () => {
-      frameId = null;
-      const rootTop = scrollRoot.getBoundingClientRect().top;
-      const tabsTop = tabs.getBoundingClientRect().top;
-      const sentinelTop = sentinel.getBoundingClientRect().top;
-      const stuck = sentinelTop < rootTop + 8 && tabsTop <= rootTop + 10;
-      setResponseTabsStuck((current) => (current === stuck ? current : stuck));
-    };
-    const scheduleUpdate = () => {
-      if (frameId !== null) return;
-      frameId = window.requestAnimationFrame(updateStuckState);
-    };
-
-    scheduleUpdate();
-    scrollRoot.addEventListener("scroll", scheduleUpdate, { passive: true });
-    window.addEventListener("resize", scheduleUpdate);
-    return () => {
-      if (frameId !== null) window.cancelAnimationFrame(frameId);
-      scrollRoot.removeEventListener("scroll", scheduleUpdate);
-      window.removeEventListener("resize", scheduleUpdate);
-    };
-  }, [hasResponseTabs, turn.id]);
-
-  return (
-    <article
-      ref={(node) => registerTurn(turn.id, node)}
-      data-turn-id={turn.id}
-      className={`${styles.turn} ${styles.compareTurn}`}
-      aria-label="Model comparison"
-    >
+const CompareTurn = memo(function CompareTurn({ turn, turnIndex, responseStartIndex,
+  registerTurn, onRegenerate, onRetryWithMoreRoom, onAnalyze }: TurnProps) {
+  return <article ref={(node) => registerTurn(turn.id, node)} data-turn-id={turn.id}
+    className={`${styles.turn} ${styles.compareTurn}`} aria-label="Model comparison">
+    {shouldHideResponsesForOptimization(turn) ? <TurnPrompt turn={turn} turnIndex={turnIndex} /> : <AnalyzeTurn turn={turn} responseStartIndex={responseStartIndex}
+      onAnalyze={onAnalyze ?? (async () => {})} onRegenerate={onRegenerate}
+      onRetryWithMoreRoom={onRetryWithMoreRoom}>
       <TurnPrompt turn={turn} turnIndex={turnIndex} />
-
-      {responsesVisible && turn.compareSummary && (
-        <div className={`${styles.compareSummary} compare-summary-card`}>
-          <span className={`${styles.summaryPill} ${styles.summarySuccess}`}>
-            {turn.compareSummary.success_count} succeeded
-          </span>
-          <span className={`${styles.summaryPill} ${styles.summaryNeutral}`}>
-            {turn.compareSummary.error_count} errors
-          </span>
-          {(turn.compareSummary.total_ai_credits ?? 0) > 0 && (
-            <span className={`${styles.summaryPill} ${styles.summaryMono}`}>
-              {formatAiCredits(turn.compareSummary.total_ai_credits ?? 0)} credits
-            </span>
-          )}
-        </div>
-      )}
-
-      {responsesVisible && turn.responses.length > 0 && (
-        <>
-          <div className={styles.responseHeadingRow}>
-            <span>Model responses · {turn.responses.length} models</span>
-            {(turn.analysisRuns?.length ?? 0) > 0 && (
-              <small>Cortex analysis is below — originals stay in place</small>
-            )}
-          </div>
-          {hasResponseTabs && (
-            <>
-              <div
-                ref={responseTabsSentinelRef}
-                className={styles.mobileResponseTabsSentinel}
-                aria-hidden="true"
-              />
-              <div
-                ref={responseTabsRef}
-                className={`${styles.mobileResponseTabs} ${
-                  responseTabsStuck ? styles.mobileResponseTabsStuck : ""
-                }`}
-                role="tablist"
-                aria-label="Compare model responses"
-              >
-                {turn.responses.map((response, index) => {
-                  const presentation = getModelPresentation(response.provider, response.model);
-                  const selected = index === activeResponseIndex;
-                  const tone = responseSwitcherTone(response.provider, presentation.color);
-                  const tabStyle = {
-                    "--response-tab-accent": tone.accent,
-                    "--response-tab-soft": tone.soft,
-                  } as CSSProperties;
-                  return (
-                    <button
-                      key={`${turn.id}-tab-${response.request_id}`}
-                      type="button"
-                      role="tab"
-                      id={`${turn.id}-response-tab-${index}`}
-                      aria-selected={selected}
-                      aria-controls={`${turn.id}-response-panel-${index}`}
-                      tabIndex={selected ? 0 : -1}
-                      className={selected ? styles.mobileResponseTabActive : undefined}
-                      style={tabStyle}
-                      onClick={() => setActiveResponseIndex(index)}
-                      onKeyDown={(event) => {
-                        const nextIndex = nextResponseTabIndex(
-                          event.key,
-                          index,
-                          turn.responses.length,
-                        );
-                        if (nextIndex === null) return;
-                        event.preventDefault();
-                        setActiveResponseIndex(nextIndex);
-                        window.requestAnimationFrame(() => {
-                          document.getElementById(`${turn.id}-response-tab-${nextIndex}`)?.focus();
-                        });
-                      }}
-                    >
-                      <span className={styles.mobileResponseTabIcon}>
-                        <ProviderLogo
-                          provider={response.provider}
-                          logoUrl={presentation.logoUrl}
-                          color={presentation.color}
-                          size={13}
-                        />
-                      </span>
-                      <span className={styles.mobileResponseTabLabel}>{presentation.label}</span>
-                      {selected && (
-                        <span className={styles.mobileResponseTabDot} aria-hidden="true" />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </>
-          )}
-
-          <div
-            className={`${styles.compareGrid} ${styles.compareGridTranscript} ${compareGridClass}`}
-          >
-            {turn.responses.map((response, index) => {
-              const presentation = getModelPresentation(response.provider, response.model);
-              return (
-                <div
-                  key={`${turn.id}-${index}-${response.request_id}`}
-                  id={`${turn.id}-response-panel-${index}`}
-                  className={`${styles.compareResponsePanel} ${
-                    index === activeResponseIndex ? styles.mobileResponsePanelActive : ""
-                  }`}
-                  role={hasResponseTabs ? "tabpanel" : "region"}
-                  aria-labelledby={hasResponseTabs ? `${turn.id}-response-tab-${index}` : undefined}
-                  aria-label={hasResponseTabs ? undefined : `${presentation.label} response`}
-                  data-response-panel
-                >
-                  <ResponseCard
-                    response={response}
-                    isStreaming={isResponseLoading(turn, response)}
-                    slotIndex={responseStartIndex + index}
-                    compact
-                    loadingMode="compare"
-                    researchEnabled={turn.researchEnabled}
-                    optimizeEnabled={turn.optimizeEnabled ?? !!turn.optimization}
-                    onRegenerate={() => void onRegenerate(turn.id, index)}
-                    onRetryWithMoreRoom={() => void onRetryWithMoreRoom(turn.id, index)}
-                  />
-                </div>
-              );
-            })}
-          </div>
-          {onAnalyze && <CortexAnalysisZone turn={turn} onAnalyze={onAnalyze} />}
-        </>
-      )}
-    </article>
-  );
+    </AnalyzeTurn>}
+  </article>;
 });
-
-function nextResponseTabIndex(key: string, currentIndex: number, tabCount: number): number | null {
-  if (tabCount < 1) return null;
-  if (key === "ArrowRight") return (currentIndex + 1) % tabCount;
-  if (key === "ArrowLeft") return (currentIndex - 1 + tabCount) % tabCount;
-  if (key === "Home") return 0;
-  if (key === "End") return tabCount - 1;
-  return null;
-}
-
-function responseSwitcherTone(providerRaw: string, fallbackColor: string) {
-  const provider = providerRaw.trim().toLowerCase();
-  if (provider === "claude") {
-    return { accent: "#e07a4d", soft: "#fbeee6" };
-  }
-  if (provider === "openai") {
-    return { accent: "#5b5bd6", soft: "#eef0fb" };
-  }
-  return { accent: fallbackColor || "#5b5bd6", soft: "#eef0f2" };
-}
 
 function isResponseLoading(turn: ChatTurn, response: ChatTurn["responses"][number]) {
   if (

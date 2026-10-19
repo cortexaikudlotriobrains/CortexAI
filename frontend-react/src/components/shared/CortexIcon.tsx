@@ -6,6 +6,7 @@ export type CortexIconName =
   | "ask"
   | "attach"
   | "branch"
+  | "book-open"
   | "check"
   | "chip-close"
   | "chevron-down"
@@ -30,6 +31,7 @@ export type CortexIconName =
   | "history"
   | "improve"
   | "latency"
+  | "layers"
   | "moon"
   | "models"
   | "new-chat"
@@ -43,6 +45,8 @@ export type CortexIconName =
   | "send"
   | "smart"
   | "sparkle"
+  | "sparkles"
+  | "split"
   | "settings"
   | "sources"
   | "stop"
@@ -65,12 +69,7 @@ interface CortexIconProps extends Omit<SVGProps<SVGSVGElement>, "name"> {
   size?: number | string;
 }
 
-export function CortexIcon({
-  name,
-  size = 20,
-  strokeWidth = 1.75,
-  ...props
-}: CortexIconProps) {
+export function CortexIcon({ name, size = 20, strokeWidth = 1.75, ...props }: CortexIconProps) {
   if (name === "stop" || name === "composer-smart") {
     return (
       <svg
@@ -112,6 +111,36 @@ export function CortexIcon({
 
 function iconPath(name: Exclude<CortexIconName, "stop" | "composer-smart">) {
   switch (name) {
+    // Reference Layers/Sparkles/BookOpen paths: see AnalyzeIcons.LICENSE.
+    case "layers":
+      return (
+        <>
+          <path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z" />
+          <path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12" />
+          <path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17" />
+        </>
+      );
+    case "sparkles":
+      return (
+        <>
+          <path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z" />
+          <path d="M20 2v4M22 4h-4" />
+          <circle cx="4" cy="20" r="2" />
+        </>
+      );
+    case "split":
+      return (
+        <>
+          <path d="M16 3h5v5M8 3H3v5M21 3l-6 6v12M3 3l6 6" />
+        </>
+      );
+    case "book-open":
+      return (
+        <>
+          <path d="M12 7v14" />
+          <path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z" />
+        </>
+      );
     case "work":
       return (
         <>
@@ -165,7 +194,9 @@ function iconPath(name: Exclude<CortexIconName, "stop" | "composer-smart">) {
         </>
       );
     case "composer-attach":
-      return <path d="m21.4 11.1-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5" />;
+      return (
+        <path d="m21.4 11.1-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5" />
+      );
     case "composer-check":
       return <path d="m5 12 5 5 9-10" />;
     case "composer-improve":
@@ -287,7 +318,9 @@ function iconPath(name: Exclude<CortexIconName, "stop" | "composer-smart">) {
         </>
       );
     case "attach":
-      return <path d="M20 11.5 12 19.5a4.5 4.5 0 0 1-6.4-6.4l8-8a3 3 0 0 1 4.3 4.3l-8 8a1.5 1.5 0 0 1-2.2-2.1l7.3-7.3" />;
+      return (
+        <path d="M20 11.5 12 19.5a4.5 4.5 0 0 1-6.4-6.4l8-8a3 3 0 0 1 4.3 4.3l-8 8a1.5 1.5 0 0 1-2.2-2.1l7.3-7.3" />
+      );
     case "smart":
       return (
         <>
@@ -296,7 +329,9 @@ function iconPath(name: Exclude<CortexIconName, "stop" | "composer-smart">) {
         </>
       );
     case "sparkle":
-      return <path d="M12 3c.4 3.6 1.4 4.6 5 5-3.6.4-4.6 1.4-5 5-.4-3.6-1.4-4.6-5-5 3.6-.4 4.6-1.4 5-5z" />;
+      return (
+        <path d="M12 3c.4 3.6 1.4 4.6 5 5-3.6.4-4.6 1.4-5 5-.4-3.6-1.4-4.6-5-5 3.6-.4 4.6-1.4 5-5z" />
+      );
     case "web":
       return (
         <>
@@ -305,7 +340,9 @@ function iconPath(name: Exclude<CortexIconName, "stop" | "composer-smart">) {
         </>
       );
     case "sources":
-      return <path d="M9 12a3 3 0 0 0 3 3h2a4 4 0 0 0 0-8h-1M15 12a3 3 0 0 0-3-3h-2a4 4 0 0 0 0 8h1" />;
+      return (
+        <path d="M9 12a3 3 0 0 0 3 3h2a4 4 0 0 0 0-8h-1M15 12a3 3 0 0 0-3-3h-2a4 4 0 0 0 0 8h1" />
+      );
     case "improve":
       return (
         <>
@@ -347,9 +384,13 @@ function iconPath(name: Exclude<CortexIconName, "stop" | "composer-smart">) {
         </>
       );
     case "thumb-up":
-      return <path d="M7 11v9H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1zm0 0 4.5-8a2 2 0 0 1 2 1.6l-.8 4.4H19a2 2 0 0 1 2 2.3l-1.2 6A2 2 0 0 1 17.8 20H7" />;
+      return (
+        <path d="M7 11v9H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1zm0 0 4.5-8a2 2 0 0 1 2 1.6l-.8 4.4H19a2 2 0 0 1 2 2.3l-1.2 6A2 2 0 0 1 17.8 20H7" />
+      );
     case "thumb-down":
-      return <path d="M17 13V4h3a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1zm0 0-4.5 8a2 2 0 0 1-2-1.6l.8-4.4H5a2 2 0 0 1-2-2.3l1.2-6A2 2 0 0 1 6.2 4H17" />;
+      return (
+        <path d="M17 13V4h3a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1zm0 0-4.5 8a2 2 0 0 1-2-1.6l.8-4.4H5a2 2 0 0 1-2-2.3l1.2-6A2 2 0 0 1 6.2 4H17" />
+      );
     case "debug":
       return (
         <>

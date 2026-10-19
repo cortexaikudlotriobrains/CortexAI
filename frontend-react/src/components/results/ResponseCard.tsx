@@ -21,6 +21,7 @@ import { Citation } from "./Citation";
 import { ResponseLoadingState, type ResponseLoadingMode } from "./ResponseLoadingState";
 import { SuggestedFollowUps } from "./SuggestedFollowUps";
 import styles from "./ResponseCard.module.css";
+import { useResponseUiStore } from "../../store/responseUiStore";
 
 interface ResponseCardProps {
   response: ChatResponse;
@@ -34,6 +35,7 @@ interface ResponseCardProps {
   onSuggestedFollowUp?: (suggestion: string) => void | Promise<void>;
   onRegenerate?: () => void;
   onRetryWithMoreRoom?: () => void;
+  regenerationEstimate?: number | null;
 }
 
 export function ResponseCard({
@@ -48,9 +50,13 @@ export function ResponseCard({
   onSuggestedFollowUp,
   onRegenerate,
   onRetryWithMoreRoom,
+  regenerationEstimate,
 }: ResponseCardProps) {
   const [copied, setCopied] = useState(false);
-  const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
+  const feedbackKey = `${response.request_id}:${response.response_version ?? 1}`;
+  const feedback = useResponseUiStore((state) => state.feedback[feedbackKey] ?? null);
+  const setFeedback = (value: "up" | "down" | null) =>
+    useResponseUiStore.getState().setFeedback(feedbackKey, value);
   const copyTimerRef = useRef<number | null>(null);
   const hasError = !!response.error;
   const softError = response.error?.details?.kind === "transient_capacity";
@@ -309,9 +315,10 @@ export function ResponseCard({
               aria-description="This creates a new model call and uses AI credits."
               title="Regenerate response · New model credits will be used"
               onClick={onRegenerate}
+              disabled={regenerationEstimate === null}
             >
               <CortexIcon name="regenerate" />
-              <span>Regenerate</span>
+              <span>{hasError ? "Retry response" : "Regenerate"}{regenerationEstimate != null ? ` · ${formatAiCredits(regenerationEstimate)} AI credits estimated` : ""}</span>
             </button>
           )}
         </div>
@@ -344,7 +351,7 @@ const MARKDOWN_PLUGINS = [remarkGfm, remarkCitations];
 
 // Markdown parsing is the dominant render cost of a response. Memoized so a
 // card only re-parses when its own text changes, not on every store update.
-const ResponseMarkdown = memo(function ResponseMarkdown({
+export const ResponseMarkdown = memo(function ResponseMarkdown({
   text,
   sources,
 }: {
@@ -366,7 +373,7 @@ const ResponseMarkdown = memo(function ResponseMarkdown({
             <a
               href={href}
               target={isExternal(href) ? "_blank" : undefined}
-              rel="noreferrer"
+              rel="noopener noreferrer"
               {...props}
             >
               {children}

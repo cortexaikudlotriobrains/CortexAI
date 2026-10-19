@@ -1,7 +1,7 @@
 from decimal import Decimal
 from itertools import pairwise
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock
 from datetime import datetime, timezone
 
 import pytest
@@ -12,6 +12,7 @@ from api.google_gemini_client import GeminiClient
 from api.grok_client import GrokClient
 from api.openai_client import OpenAIClient
 from config.web_search import load_native_web_search_config
+from models.provider_stream import ProviderStreamObserver
 from server.billing.web_search_billing import web_search_reservation_override
 from tools.web.native_policy import (
     normalize_requested_web_mode,
@@ -277,7 +278,7 @@ def test_openai_native_search_uses_responses_and_returns_citations(monkeypatch):
     assert response.metadata["web_search"]["operations"] == 1
     assert response.metadata["web_source_items"][0]["url"] == "https://example.com/a"
     payload = fake_client.responses.create.call_args.kwargs
-    assert payload["tools"] == [{"type": "web_search"}]
+    assert payload["tools"] == [{"type": "web_search", "search_context_size": "medium"}]
     assert payload["tool_choice"] == "required"
     assert payload["max_tool_calls"] == 3
 
@@ -320,6 +321,187 @@ def test_claude_native_search_caps_uses_and_preserves_sources(monkeypatch):
     payload = fake_client.messages.create.call_args.kwargs
     assert payload["tools"][0]["max_uses"] == 3
     assert payload["tool_choice"] == {"type": "auto"}
+
+
+@pytest.mark.parametrize("streamed", [False, True])
+@pytest.mark.parametrize(
+    "model",
+    [
+        "claude-sonnet-5-5",
+        "claude-sonnet-5-5-20260928",
+        "claude-opus-5-5",
+        "claude-fable-5-1",
+        "claude-mythos-5-1",
+    ],
+)
+def test_claude_required_search_avoids_unsupported_forced_tool_choice(
+    monkeypatch, model, streamed
+):
+    monkeypatch.setenv("NATIVE_WEB_SEARCH_MODE", "enabled")
+    monkeypatch.setenv("NATIVE_WEB_SEARCH_PROVIDERS", "claude")
+    prompt = "what are some of the gains or losses of terrority this year in russia ukraine war"
+    policy = resolve_web_search_policy(prompt, requested_mode="auto")
+    final = SimpleNamespace(
+        content=[
+            SimpleNamespace(type="server_tool_use", name="web_search"),
+            SimpleNamespace(
+                type="text",
+                text="Researched answer",
+                citations=[SimpleNamespace(url="https://example.com/frontline", title="Report")],
+            ),
+        ],
+        usage=SimpleNamespace(
+            input_tokens=10,
+            output_tokens=5,
+            server_tool_use=SimpleNamespace(web_search_requests=1),
+        ),
+        model=model,
+        stop_reason="end_turn",
+    )
+    stream = MagicMock()
+    stream.__enter__.return_value = stream
+    stream.__iter__.return_value = iter(
+        [
+            SimpleNamespace(
+                type="content_block_delta",
+                delta=SimpleNamespace(type="text_delta", text="Researched answer"),
+            )
+        ]
+    )
+    stream.get_final_message.return_value = final
+
+    def complete(**payload):
+        if payload["tool_choice"]["type"] in {"any", "tool"}:
+            raise ValueError('400 tool_choice: type "tool" and "any" are not supported for this model.')
+        return stream if streamed else final
+
+    fake_client = Mock()
+    fake_client.messages.create.side_effect = complete
+    fake_client.messages.stream.side_effect = complete
+    monkeypatch.setattr("api.claude_client.anthropic.Anthropic", lambda **_: fake_client)
+    deltas = []
+    observer = (
+        ProviderStreamObserver(
+            provider="claude",
+            model=model,
+            activity_callback=lambda _: None,
+            text_callback=deltas.append,
+        )
+        if streamed
+        else None
+    )
+
+    # The request-level model override must govern compatibility, not the client default.
+    response = ClaudeClient(api_key="test", model_name="claude-sonnet-4-5").get_completion(
+        messages=[
+            {"role": "system", "content": "Keep the answer concise."},
+            {"role": "user", "content": prompt},
+        ],
+        model=model,
+        reasoning_mode="adaptive",
+        reasoning_effort="medium",
+        max_tokens=8192,
+        web_search_policy=policy.to_provider_dict(),
+        _stream_observer=observer,
+    )
+
+    assert response.is_success
+    assert response.text == "Researched answer[1]"
+    assert response.token_usage.total_tokens == 15
+    assert response.metadata["web_search"]["effective_mode"] == "required"
+    assert response.metadata["web_search"]["operations"] == 1
+    assert response.metadata["web_source_items"][0]["url"] == "https://example.com/frontline"
+    call = fake_client.messages.stream if streamed else fake_client.messages.create
+    call.assert_called_once()
+    payload = call.call_args.kwargs
+    assert payload["tool_choice"] == {"type": "auto"}
+    assert payload["tools"] == [{"type": "web_search_20260318", "name": "web_search", "max_uses": 3}]
+    assert payload["system"].startswith("Keep the answer concise.\n\n")
+    assert "must use web_search before answering" in payload["system"]
+    assert "no more than 3" in payload["system"]
+    assert payload["messages"][-1]["content"] == [{"type": "text", "text": prompt}]
+    assert payload["thinking"] == {"type": "adaptive"}
+    assert payload["output_config"] == {"effort": "medium"}
+    assert payload["max_tokens"] == 8192
+    if streamed:
+        assert [delta.text for delta in deltas] == ["Researched answer"]
+        fake_client.messages.create.assert_not_called()
+    else:
+        fake_client.messages.stream.assert_not_called()
+
+
+@pytest.mark.parametrize("model", ["claude-sonnet-4-5", "claude-sonnet-5", "claude-haiku-5-5"])
+def test_claude_older_models_retain_supported_required_tool_choice(monkeypatch, model):
+    monkeypatch.setenv("CLAUDE_FILTERED_WEB_SEARCH_ENABLED", "false")
+    monkeypatch.setenv("NATIVE_WEB_SEARCH_MODE", "enabled")
+    monkeypatch.setenv("NATIVE_WEB_SEARCH_PROVIDERS", "claude")
+    fake_client = Mock()
+    fake_client.messages.create.return_value = SimpleNamespace(
+        content=[SimpleNamespace(type="text", text="Answer")],
+        usage=SimpleNamespace(input_tokens=10, output_tokens=5),
+        model=model,
+        stop_reason="end_turn",
+    )
+    monkeypatch.setattr("api.claude_client.anthropic.Anthropic", lambda **_: fake_client)
+
+    response = ClaudeClient(api_key="test", model_name=model).get_completion(
+        "Search for the latest update", web_search_policy=_policy("required")
+    )
+
+    assert response.is_success
+    assert fake_client.messages.create.call_args.kwargs["tool_choice"] == {"type": "any"}
+
+
+@pytest.mark.parametrize("has_system", [False, True])
+@pytest.mark.parametrize(
+    ("mode", "rollout", "providers", "has_tool"),
+    [
+        ("auto", "enabled", "claude", True),
+        ("required", "enabled", "claude", True),
+        ("off", "enabled", "claude", False),
+        ("required", "off", "claude", False),
+        ("required", "enabled", "openai", False),
+    ],
+)
+def test_claude_search_controls_respect_policy_rollout_and_actual_usage(
+    monkeypatch, mode, rollout, providers, has_tool, has_system
+):
+    monkeypatch.setenv("NATIVE_WEB_SEARCH_MODE", rollout)
+    monkeypatch.setenv("NATIVE_WEB_SEARCH_PROVIDERS", providers)
+    fake_client = Mock()
+    fake_client.messages.create.return_value = SimpleNamespace(
+        content=[SimpleNamespace(type="text", text="Answer")],
+        usage=SimpleNamespace(input_tokens=10, output_tokens=5),
+        model="claude-sonnet-5-5",
+        stop_reason="end_turn",
+    )
+    monkeypatch.setattr("api.claude_client.anthropic.Anthropic", lambda **_: fake_client)
+
+    messages = [{"role": "user", "content": "Explain DNS"}]
+    if has_system:
+        messages.insert(0, {"role": "system", "content": "Original instruction"})
+    response = ClaudeClient(api_key="test", model_name="claude-sonnet-5-5").get_completion(
+        messages=messages,
+        web_search_policy=_policy(mode),
+    )
+
+    assert response.is_success
+    payload = fake_client.messages.create.call_args.kwargs
+    if mode == "required" and has_tool:
+        assert "must use web_search before answering" in payload["system"]
+        if has_system:
+            assert payload["system"].startswith("Original instruction\n\n")
+    elif has_system:
+        assert payload["system"] == "Original instruction"
+    else:
+        assert "system" not in payload
+    assert ("tools" in payload) is has_tool
+    assert ("tool_choice" in payload) is has_tool
+    assert response.metadata["web_search"]["operations"] == 0
+    assert response.metadata["web_search"]["status"] == "not_used"
+    assert response.metadata["web_search"]["fixed_credits"] == 0
+    if has_tool:
+        assert payload["tool_choice"] == {"type": "auto"}
 
 
 def test_gemini_interactions_search_extracts_result_items(monkeypatch):

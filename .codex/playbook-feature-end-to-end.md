@@ -53,3 +53,12 @@
 - No regressions in existing API contracts.
 - Docs reflect shipped behavior.
 - Migration and rollout plan included if schema changed.
+
+## Analyze/Compare execution checks
+
+For the automatic synthesis path, verify combined estimate/preauthorization,
+server-owned initial intent idempotency, continuation after navigation,
+insufficient/failed-model retries, actual usage settlement, revision snapshots,
+failed-update recovery and paid-call prevention on read/view changes. Run the
+Analyze mobile and desktop/iPad browser checks and apply the synthesis migration
+before starting a PostgreSQL runtime. See `docs/COMPARE_MODE_GUIDE.md`.

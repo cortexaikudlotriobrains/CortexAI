@@ -178,6 +178,7 @@ def _fake_db_uow_factory(session_obj):
 @pytest.fixture()
 def fastapi_client(monkeypatch):
     monkeypatch.setenv("API_KEYS", "dev-key-1")
+    monkeypatch.setenv("OPENAI_API_KEY", "fake-analysis-key")
     monkeypatch.setenv("DATABASE_URL", "sqlite+pysqlite:///:memory:")
     monkeypatch.setenv("ALLOW_NON_POSTGRES_DATABASE_URL", "true")
     rate_limit_service.reset_rate_limit_state()
@@ -424,6 +425,8 @@ def _bootstrap_api_db_schema(database_url: str) -> None:
         Column("model", String, nullable=False),
         Column("source_fingerprint", String, nullable=False),
         Column("source_snapshot", JSON, nullable=False, default=list),
+        Column("structured_result", JSON, nullable=False, default=dict),
+        Column("context_snapshot", JSON, nullable=False, default=list),
         Column("recommended_answer", String, nullable=False),
         Column("agreements", JSON, nullable=False, default=list),
         Column("disagreements", JSON, nullable=False, default=list),
@@ -451,6 +454,18 @@ def _bootstrap_api_db_schema(database_url: str) -> None:
             default="cortex-analysis-v1",
         ),
         Column("created_at", DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")),
+    )
+
+    Table(
+        "compare_analysis_intents", metadata,
+        Column("request_group_id", Uuid, primary_key=True),
+        Column("user_id", Uuid, nullable=False), Column("state", String, nullable=False),
+        Column("automatic", Boolean, default=True), Column("cancel_requested", Boolean, default=False), Column("context_snapshot", JSON, default=list),
+        Column("reservation_payload", JSON), Column("model", String),
+        Column("policy_version", String), Column("max_output_tokens", Integer),
+        Column("analysis_id", Uuid), Column("error_code", String), Column("progress_stage", String),
+        Column("created_at", DateTime, server_default=text("CURRENT_TIMESTAMP")),
+        Column("updated_at", DateTime, server_default=text("CURRENT_TIMESTAMP")),
     )
 
     Table(
@@ -816,6 +831,7 @@ class DBModeCompareOrchestrator:
 def db_mode_fastapi_client(monkeypatch):
     from server.routes import admin as admin_route
 
+    monkeypatch.setenv("OPENAI_API_KEY", "fake-analysis-key")
     db_file = Path(tempfile.gettempdir()) / f"api_compare_group_{uuid4().hex}.sqlite"
     with suppress(FileNotFoundError):
         db_file.unlink()
@@ -880,10 +896,18 @@ def db_mode_fastapi_client(monkeypatch):
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("analysis_model", "expected_credits"),
+    [("gpt-6-luna", 23), ("gpt-5.4-mini", 180)],
+)
 def test_cortex_analysis_runs_persist_and_regeneration_marks_them_stale(
     db_mode_fastapi_client,
     monkeypatch,
+    analysis_model,
+    expected_credits,
 ):
+    # Credit expectations belong to a specific model, independent of defaults/.env.
+    monkeypatch.setenv("CORTEX_ANALYSIS_MODEL", analysis_model)
     client, _ = db_mode_fastapi_client
     generated = cortex_analysis_service.AnalysisResult(
         recommended_answer="Use a staged rollout.",
@@ -899,6 +923,8 @@ def test_cortex_analysis_runs_persist_and_regeneration_marks_them_stale(
         completion_tokens=20,
         total_tokens=30,
         estimated_cost=0.001,
+        structured_result={"schemaVersion": 2, "takeaway": "Use the lower-risk approach.",
+            "passages": [], "points": [], "differences": [], "limitations": [], "linkedSources": []},
     )
     monkeypatch.setattr(
         cortex_analysis_service,
@@ -923,12 +949,21 @@ def test_cortex_analysis_runs_persist_and_regeneration_marks_them_stale(
     session_id = compare_payload["session_id"]
 
     first = client.post(f"/v1/compare/{group_id}/analysis", json={})
-    second = client.post(f"/v1/compare/{group_id}/analysis", json={})
+    second = client.post(f"/v1/compare/{group_id}/analysis?regenerate=true", json={})
     assert first.status_code == 201
     assert second.status_code == 201
     assert first.json()["analysisId"] != second.json()["analysisId"]
-    assert first.json()["aiCredits"] == 180
+    assert first.json()["model"] == analysis_model
+    assert first.json()["aiCredits"] == expected_credits
     assert first.json()["creditUsageEstimated"] is False
+    assert second.json()["model"] == analysis_model
+    assert second.json()["aiCredits"] == expected_credits
+
+    # Saved runs must keep using their recorded model after configuration changes.
+    monkeypatch.setenv(
+        "CORTEX_ANALYSIS_MODEL",
+        "gpt-5.4-mini" if analysis_model == "gpt-6-luna" else "gpt-6-luna",
+    )
 
     saved = client.get(
         "/v1/compare/analysis-runs",
@@ -937,7 +972,8 @@ def test_cortex_analysis_runs_persist_and_regeneration_marks_them_stale(
     assert saved.status_code == 200
     assert len(saved.json()) == 2
     assert saved.json()[0]["isStale"] is False
-    assert all(item["aiCredits"] == 180 for item in saved.json())
+    assert all(item["model"] == analysis_model for item in saved.json())
+    assert all(item["aiCredits"] == expected_credits for item in saved.json())
     assert all(
         item["creditUsageEstimated"] is False for item in saved.json()
     )
@@ -1789,18 +1825,21 @@ def test_stream_chat_and_compare_share_one_session_id_in_done_events(db_mode_fas
     session_id = chat_done.get("session_id")
     assert session_id
 
+    # Keep session/history coverage independent of the default output reservation
+    # after the research charge on this Free account.
     compare_response = client.post(
         "/v1/compare/stream",
         headers={"X-API-Key": "dev-key-1"},
         json={
             "prompt": "Stream compare in the same thread",
+            "generation": {"max_output_tokens": 128},
             "targets": [
                 {"provider": "openai", "model": "gpt-4o-mini"},
                 {"provider": "gemini", "model": "gemini-2.5-flash-lite"},
             ],
         },
     )
-    assert compare_response.status_code == 200
+    assert compare_response.status_code == 200, compare_response.text
     compare_events = [
         json.loads(line) for line in compare_response.text.splitlines() if line.strip()
     ]
@@ -2053,3 +2092,187 @@ def test_redact_sensitive_headers_masks_auth_values():
     assert redacted["X-API-Key"] == "[REDACTED]"
     assert redacted["Authorization"] == "[REDACTED]"
     assert redacted["Content-Type"] == "application/json"
+
+
+def _synthesis_result(**kwargs):
+    sources = kwargs["sources"]
+    return cortex_analysis_service.AnalysisResult(
+        recommended_answer="Take a staged approach.", agreements=[], disagreements=[],
+        disagreement_note=None, unique_insights=[], confidence_level="limited",
+        confidence_reason="Supplied answers.", verify_items=[], high_stakes_domain=None,
+        prompt_tokens=10, completion_tokens=20, total_tokens=30, estimated_cost=.001,
+        structured_result={"schemaVersion": 2, "takeaway": "Take a staged approach.",
+            "passages": [{"requestId": source.request_id, "responseVersion": source.response_version,
+                "provider": source.provider, "model": source.model, "quote": source.content} for source in sources],
+            "points": [], "differences": [], "limitations": [], "linkedSources": []})
+
+
+def test_automatic_analysis_is_once_only_and_history_reads_never_charge(db_mode_fastapi_client, monkeypatch):
+    monkeypatch.delenv("CORTEX_ANALYSIS_MAX_OUTPUT_TOKENS", raising=False)
+    client, _ = db_mode_fastapi_client
+    calls = []
+    def generate(**kwargs):
+        calls.append(kwargs)
+        for stage in ("reading", "synthesizing", "validating"):
+            kwargs["on_progress"](stage)
+            from db.tables import get_table
+            with persistence_service.db_uow(commit_on_success=False) as db:
+                table = get_table("compare_analysis_intents")
+                intent = db.execute(select(table).where(table.c.state == "processing")).mappings().one()
+                assert intent["progress_stage"] == stage
+                assert intent["max_output_tokens"] == kwargs["max_output_tokens"] == 4000
+                assert intent["reservation_payload"]["model_estimates"][0]["output_tokens"] == 4000
+            progress = client.get(f"/v1/compare/{intent['request_group_id']}/analysis-state")
+            assert progress.status_code == 200
+            assert progress.json()["progressStage"] == stage
+        return _synthesis_result(**kwargs)
+    monkeypatch.setattr(cortex_analysis_service, "analyze_responses", generate)
+    response = client.post("/v1/compare", json={"prompt": "Lend-Lease continues, no active fighting",
+        "automatic_analysis": True,
+        "context": {"conversation_history": [{"role": "user", "content": "What if the U.S. never fought in WWII?"}]},
+        "targets": [{"provider": "openai", "model": "gpt-4o-mini"}, {"provider": "gemini", "model": "gemini-2.5-flash"}],
+        "routing": {"smart_mode": False, "web_mode": "off"}})
+    assert response.status_code == 200, response.text
+    group = response.json()["request_group_id"]
+    assert len(calls) == 1
+    assert calls[0]["context"][0]["content"] == "What if the U.S. never fought in WWII?"
+    for _ in range(3):
+        state = client.get(f"/v1/compare/{group}/analysis-state")
+        saved = client.get("/v1/compare/analysis-runs", params={"request_group_id": group})
+        assert state.json()["state"] == "complete"
+        assert state.json()["progressStage"] is None
+        assert len(saved.json()) == 1
+        assert saved.json()[0]["structuredResult"]["schemaVersion"] == 2
+        assert saved.json()[0]["isStale"] is False
+    assert len(calls) == 1
+    # Duplicate explicit creation reuses the same policy/revisions/context.
+    same = client.post(f"/v1/compare/{group}/analysis", json={})
+    assert same.status_code == 201
+    assert len(calls) == 1
+    source = response.json()["responses"][0]
+    regenerated = client.post("/v1/chat", json={"prompt": "Lend-Lease continues, no active fighting",
+        "provider": source["provider"], "model": source["model"],
+        "context": {"session_id": response.json()["session_id"]},
+        "regeneration": {"source_request_id": source["request_id"]},
+        "routing": {"smart_mode": False, "web_mode": "off"}})
+    assert regenerated.status_code == 200, regenerated.text
+    assert len(calls) == 1  # Later regeneration never silently purchases an update.
+    saved = client.get("/v1/compare/analysis-runs", params={"request_group_id": group}).json()
+    assert saved[0]["isStale"] is True
+    assert any(item["responseVersion"] == 1 and item["content"] == "A" for item in saved[0]["sourceResponses"])
+    old_id = saved[0]["analysisId"]
+    def fail(**kwargs):
+        raise cortex_analysis_service.CortexAnalysisGenerationError("failed")
+    monkeypatch.setattr(cortex_analysis_service, "analyze_responses", fail)
+    failed = client.post(f"/v1/compare/{group}/analysis", json={})
+    assert failed.status_code == 502
+    saved = client.get("/v1/compare/analysis-runs", params={"request_group_id": group}).json()
+    assert len(saved) == 1 and saved[0]["analysisId"] == old_id
+    monkeypatch.setattr(cortex_analysis_service, "analyze_responses", generate)
+    updated = client.post(f"/v1/compare/{group}/analysis", json={})
+    assert updated.status_code == 201, updated.text
+    assert updated.json()["analysisId"] != old_id
+    assert updated.json()["isStale"] is False
+    assert calls[-1]["max_output_tokens"] == 4000
+
+
+def test_automatic_analysis_preflight_stops_before_models_when_provider_unavailable(db_mode_fastapi_client, monkeypatch):
+    client, orchestrator = db_mode_fastapi_client
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(orchestrator, "compare", lambda **kwargs: pytest.fail("No provider calls before combined preflight"))
+    response = client.post("/v1/compare", json={"prompt": "Question", "automatic_analysis": True,
+        "targets": [{"provider": "openai", "model": "gpt-4o-mini"}, {"provider": "gemini", "model": "gemini-2.5-flash"}],
+        "routing": {"smart_mode": False, "web_mode": "off"}})
+    assert response.status_code == 503
+
+
+def test_initial_synthesis_waits_for_failed_response_retry(db_mode_fastapi_client, monkeypatch):
+    from dataclasses import replace
+    from models.unified_response import NormalizedError
+    client, orchestrator = db_mode_fastapi_client
+    original = orchestrator.compare
+    def partial(**kwargs):
+        result = original(**kwargs)
+        failed = replace(result.responses[1], text="", error=NormalizedError(
+            code="timeout", message="Timed out", provider="gemini", retryable=True))
+        return MultiUnifiedResponse.from_responses(request_group_id=result.request_group_id,
+            prompt=result.prompt, responses=[result.responses[0], failed])
+    monkeypatch.setattr(orchestrator, "compare", partial)
+    calls = []
+    def generate(**kwargs):
+        calls.append(kwargs)
+        return _synthesis_result(**kwargs)
+    monkeypatch.setattr(cortex_analysis_service, "analyze_responses", generate)
+    result = client.post("/v1/compare", json={"prompt": "Question", "automatic_analysis": True,
+        "targets": [{"provider": "openai", "model": "gpt-4o-mini"}, {"provider": "gemini", "model": "gemini-2.5-flash"}],
+        "routing": {"smart_mode": False, "web_mode": "off"}})
+    assert result.status_code == 200, result.text
+    group = result.json()["request_group_id"]
+    assert calls == []
+    assert client.get(f"/v1/compare/{group}/analysis-state").json()["state"] == "waiting"
+    failed = result.json()["responses"][1]
+    retry = client.post("/v1/chat", json={"prompt": "Question", "provider": failed["provider"], "model": failed["model"],
+        "context": {"session_id": result.json()["session_id"]},
+        "regeneration": {"source_request_id": failed["request_id"]},
+        "routing": {"smart_mode": False, "web_mode": "off"}})
+    assert retry.status_code == 200, retry.text
+    assert len(calls) == 1
+    assert client.get(f"/v1/compare/{group}/analysis-state").json()["state"] == "complete"
+
+
+def test_analysis_cancel_state_is_owned_and_shared(db_mode_fastapi_client, monkeypatch):
+    from server import analysis_jobs
+    from db import analysis_repository
+    client, _ = db_mode_fastapi_client
+    owner = UUID("11111111-1111-1111-1111-111111111111")
+    group = uuid4()
+    analysis_jobs.authorize_initial(user_id=owner, group_id=group, question="Question", context=[], output_tokens=[100, 100])
+    response = client.post(f"/v1/compare/{group}/cancel", json={})
+    assert response.status_code == 204
+    with persistence_service.db_uow(commit_on_success=False) as db:
+        assert analysis_repository.get_intent(db, owner, group)["cancel_requested"] is True
+        assert analysis_repository.get_intent(db, uuid4(), group) is None
+    analysis_jobs.abandon_initial(owner, group)
+
+
+def test_waiting_intents_without_persisted_answers_do_not_starve_the_queue(db_mode_fastapi_client):
+    from db import analysis_repository
+    client, _ = db_mode_fastapi_client
+    result = client.post("/v1/compare", json={"prompt": "Question",
+        "targets": [{"provider": "openai", "model": "gpt-4o-mini"}, {"provider": "gemini", "model": "gemini-2.5-flash"}],
+        "routing": {"smart_mode": False, "web_mode": "off"}})
+    assert result.status_code == 200
+    owner = UUID("11111111-1111-1111-1111-111111111111")
+    group = UUID(result.json()["request_group_id"])
+    with persistence_service.db_uow() as db:
+        for _ in range(22):
+            analysis_repository.create_intent(db, request_group_id=uuid4(), user_id=owner,
+                state="waiting", automatic=True, model="gpt-5.4-mini", policy_version="test", max_output_tokens=1800)
+        analysis_repository.create_intent(db, request_group_id=group, user_id=owner,
+            state="queued", automatic=True, model="gpt-5.4-mini", policy_version="test", max_output_tokens=1800)
+    with persistence_service.db_uow(commit_on_success=False) as db:
+        assert [row["request_group_id"] for row in analysis_repository.pending_intents(db)] == [group]
+
+
+def test_manual_legacy_synthesis_uses_bounded_owned_prior_context(db_mode_fastapi_client, monkeypatch):
+    from datetime import datetime
+    from db.tables import get_table
+    client, _ = db_mode_fastapi_client
+    result = client.post("/v1/compare", json={"prompt": "Lend-Lease still continues, but no active fighting",
+        "targets": [{"provider": "openai", "model": "gpt-4o-mini"}, {"provider": "gemini", "model": "gemini-2.5-flash"}],
+        "routing": {"smart_mode": False, "web_mode": "off"}})
+    assert result.status_code == 200
+    session_id = UUID(result.json()["session_id"])
+    group = result.json()["request_group_id"]
+    with persistence_service.db_uow() as db:
+        db.execute(insert(get_table("messages")).values(id=uuid4(), session_id=session_id,
+            role="user", content="How would WWII end without active U.S. fighting?", created_at=datetime(2020, 1, 1)))
+    captured = []
+    def generate(**kwargs):
+        captured.extend(kwargs["context"])
+        return _synthesis_result(**kwargs)
+    monkeypatch.setattr(cortex_analysis_service, "analyze_responses", generate)
+    response = client.post(f"/v1/compare/{group}/analysis", json={})
+    assert response.status_code == 201, response.text
+    assert {"role": "user", "content": "How would WWII end without active U.S. fighting?"} in captured
+    assert response.json()["contextSnapshot"] == captured

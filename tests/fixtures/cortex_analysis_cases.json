@@ -1,0 +1,386 @@
+{
+  "fixture_version": 2,
+  "purpose": "Semantic regression rubric for Cortex Analysis redesign",
+  "limitations": [
+    "Selected excerpts from six user-supplied examples, not complete recorded API requests or full model responses.",
+    "Topic claims are supplied material for synthesis evaluation, not independently verified medical, financial, historical, or sporting facts.",
+    "Expected behavior is a rubric, not an exact golden answer. Do not assert model quality from mocked outputs alone.",
+    "Fixture response IDs are local identifiers. Real evidence must resolve to actual immutable response IDs and revisions.",
+    "An omitted source URL means no link was present in these supplied excerpts, not that the production provider had no sources."
+  ],
+  "global_requirements": [
+    "Answer the user's question before describing differences between models.",
+    "Agreement does not establish truth or independent corroboration.",
+    "Treat paraphrases as potentially shared; complementary information is not automatically disagreement.",
+    "Only show useful evidence-backed optional blocks; omit empty or unsupported blocks.",
+    "Do not fabricate URLs, exact quotes, document contents, verification, or provider rankings.",
+    "Preserve explicit follow-up constraints and distinguish claims, interpretations, and unresolved assumptions.",
+    "Present the overall crux in The takeaway and include an exact attributed quotation from each contributing model in In their words.",
+    "Do not use generic Both models agree, All three agree, or agreement-percentage banners.",
+    "Keep the Source view accessible when no website links exist; model passages remain inspectable.",
+    "Preserve direct writing; source attribution must remain accurate even when a conclusion is stated confidently."
+  ],
+  "cases": [
+    {
+      "id": "athletes_daughters",
+      "input_completeness": "selected_excerpts_not_full_transcript",
+      "question": "Why do people who are prime athletes have daughters but less no of such athletes have sons...",
+      "responses": [
+        {
+          "id": "athletes_a",
+          "revision": 1,
+          "display_name": "Claude Sonnet",
+          "excerpts": [
+            "The effect was most pronounced in a specific subgroup: the subgroup in which the effect of elite sports participation is most pronounced consists of female athletes who compete in endurance or precision sports and who have a child during their careers. Among them, the probability of having a daughter or a son is 63% versus 37%, whereas it is approximately 49% versus 51% in the global population.",
+            "Importantly, this isn't true of all elite athletes — it's concentrated in certain categories.",
+            "The authors note this is a preliminary observational investigation"
+          ],
+          "source_metadata": []
+        },
+        {
+          "id": "athletes_b",
+          "revision": 1,
+          "display_name": "Grok",
+          "excerpts": [
+            "The skew was even more pronounced for female endurance/precision athletes who gave birth during their competitive careers (SR as low as 0.581, or roughly 63% daughters vs. 37% sons). Male athletes showed a milder effect, and the difference was less marked after retirement.",
+            "The study (published in Scientific Reports) is observational and does not pinpoint exact mechanisms"
+          ],
+          "source_metadata": []
+        }
+      ],
+      "observed_analysis_failure": "A stronger maternal-athlete effect was classified as raised only by Grok, although both responses explicitly describe it.",
+      "expected_behavior": [
+        "Scope the supplied association to the athlete categories/subgroups discussed; do not generalize to every elite athlete or every athletic father.",
+        "Recognize the active-career female endurance/precision subgroup as shared material.",
+        "Distinguish an observational association from proposed hormonal or physiological mechanisms.",
+        "Do not use two references to the same study as two independent confirmations.",
+        "Avoid a forced disagreement or an irrelevant billionaire comparison.",
+        "Include short exact quotations from the actual contributing responses; describe their combined substance instead of using a generic agreement/disagreement label."
+      ],
+      "forbidden_outputs": [
+        "Only Grok raised the stronger maternal-athlete effect.",
+        "Training stress is established as the cause.",
+        "All elite athletes tend to have daughters."
+      ],
+      "evidence_expectation": "Any shared-subgroup block links exact spans from athletes_a and athletes_b. No source URL may be invented."
+    },
+    {
+      "id": "fast_remittance",
+      "input_completeness": "selected_excerpts_not_full_transcript",
+      "question": "How payments via remitly or wise are processed as they transfer the money into client account within minutes.. how this is possible",
+      "responses": [
+        {
+          "id": "payments_a",
+          "revision": 1,
+          "display_name": "Grok",
+          "excerpts": [
+            "Wise simultaneously (or near-simultaneously) pays the recipient from its own local account in the destination country, using local payment systems.",
+            "The actual funds don’t cross borders for each transaction—Wise balances its accounts internally or via netting/settlement later.",
+            "Speed varies by corridor, funding method, verification needs, time zones, holidays, and amount."
+          ],
+          "source_metadata": []
+        },
+        {
+          "id": "payments_b",
+          "revision": 1,
+          "display_name": "Claude Haiku",
+          "excerpts": [
+            "When you send $200 to someone in India, the provider can pay the recipient from its own rupee balance right away.",
+            "The slow interbank step happens after the customer sees the payout.",
+            "Flows go in both directions all day.",
+            "Speed depends on the destination country and payout method."
+          ],
+          "source_metadata": []
+        }
+      ],
+      "observed_analysis_failure": "Later settlement was labeled unique to Haiku even though both responses explicitly describe it.",
+      "expected_behavior": [
+        "Give a concrete sequence explaining sender funding, access to destination liquidity, local payout, and later provider settlement as described by the inputs.",
+        "Explain the distinction between when the recipient can use the funds and when the provider settles or rebalances.",
+        "Treat later settlement as a shared conclusion, not unique to Haiku.",
+        "Do not force a meaningful difference when the excerpts are complementary.",
+        "Keep corridor, funding, and compliance conditions; do not promise universal instant delivery.",
+        "Include short exact quotations from the actual contributing responses; describe their combined substance instead of using a generic agreement/disagreement label."
+      ],
+      "forbidden_outputs": [
+        "Only Haiku explains settlement after payout.",
+        "Every Wise or Remitly transfer works identically and arrives instantly.",
+        "The sender's identical physical dollars necessarily arrive later in the recipient's country."
+      ],
+      "evidence_expectation": "A shared settlement conclusion cites the exact later-settlement passage from payments_a and the after-payout passage from payments_b."
+    },
+    {
+      "id": "ai_investment_circularity",
+      "input_completeness": "selected_excerpts_not_full_transcript",
+      "question": "How much investment are actually coming into AI..and what part is actual investment instead of companies moving money around to each other",
+      "responses": [
+        {
+          "id": "investment_a",
+          "revision": 1,
+          "display_name": "Claude Sonnet 5.5",
+          "excerpts": [
+            "The circular financing is probably in the low hundreds of billions of actual dollars.",
+            "The headline figures are inflated by guarantees, conditional commitments and non-binding intentions.",
+            "I couldn't find an authoritative estimate of the split.",
+            "Several of these sources are blogs and newsletters rather than filings."
+          ],
+          "source_metadata": []
+        },
+        {
+          "id": "investment_b",
+          "revision": 1,
+          "display_name": "GPT-6 Luna",
+          "excerpts": [
+            "There isn’t a reliable public number for “AI investment after removing the circular money.”",
+            "S&P Global estimates $235 billion of global private AI investment in 2025, up from $109 billion in 2024. That is a measure of investment raised by AI companies, not a measure of new data centers or equipment bought",
+            "That still finances physical assets—but shifts who provides the money and where the debt appears.",
+            "A dollar of announced investment is not necessarily a dollar already spent."
+          ],
+          "source_metadata": [
+            {
+              "id": "spglobal_ai_2025",
+              "title": "The most wanted exposure: LP allocation intent and unicorn AI deal concentration in private markets",
+              "url": "https://www.spglobal.com/market-intelligence/en/news-insights/research/2026/05/the-most-wanted-exposure-lp-allocation-intent-and-unicorn-ai-deal-concentration-in-private-markets",
+              "mapping_status": "linked_to_private_investment_passage_in_supplied_answer"
+            },
+            {
+              "id": "bis_ai_financing",
+              "title": "Financing the AI infrastructure boom: on- and off-balance sheet borrowing",
+              "url": "https://www.bis.org/publications/qr-202603/financing-ai-infrastructure-boom-on-and-off-balance-sheet-borrowing",
+              "mapping_status": "linked_to_financing_discussion_in_supplied_answer"
+            }
+          ]
+        }
+      ],
+      "observed_analysis_failure": "The summary treats a broad majority claim as shared and labels announced-versus-spent as unique to GPT although Claude also distinguishes conditional headlines from actual dollars.",
+      "expected_behavior": [
+        "Distinguish private funding raised, physical capital spending, borrowing, guarantees, and future purchase commitments.",
+        "Explain that real infrastructure spending and circular financing can describe the same economic chain; they are not mutually exclusive buckets.",
+        "Do not add incompatible annual and multi-year figures or invent a clean percentage split.",
+        "Show a meaningful difference in how far the answers are willing to quantify circular financing: a rough estimate versus no defensible clean public split.",
+        "Treat announced versus already spent as shared material.",
+        "Display the supplied source links and their actual model attribution; do not claim Cortex independently read them.",
+        "Include short exact quotations from the actual contributing responses; describe their combined substance instead of using a generic agreement/disagreement label."
+      ],
+      "forbidden_outputs": [
+        "Both models establish the percentage of AI investment that is real versus circular.",
+        "Only GPT distinguishes announcements from money already spent.",
+        "The exact net circular share can be calculated by adding all cited headlines."
+      ],
+      "evidence_expectation": "The meaningful-difference block cites investment_a's rough estimate and investment_b's no-reliable-total sentence. A shared announced/spent conclusion cites both relevant spans. Source links are attributed to investment_b, not fabricated for investment_a."
+    },
+    {
+      "id": "newborn_weight_gain",
+      "input_completeness": "selected_excerpts_not_full_transcript",
+      "question": "Is it to okay for a new born kid to gain around 38 GM's of weight per day in first 2 week",
+      "responses": [
+        {
+          "id": "newborn_a",
+          "revision": 1,
+          "display_name": "Claude Haiku",
+          "excerpts": [
+            "Yes, 38 grams a day is generally within the normal range for a newborn in the first two weeks",
+            "Most newborns lose some weight in the first few days, usually regaining their birth weight by about 10 to 14 days old.",
+            "Are they having enough wet and dirty diapers",
+            "Are they alert and active between feeds?",
+            "Your baby's doctor can tell you whether this rate fits your child's growth curve"
+          ],
+          "source_metadata": []
+        },
+        {
+          "id": "newborn_b",
+          "revision": 1,
+          "display_name": "Grok",
+          "excerpts": [
+            "Yes, a gain of around 38 grams per day can be normal for a newborn in the early weeks, especially once the typical initial weight loss ends and steady gain begins.",
+            "Other reassuring signs include frequent effective feeds, adequate wet and dirty diapers, and an alert, content baby between feeds.",
+            "A pediatrician or healthcare provider should evaluate your baby’s specific weights, growth chart, feeding, and overall health"
+          ],
+          "source_metadata": []
+        }
+      ],
+      "observed_analysis_failure": "Diaper output and alertness were labeled unique to Haiku even though both answers include them, while high confidence was based on matching recommendations.",
+      "expected_behavior": [
+        "Recognize feeding, diapers, alertness, and individual growth assessment as shared points.",
+        "Use conditional language appropriate to the supplied material; do not diagnose or declare the individual baby healthy from one daily rate.",
+        "Identify missing measurement context when useful: which weights/dates were used and whether the interval starts at birth or after initial loss.",
+        "Do not turn agreement into medical certainty.",
+        "Keep any follow-up advice relevant and proportionate rather than appending a generic checklist.",
+        "Include short exact quotations from the actual contributing responses; describe their combined substance instead of using a generic agreement/disagreement label."
+      ],
+      "forbidden_outputs": [
+        "Only Haiku mentions diapers or alertness.",
+        "High confidence means the individual baby's growth is medically verified.",
+        "The one number alone establishes that the baby is healthy."
+      ],
+      "evidence_expectation": "A shared practical-signs conclusion cites newborn_a and newborn_b. Missing baseline is framed as an unanswered question, not an invented patient fact."
+    },
+    {
+      "id": "wwii_lend_lease_follow_up",
+      "input_completeness": "selected_excerpts_not_full_transcript",
+      "prior_context": [
+        {
+          "role": "user",
+          "content": "how the ww2 would have ended if America had never got involved in fighting"
+        }
+      ],
+      "question": "if america lend lease program was still in place but no active fighting",
+      "explicit_constraints": [
+        "U.S. material aid through Lend-Lease continues.",
+        "No active U.S. combat role."
+      ],
+      "responses": [
+        {
+          "id": "wwii_a",
+          "revision": 1,
+          "display_name": "GPT-5.6 Luna",
+          "excerpts": [
+            "Assuming the United States continues Lend-Lease at roughly historical levels but never sends combat forces or conducts its own attacks",
+            "The likely result is a Soviet victory in Europe, but later—perhaps in 1946 or afterward, rather than May 1945.",
+            "The Red Army might advance much farther west, potentially occupying all of Germany, France, or even parts of the Low Countries before meeting British forces.",
+            "The Soviet Union could still enter the war against Japan, as it did historically in August 1945."
+          ],
+          "source_metadata": []
+        },
+        {
+          "id": "wwii_b",
+          "revision": 1,
+          "display_name": "Claude Sonnet",
+          "excerpts": [
+            "The Soviet Union still receives massive Lend-Lease aid",
+            "But without a Western Front diverting German divisions, Hitler can concentrate far more of the Wehrmacht against the USSR.",
+            "A Soviet-occupied France, Low Countries, and all of Germany becomes a real possibility.",
+            "No Manhattan Project-driven atomic bombs",
+            "A USSR-dominated Europe, potentially extending all the way to the Atlantic or Pyrenees"
+          ],
+          "source_metadata": []
+        }
+      ],
+      "observed_analysis_failure": "Minor wording differences about possible Soviet reach become a conflict, speculative outcomes become verification targets, and historical August 1945 can be misread as a fixed date in the counterfactual.",
+      "expected_behavior": [
+        "Carry forward the prior WWII question and explicitly preserve continued Lend-Lease plus no active U.S. combat.",
+        "Distinguish supplied historical premises from speculative trajectories; use appropriately conditional wording.",
+        "Do not treat overlapping possible western advances as a substantive contradiction solely because one lists additional places.",
+        "Flag that no U.S. combat does not by itself establish no nuclear research or no Manhattan Project; that requires an additional assumption.",
+        "Do not fix Soviet entry into the counterfactual Pacific war to the historical August 1945 date.",
+        "Discuss the uncertainty-driving conditions rather than pretending an unobserved counterfactual outcome can be verified.",
+        "Include short exact quotations from the actual contributing responses; describe their combined substance instead of using a generic agreement/disagreement label."
+      ],
+      "forbidden_outputs": [
+        "Lend-Lease is absent in this follow-up.",
+        "The Soviet Union definitely reaches the Atlantic in a particular year.",
+        "No U.S. fighting necessarily means no nuclear research.",
+        "August 1945 remains the established Soviet intervention date in this alternative timeline."
+      ],
+      "evidence_expectation": "Evidence remains tied to the clarified follow-up and supplied response versions. Cortex may identify an assumption as reasoning without inventing a web citation for it."
+    },
+    {
+      "id": "tennis_regional_representation",
+      "input_completeness": "selected_excerpts_not_full_transcript",
+      "question": "Why is it that Serbian , Kazak or Belarusian or Russian player have kind of started dominating the tennis",
+      "responses": [
+        {
+          "id": "tennis_a",
+          "revision": 1,
+          "display_name": "Grok",
+          "excerpts": [
+            "The former Soviet Union, Yugoslavia, and Eastern Bloc emphasized discipline, physical conditioning, and mental toughness in sports.",
+            "It has notably recruited Russian-born talent",
+            "Geopolitical and practical shifts post-2022",
+            "It’s more accurate to describe high representation and periodic peaks",
+            "Rybakina becoming world No. 1."
+          ],
+          "source_metadata": []
+        },
+        {
+          "id": "tennis_b",
+          "revision": 1,
+          "display_name": "DeepSeek Pro",
+          "excerpts": [
+            "Much of Kazakhstan's success — Elena Rybakina and Alexander Bublik — comes from Kazakhstan deliberately recruiting Russian teenagers and funding them in exchange for representing Kazakhstan",
+            "The result: tennis rewarded patient, disciplined, physically tough baseline players",
+            "Djokovic isn't part of the post-Soviet cluster — he comes from the former Yugoslavia",
+            "\"Dominating\" is a bit of an exaggeration — it's a strong, sustained pattern, not a monopoly"
+          ],
+          "source_metadata": []
+        }
+      ],
+      "observed_analysis_failure": "Complementary causal stories become differences, broad cultural narratives are repeated as explanation, and distinctions in sporting nationality and development can get blurred.",
+      "expected_behavior": [
+        "Qualify the premise by tour, period, rankings/titles, and prominent individuals without inventing current statistics.",
+        "Distinguish Kazakhstan's recruitment/funding from domestic development and distinguish former Yugoslavia from the former Soviet Union.",
+        "Treat post-2022 restrictions and court/style explanations as potentially complementary, not automatically contradictory.",
+        "Do not present cultural toughness as established causal proof.",
+        "Do not propagate a time-sensitive world-No.-1 claim as independently checked when current verification is unavailable.",
+        "Include short exact quotations from the actual contributing responses; describe their combined substance instead of using a generic agreement/disagreement label."
+      ],
+      "forbidden_outputs": [
+        "All named countries share one identical Soviet development system.",
+        "Two cultural explanations establish that national character causes tennis success.",
+        "The supplied current ranking claim has been verified by Cortex."
+      ],
+      "evidence_expectation": "A shared Kazakhstan conclusion cites both responses. Current rankings remain unverified unless supplied reliable current evidence actually establishes them."
+    }
+  ],
+  "cross_cutting_acceptance_scenarios": [
+    {
+      "id": "three_responses_partial_agreement",
+      "expectation": "Identify only actual contributors and explain a consequential dissent with attributed passages. Do not use a generic 2-of-3 voting badge or claim all three supplied the same point."
+    },
+    {
+      "id": "same_provider_distinct_models",
+      "expectation": "Resolve evidence and controls by response/revision identity, not provider name or display order."
+    },
+    {
+      "id": "source_metadata_only",
+      "expectation": "A title and URL may be shown as attached metadata, but not as proof that the page was retrieved or supports a generated claim."
+    },
+    {
+      "id": "legacy_history",
+      "expectation": "Old saved analyses remain readable; absent evidence is not retroactively fabricated."
+    },
+    {
+      "id": "regenerated_source",
+      "expectation": "A new response revision marks the prior analysis stale; historical evidence remains bound to its original revision; explicit Update initiates the paid run."
+    },
+    {
+      "id": "failed_analysis_rerun",
+      "expectation": "Failure does not erase or replace a valid previous analysis with a blank or successful-looking result."
+    },
+    {
+      "id": "views_are_free_of_model_calls",
+      "expectation": "The initial Send authorizes model answers plus one automatic eligible synthesis. Merely opening views/history or resizing creates no new paid work; duplicate events/remounts must not repeat synthesis."
+    },
+    {
+      "id": "responsive_actions",
+      "expectation": "Copy, regenerate, ratings, selected model, and evidence navigation target the same response across desktop/tablet/mobile and tab changes."
+    },
+    {
+      "id": "automatic_sequence_with_upfront_cost",
+      "expectation": "Before Send show selected models and the estimated combined cost. When model requests terminate with at least two successes, run synthesis once without a second confirmation; honor wallet reservation and actual settlement."
+    },
+    {
+      "id": "source_view_without_links",
+      "expectation": "Sources stays available and shows No linked sources supplied plus the available model passages."
+    },
+    {
+      "id": "pending_and_failed_update",
+      "expectation": "A previous valid analysis remains readable while updating and after failure; its quotes open the original immutable response snapshot."
+    },
+    {
+      "id": "response_revision_feedback",
+      "expectation": "Regeneration starts a distinct revision with separate feedback; historical feedback remains attached to its original response/run."
+    },
+    {
+      "id": "background_and_history_idempotency",
+      "expectation": "The authorized initial run can finish after navigation. Returning to history does not start another synthesis or reserve more credits."
+    }
+  ],
+  "approved_product_behavior": {
+    "initial_workflow": "Send runs the selected model answers and automatically creates one eligible synthesis; disclose the combined estimate upfront and do not ask for a second approval.",
+    "presentation": "The takeaway and visible In their words quotations; no Both agree / All agree / agreement-count badge.",
+    "tone": "Clear and direct synthesis of supplied model conclusions, with exact attribution and relevant qualifications rather than repetitive hedging.",
+    "sources": "Always-visible Sources entry, separate linked websites and model passages, explicit missing-link state.",
+    "follow_on_work": "Update analysis and retries are direct cost-disclosed actions without extra confirmation; view changes create no paid work."
+  }
+}

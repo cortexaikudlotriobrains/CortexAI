@@ -168,8 +168,10 @@ Signs out every other device and keeps the current session.
   with k-anonymity: only the first 5 hex characters of the SHA-1 leave the server and responses
   are padded. If the service is unreachable the check is skipped (logged), never blocking sign-up.
 - **CORS**: only trusted origins (`AUTH_ALLOWED_ORIGINS`, the origin of
-  `COGNITO_SUCCESS_REDIRECT_URI`, loopback outside production) get credentialed CORS. Every
-  other origin gets `Access-Control-Allow-Origin: *` without credentials, so API-key/Bearer
+  `COGNITO_SUCCESS_REDIRECT_URI`, loopback outside production) get credentialed CORS.
+  Trusted responses reflect the exact origin and include `Vary: Origin`, including
+  the first login request before a browser has a session cookie. Every
+  other origin gets public CORS without credentials, so API-key/Bearer
   calls still work but no other site, including a sibling subdomain, can read a
   cookie-authenticated response. The React app calls the API on its own origin and needs no CORS.
 - **No account enumeration**: sign-up, resend, forgot-password and login give identical

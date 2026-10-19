@@ -26,6 +26,7 @@ from models.user_context import UserContext
 from orchestrator.core import CortexOrchestrator
 from orchestrator.generation_policy import GenerationBudgetResolution
 from orchestrator.model_registry import ModelRegistry
+from server import analysis_jobs
 from server import attachments as attachments_service
 from server import persistence as persistence_service
 from server.activity_stream import ActivityStream
@@ -164,7 +165,7 @@ def _build_user_context(context_req):
     history = []
     if context_req.conversation_history:
         history = [
-            {"role": item.role, "content": item.content}
+            item.model_dump(exclude_none=True)
             for item in context_req.conversation_history
         ]
 
@@ -514,6 +515,8 @@ async def compare(
     auth: AuthResult = Depends(get_auth),
 ):
     """Send a prompt to multiple AI models and compare responses."""
+    if request.automatic_analysis and not API_DB_ENABLED:
+        raise HTTPException(501, detail="Automatic analysis requires database persistence.")
     if len(request.targets) > MAX_COMPARE_TARGETS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -617,6 +620,7 @@ async def compare(
     kwargs["web_search_policy"] = web_policy.to_provider_dict()
     kwargs["_native_web_search"] = native_web_search
 
+    request_group_id = str(uuid.uuid4())
     billing_reservation: ReservedRequestUsage | None = None
     if API_DB_ENABLED and persistence_resolution is not None:
         billing_reservation = _reserve_compare_usage(
@@ -636,6 +640,18 @@ async def compare(
             credit_activity_id=request.credit_activity_id,
             generation_budgets=generation_budgets,
         )
+        if request.automatic_analysis:
+            try:
+                analysis_jobs.authorize_initial(
+                    user_id=persistence_resolution.user_id,
+                    group_id=uuid.UUID(request_group_id), question=effective_prompt,
+                    context=[item.model_dump() for item in request.context.conversation_history]
+                        if request.context and request.context.conversation_history else [],
+                    output_tokens=[item.effective_max_output_tokens for item in generation_budgets],
+                )
+            except BaseException:
+                _release_compare_usage_safely(billing_reservation, reason="analysis_preflight_failed")
+                raise
         generation_budgets = [
             constrain_budget_to_reservation(
                 budget,
@@ -674,7 +690,7 @@ async def compare(
             for index, item in enumerate(response.responses)
         ]
         response = MultiUnifiedResponse.from_responses(
-            request_group_id=response.request_group_id,
+            request_group_id=request_group_id if request.automatic_analysis else response.request_group_id,
             prompt=response.prompt,
             responses=normalized_responses,
         )
@@ -686,6 +702,8 @@ async def compare(
                 attachments_present=bool(resolved_attachments),
             )
     except BaseException:
+        if request.automatic_analysis and persistence_resolution is not None:
+            analysis_jobs.abandon_initial(persistence_resolution.user_id, uuid.UUID(request_group_id))
         if not provider_completed:
             _release_compare_usage_safely(
                 billing_reservation,
@@ -710,7 +728,15 @@ async def compare(
             )
         except Exception:
             logger.exception("Compare persistence failed in DB mode")
+            if request.automatic_analysis:
+                analysis_jobs.abandon_initial(persistence_resolution.user_id, uuid.UUID(request_group_id))
+                raise HTTPException(503, detail={"code": "compare_persistence_failed",
+                    "message": "Your answers could not be saved. Please try again."}) from None
 
+    if request.automatic_analysis and persistence_resolution is not None:
+        await asyncio.shield(analysis_jobs.track_task(asyncio.create_task(
+            analysis_jobs.continue_initial(persistence_resolution.user_id, uuid.UUID(request_group_id))
+        )))
     dto = CompareResponseDTO.from_multi_unified_response(response, session_id=resolved_session_id)
     return dto
 
@@ -723,6 +749,8 @@ async def compare_stream(
     auth: AuthResult = Depends(get_auth),
 ):
     """Stream compare responses as NDJSON events, then emit aggregate summary."""
+    if request.automatic_analysis and not API_DB_ENABLED:
+        raise HTTPException(501, detail="Automatic analysis requires database persistence.")
     if len(request.targets) > MAX_COMPARE_TARGETS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -841,6 +869,18 @@ async def compare_stream(
             credit_activity_id=request.credit_activity_id,
             generation_budgets=generation_budgets,
         )
+        if request.automatic_analysis:
+            try:
+                analysis_jobs.authorize_initial(
+                    user_id=persistence_resolution.user_id,
+                    group_id=uuid.UUID(request_group_id), question=effective_prompt,
+                    context=[item.model_dump() for item in request.context.conversation_history]
+                        if request.context and request.context.conversation_history else [],
+                    output_tokens=[item.effective_max_output_tokens for item in generation_budgets],
+                )
+            except BaseException:
+                _release_compare_usage_safely(billing_reservation, reason="analysis_preflight_failed")
+                raise
         generation_budgets = [
             constrain_budget_to_reservation(
                 budget,
@@ -925,6 +965,7 @@ async def compare_stream(
                 "mode": "compare",
                 "session_id": requested_session_id,
                 "target_count": len(request.targets),
+                "request_group_id": request_group_id,
                 "research_mode": research_mode,
                 "web_sources": 0,
                 "web_source_items": [],
@@ -1301,7 +1342,15 @@ async def compare_stream(
                     )
                 except Exception:
                     logger.exception("Compare stream persistence failed in DB mode")
+                    if request.automatic_analysis:
+                        analysis_jobs.abandon_initial(persistence_resolution.user_id, uuid.UUID(request_group_id))
+                        raise HTTPException(503, detail={"code": "compare_persistence_failed",
+                            "message": "Your answers could not be saved. Please try again."}) from None
 
+            if request.automatic_analysis and persistence_resolution is not None:
+                analysis_jobs.track_task(asyncio.create_task(analysis_jobs.continue_initial(
+                    persistence_resolution.user_id, uuid.UUID(request_group_id)
+                )))
             dtos = [
                 ChatResponseDTO.from_unified_response(
                     r,
@@ -1390,6 +1439,8 @@ async def compare_stream(
             raise
         except Exception as exc:
             activity_stream.cancel()
+            if request.automatic_analysis and persistence_resolution is not None:
+                analysis_jobs.abandon_initial(persistence_resolution.user_id, uuid.UUID(request_group_id))
             public_error = unexpected_public_error(request_id=req_id)
             failed_line = activity_line(CortexActivityType.REQUEST_FAILED)
             if failed_line is not None:
@@ -1467,10 +1518,76 @@ async def compare_stream(
             activity_stream.cancel()
 
     return StreamingResponse(
-        event_stream(),
+        _detached_stream(event_stream(), request_group_id=request_group_id,
+                         user_id=persistence_resolution.user_id)
+            if request.automatic_analysis and persistence_resolution is not None else event_stream(),
         media_type="application/x-ndjson",
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
         },
     )
+
+
+_active_compare_tasks: dict[str, tuple[uuid.UUID, asyncio.Task]] = {}
+
+
+def _detached_stream(source, *, request_group_id: str, user_id: uuid.UUID):
+    queue: asyncio.Queue = asyncio.Queue()
+    listening = True
+    async def produce():
+        try:
+            async for event in source:
+                if listening:
+                    queue.put_nowait(event)
+        finally:
+            _active_compare_tasks.pop(request_group_id, None)
+            queue.put_nowait(None)
+    task = analysis_jobs.track_task(asyncio.create_task(produce()))
+    _active_compare_tasks[request_group_id] = (user_id, task)
+    async def monitor_cancel():
+        from db import analysis_repository
+        while not task.done():
+            try:
+                with persistence_service.db_uow(commit_on_success=False) as db:
+                    intent = analysis_repository.get_intent(db, user_id, uuid.UUID(request_group_id))
+                if intent and intent.get("cancel_requested"):
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+                    analysis_jobs.abandon_initial(user_id, uuid.UUID(request_group_id))
+                    return
+            except Exception:
+                logger.warning("Compare cancellation state unavailable", exc_info=True)
+            await asyncio.sleep(1)
+    monitor = analysis_jobs.track_task(asyncio.create_task(monitor_cancel()))
+    task.add_done_callback(lambda _: monitor.cancel())
+    async def consume():
+        nonlocal listening
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield item
+        finally:
+            listening = False
+            while not queue.empty():
+                queue.get_nowait()
+    return consume()
+
+
+@router.post("/compare/{request_group_id}/cancel", status_code=204)
+async def cancel_compare(request_group_id: uuid.UUID, http_request: Request,
+                         auth: AuthResult = Depends(get_auth)):
+    req_id = str(getattr(http_request.state, "request_id", "") or uuid.uuid4())
+    _SESSION_AUTH_GUARD.require(auth=auth, request_id=req_id)
+    from db import analysis_repository
+    with persistence_service.db_uow() as db:
+        identity = persistence_service.resolve_identity(auth=auth, request_id=req_id, db_session=db)
+        analysis_repository.transition(db, identity.user_id, request_group_id,
+            expected=("waiting", "queued"), state="waiting", cancel_requested=True)
+    active = _active_compare_tasks.get(str(request_group_id))
+    if active is not None and active[0] == identity.user_id:
+        active[1].cancel()
+        await asyncio.gather(active[1], return_exceptions=True)
+        analysis_jobs.abandon_initial(identity.user_id, request_group_id)

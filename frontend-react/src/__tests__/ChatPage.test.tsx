@@ -165,7 +165,7 @@ describe("ChatPage authentication gate", () => {
     ).toBeInTheDocument();
 
     act(() => useChatStore.getState().setMode("compare"));
-    expect(screen.getByText("Hi, what would you like to compare?")).toBeInTheDocument();
+    expect(screen.getByText("Hi, what would you like to analyze?")).toBeInTheDocument();
     expect(screen.queryByText("Hi, how can I help?")).not.toBeInTheDocument();
 
     act(() => {
@@ -179,7 +179,7 @@ describe("ChatPage authentication gate", () => {
       });
     });
     expect(composer.parentElement).toHaveAttribute("data-composer-placement", "bottom");
-    expect(screen.queryByText("Hi, what would you like to compare?")).not.toBeInTheDocument();
+    expect(screen.queryByText("What do you want to understand?")).not.toBeInTheDocument();
   });
 
   it("retries the latest failed turn through regeneration", async () => {

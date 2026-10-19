@@ -5,6 +5,7 @@ export type MessageRole = "user" | "assistant" | "system";
 export interface ConversationHistoryItem {
   role: MessageRole;
   content: string;
+  response_variants?: { provider: string; model: string; content: string }[];
 }
 
 export interface UserContextRequest {
@@ -68,6 +69,7 @@ export interface CompareTargetRequest {
 }
 
 export interface CompareRequest {
+  automatic_analysis?: boolean;
   prompt: string;
   credit_activity_id?: string;
   initial_query?: string;
@@ -695,6 +697,40 @@ export interface CortexAnalysisSource {
   requestId: string;
   responseVersion: number;
   responseName: string;
+  provider?: string;
+  model?: string;
+  content?: string | null;
+  webSources?: WebSourceItem[];
+}
+
+export interface AnalysisPassage {
+  requestId: string;
+  responseVersion: number;
+  provider: string;
+  model: string;
+  quote: string;
+}
+
+export interface AnalysisLinkedSource {
+  sourceId: string;
+  title: string;
+  url: string;
+  domain: string;
+  relationship: "attached_to_response";
+  attributions: { requestId: string; responseVersion: number }[];
+}
+
+export interface AnalysisPoint { text: string; evidence: AnalysisPassage[] }
+export interface AnalysisSynthesis {
+  schemaVersion: 2;
+  headline?: string | null;
+  introduction?: string | null;
+  takeaway: string;
+  passages: AnalysisPassage[];
+  points: AnalysisPoint[];
+  differences: { title?: string | null; text: string; positions: AnalysisPoint[] }[];
+  limitations: string[];
+  linkedSources: AnalysisLinkedSource[];
 }
 
 export interface CortexAnalysisUniqueInsight {
@@ -713,6 +749,8 @@ export interface CortexAnalysisRun {
   sessionId: string;
   model: string;
   recommendedAnswer: string;
+  structuredResult?: AnalysisSynthesis | null;
+  contextSnapshot?: { role: string; content: string }[];
   agreements: string[];
   disagreements: CortexAnalysisDisagreement[];
   disagreementNote: string | null;
@@ -927,5 +965,6 @@ export interface CompareStreamChunk {
   response?: ChatResponse;
   compare?: CompareResponse;
   session_id?: string;
+  request_group_id?: string;
   activity?: CortexActivityEvent;
 }

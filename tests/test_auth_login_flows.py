@@ -935,10 +935,12 @@ def test_breach_check_fails_open_and_can_be_disabled(client, monkeypatch):
     assert calls == ["ada@example.com", "ada@example.com"]
 
 
-def test_credentialed_cors_only_for_trusted_origins(client, monkeypatch):
-    headers = {"Origin": "https://evil.example"}
+@pytest.mark.parametrize("cookie_headers", [{}, {"Cookie": "unrelated=value"}])
+def test_credentialed_cors_only_for_trusted_origins(client, monkeypatch, cookie_headers):
+    headers = {**cookie_headers, "Origin": "https://evil.example"}
     r = client.get("/health", headers=headers)
-    assert r.headers["access-control-allow-origin"] == "*"
+    expected_public_origin = headers["Origin"] if cookie_headers else "*"
+    assert r.headers["access-control-allow-origin"] == expected_public_origin
     assert "access-control-allow-credentials" not in r.headers
 
     preflight = client.options(
@@ -948,9 +950,19 @@ def test_credentialed_cors_only_for_trusted_origins(client, monkeypatch):
     assert "access-control-allow-credentials" not in preflight.headers
 
     monkeypatch.setenv("AUTH_ALLOWED_ORIGINS", "https://app.example.com")
-    trusted = client.get("/health", headers={"Origin": "https://app.example.com"})
+    trusted_headers = {**cookie_headers, "Origin": "https://app.example.com"}
+    trusted = client.get("/health", headers=trusted_headers)
     assert trusted.headers["access-control-allow-origin"] == "https://app.example.com"
     assert trusted.headers["access-control-allow-credentials"] == "true"
+    assert "Origin" in trusted.headers["vary"]
+
+    trusted_preflight = client.options(
+        "/v1/auth/me",
+        headers={**trusted_headers, "Access-Control-Request-Method": "GET"},
+    )
+    assert trusted_preflight.status_code == 200
+    assert trusted_preflight.headers["access-control-allow-origin"] == "https://app.example.com"
+    assert trusted_preflight.headers["access-control-allow-credentials"] == "true"
 
 
 def test_loopback_origins_are_trusted_only_outside_production(monkeypatch):

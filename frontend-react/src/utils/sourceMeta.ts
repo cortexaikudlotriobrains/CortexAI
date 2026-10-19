@@ -1,5 +1,18 @@
 import type { WebSourceItem } from "../types";
 
+export function normalizeSourceUrl(value: string): string | null {
+  if ([...value].some((character) => character.charCodeAt(0) <= 0x20 || character === "\\"))
+    return null;
+  try {
+    const url = new URL(value);
+    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) return null;
+    url.hash = "";
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
 const COMMON_PUBLISHERS: Record<string, string> = {
   "aljazeera.com": "Al Jazeera",
   "bbc.co.uk": "BBC",

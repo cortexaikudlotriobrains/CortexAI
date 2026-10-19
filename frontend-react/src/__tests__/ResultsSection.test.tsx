@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ResultsSection } from "../components/results/ResultsSection";
@@ -11,6 +11,7 @@ describe("ResultsSection layout states", () => {
   afterEach(() => {
     cleanup();
     useChatStore.getState().startNewChat();
+    useChatStore.getState().setMode("single");
     Object.defineProperty(HTMLElement.prototype, "scrollTo", {
       configurable: true,
       value: originalScrollTo,
@@ -121,6 +122,7 @@ describe("ResultsSection layout states", () => {
       expect(screen.getByText("Prompt optimized")).toBeInTheDocument();
       expect(turnElement?.querySelectorAll("article")).toHaveLength(expectedResponseCards);
       if (turn.mode === "compare") {
+        fireEvent.click(screen.getByRole("tab", { name: "Model responses 2" }));
         expect(
           screen.getByRole("tablist", { name: "Compare model responses" }),
         ).toBeInTheDocument();
@@ -139,6 +141,7 @@ describe("ResultsSection layout states", () => {
 
     render(<ResultsSection />);
 
+    fireEvent.click(screen.getByRole("tab", { name: "Model responses 2" }));
     expect(screen.getByText("GPT has started responding.")).toBeInTheDocument();
     expect(screen.getAllByRole("status")).toHaveLength(1);
     expect(screen.getByRole("status")).toHaveTextContent("Preparing this response\u2026");
@@ -181,6 +184,7 @@ describe("ResultsSection layout states", () => {
 
     render(<ResultsSection />);
 
+    fireEvent.click(screen.getByRole("tab", { name: "Model responses 3" }));
     expect(screen.getByText("3 succeeded")).toBeInTheDocument();
     expect(screen.getByText("0 errors")).toBeInTheDocument();
     expect(screen.queryByText("300 tok")).not.toBeInTheDocument();
@@ -200,10 +204,16 @@ describe("ResultsSection layout states", () => {
 
     render(<ResultsSection />);
 
+    expect(screen.getByRole("tab", { name: "Analysis" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Model responses 2" })).toHaveAttribute("aria-selected", "false");
+    await user.click(screen.getByRole("tab", { name: "Model responses 2" }));
     const gptTab = screen.getByRole("tab", { name: "GPT-5.1" });
     const claudeTab = screen.getByRole("tab", { name: "Claude Sonnet" });
     const gptPanel = screen.getByRole("tabpanel", { name: "GPT-5.1" });
     const claudePanel = screen.getByRole("tabpanel", { name: "Claude Sonnet" });
+
+    expect(screen.getByRole("tab", { name: "Model responses 2" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByLabelText("Selected model response")).not.toBeInTheDocument();
 
     expect(gptTab).toHaveAttribute("aria-selected", "true");
     expect(claudeTab).toHaveAttribute("aria-selected", "false");
@@ -216,6 +226,14 @@ describe("ResultsSection layout states", () => {
     expect(claudeTab).toHaveAttribute("aria-selected", "true");
     expect(gptPanel.className).not.toContain("mobileResponsePanelActive");
     expect(claudePanel.className).toContain("mobileResponsePanelActive");
+    await user.click(screen.getByRole("tab", { name: "Analysis" }));
+    await user.click(screen.getByRole("tab", { name: "Model responses 2" }));
+    expect(claudeTab).toHaveAttribute("aria-selected", "true");
+    act(() => useChatStore.getState().setMode("single"));
+    act(() => useChatStore.getState().setMode("compare"));
+    expect(screen.getByRole("tab", { name: "Analysis" })).toHaveAttribute("aria-selected", "true");
+    await user.click(screen.getByRole("tab", { name: "Model responses 2" }));
+    expect(claudeTab).toHaveAttribute("aria-selected", "true");
   });
 
   it("does not infer source activity from the submitted turn flags", () => {

@@ -8,7 +8,7 @@ import {
 test("desktop multi-turn Compare uses tall natural cards and scrolls the transcript", async ({ responsiveApp }) => {
     const { page } = responsiveApp;
     await page.setViewportSize({ width: 1440, height: 900 });
-    await restoreHistoryThread(page, "Architecture decision");
+    await restoreHistoryThread(page, "Architecture decision", { view: "responses" });
 
     const metrics = await page.evaluate(() => {
         const transcript = document.querySelector('section[aria-label="Chat transcript"]');
@@ -70,10 +70,10 @@ test("desktop multi-turn Compare uses tall natural cards and scrolls the transcr
     await expectNoHorizontalOverflow(page);
 });
 
-test("desktop three-model Compare keeps all cards visible in one grid row", async ({ responsiveApp }) => {
+test("desktop three-model Compare keeps all cards visible in one grid row", async ({ responsiveApp }, testInfo) => {
     const { page } = responsiveApp;
     await page.setViewportSize({ width: 1440, height: 900 });
-    await restoreHistoryThread(page, "Three model platform comparison");
+    await restoreHistoryThread(page, "Three model platform comparison", { view: "responses" });
 
     const headers = page.locator("[data-response-index] > header");
     await expect(headers).toHaveCount(3);
@@ -109,12 +109,14 @@ test("desktop three-model Compare keeps all cards visible in one grid row", asyn
         expect(width).toBeGreaterThanOrEqual(280);
     }
     await expectNoHorizontalOverflow(page);
+    await page.locator('section[aria-label="Chat transcript"]').evaluate(element => { element.scrollTop = 0; });
+    await page.screenshot({ path: testInfo.outputPath("responses-1440-three-light.png"), fullPage: true });
 });
 
 test("iPad landscape wraps three Compare cards into a two-column grid", async ({ responsiveApp }) => {
     const { page } = responsiveApp;
     await page.setViewportSize({ width: 1024, height: 768 });
-    await restoreHistoryThread(page, "Three model platform comparison");
+    await restoreHistoryThread(page, "Three model platform comparison", { view: "responses" });
 
     const grid = page
         .locator('article[aria-label="Model comparison"]')
@@ -145,7 +147,7 @@ test("iPad landscape wraps three Compare cards into a two-column grid", async ({
 test("desktop Compare renders Markdown tables inside each response column", async ({ responsiveApp }) => {
     const { page } = responsiveApp;
     await page.setViewportSize({ width: 1440, height: 900 });
-    await restoreHistoryThread(page, "Compare deployment options table");
+    await restoreHistoryThread(page, "Compare deployment options table", { view: "responses" });
 
     const tables = page.getByRole("table");
     await expect(tables).toHaveCount(2);
@@ -175,7 +177,7 @@ test("desktop Compare renders Markdown tables inside each response column", asyn
 test("iPad portrait stacks all tall Compare cards with independent scrolling", async ({ responsiveApp }) => {
     const { page } = responsiveApp;
     await page.setViewportSize({ width: 820, height: 1180 });
-    await restoreHistoryThread(page, "Architecture decision");
+    await restoreHistoryThread(page, "Architecture decision", { view: "responses" });
 
     const firstTurn = page.locator('article[aria-label="Model comparison"]').first();
     const panels = firstTurn.locator("[data-response-panel]");

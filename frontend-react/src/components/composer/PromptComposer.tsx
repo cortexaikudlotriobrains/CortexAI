@@ -9,6 +9,8 @@ import { useAttachmentUploadStore } from "../../store/attachmentUploadStore";
 import { attachmentUploadsBlockSubmission } from "../../uploads/attachmentUploadQueue";
 import { userFacingMessage } from "../../errors/userFacingError";
 import { useChat } from "../../hooks/useChat";
+import { useAnalyzeEstimate } from "../../hooks/useAnalyzeEstimate";
+import { ANALYZE_LABEL } from "../../config/productLabels";
 import { isModelDropdownVisible } from "../../hooks/useSmartRouting";
 import type { ModelCatalogItem } from "../../types";
 import type { UseSubscriptionResult } from "../../hooks/useSubscription";
@@ -84,6 +86,7 @@ export function PromptComposer({
   const uploadTasks = useAttachmentUploadStore((s) => s.tasks);
 
   const { submit, cancel } = useChat();
+  const analysisEstimate = useAnalyzeEstimate();
   const cardRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [optionsOpen, setOptionsOpen] = useState(false);
@@ -117,6 +120,7 @@ export function PromptComposer({
   const thirdTargetError = compareTargetAccessError(3, entitlements, plans);
 
   const handleSubmit = () => {
+    if (mode === "compare" && (!analysisEstimate?.estimate || !analysisEstimate.estimate.can_authorize)) return;
     if (uploadsPending) {
       setError(uploadWaitError);
       return;
@@ -389,7 +393,7 @@ export function PromptComposer({
           onKeyDown={handleKeyDown}
           disabled={streaming}
           placeholder={
-            mode === "compare" ? "Ask once and compare model responses" : "Ask anything…"
+            mode === "compare" ? "What would you like to understand?" : "Ask anything…"
           }
         />
 
@@ -411,7 +415,7 @@ export function PromptComposer({
                 reasoningUnavailable={reasoningUnavailable}
                 reasoningContextLabel={reasoningContextLabel}
                 onReasoningChange={handleReasoningChange}
-                modeLabel={mode === "compare" ? "Compare" : ""}
+                modeLabel={mode === "compare" ? ANALYZE_LABEL : ""}
                 models={availableModels.filter(
                   (model) => model.enabled && model.selectable !== false,
                 )}
@@ -462,7 +466,8 @@ export function PromptComposer({
               id="submitBtn"
               onClick={() => (streaming ? cancel() : handleSubmit())}
               disabled={
-                !streaming && (uploadsPending || (!prompt.trim() && attachments.length === 0))
+                !streaming && (uploadsPending || (!prompt.trim() && attachments.length === 0) ||
+                  (mode === "compare" && !analysisEstimate?.estimate?.can_authorize))
               }
             >
               <CortexIcon

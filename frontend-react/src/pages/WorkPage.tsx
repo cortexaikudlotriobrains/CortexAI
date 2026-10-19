@@ -1,3 +1,4 @@
+import { ANALYZE_LABEL } from "../config/productLabels";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -414,7 +415,7 @@ export function WorkPage() {
             </button>
             <button type="button" onClick={() => navigate("/?mode=compare")}>
               <span className={styles.tabIcon}><CortexIcon name="compare" /></span>
-              <span>Compare</span>
+              <span>{ANALYZE_LABEL}</span>
             </button>
             <button type="button" className={styles.activeTab} aria-current="page">
               <span className={styles.tabIcon}><CortexIcon name="work" /></span>
@@ -475,7 +476,7 @@ export function WorkPage() {
             <button type="button" onClick={() => store.setError(null)}>Dismiss</button>
           </div>
         )}
-        {workspaceReady && <nav className={styles.mobileNav} aria-label="Mobile navigation"><button onClick={() => navigate("/")}><CortexIcon name="ask" /><span>Ask</span></button><button onClick={() => navigate("/?mode=compare")}><CortexIcon name="compare" /><span>Compare</span></button><button className={styles.mobileNavActive} aria-current="page"><CortexIcon name="work" /><span>Work</span></button><button onClick={() => navigate("/?panel=history")}><CortexIcon name="history" /><span>History</span></button></nav>}
+        {workspaceReady && <nav className={styles.mobileNav} aria-label="Mobile navigation"><button onClick={() => navigate("/")}><CortexIcon name="ask" /><span>Ask</span></button><button onClick={() => navigate("/?mode=compare")}><CortexIcon name="compare" /><span>{ANALYZE_LABEL}</span></button><button className={styles.mobileNavActive} aria-current="page"><CortexIcon name="work" /><span>Work</span></button><button onClick={() => navigate("/?panel=history")}><CortexIcon name="history" /><span>History</span></button></nav>}
       </main>
     </div>
   );

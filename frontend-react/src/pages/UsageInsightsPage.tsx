@@ -1,3 +1,4 @@
+import { ANALYZE_LABEL } from "../config/productLabels";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { exportUsageCsv, type UsageSummaryParams } from "../api/usage";
@@ -283,7 +284,7 @@ export function UsageInsightsPage() {
             <span className={styles.mobileNavIcon}>
               <CortexIcon name="compare" />
             </span>
-            <span>Compare</span>
+            <span>{ANALYZE_LABEL}</span>
           </button>
           <button type="button" onClick={() => navigate("/")}>
             <span className={styles.mobileNavIcon}>
@@ -845,8 +846,8 @@ function buildSessionModeRows(summary: UsageSummary): SessionModeRow[] {
     },
     {
       key: "compareOnly",
-      label: "Compare only",
-      mobileLabel: "Compare",
+      label: `${ANALYZE_LABEL} only`,
+      mobileLabel: ANALYZE_LABEL,
       count: compareOnly,
       color: "#5b5bd6",
     },

@@ -188,6 +188,30 @@ describe("history threads", () => {
 });
 
 describe("conversation history", () => {
+  it("keeps full Compare content and adds exact model provenance only when requested", () => {
+    const turn: ChatTurn = {
+      id: "compare", mode: "compare", prompt: "Budget $500", submittedPrompt: "Budget $500",
+      attachments: [], status: "complete", createdAt: "2026-10-17T12:00:00Z",
+      responses: [
+        { ...chatResponse("OpenAI answer"), provider: "openai", model: "gpt-6-astra" },
+        { ...chatResponse("Claude answer"), provider: "claude", model: "claude-opus-5-5" },
+      ],
+    };
+    expect(buildConversationHistory([turn], true)).toEqual([
+      { role: "user", content: "Budget $500" },
+      { role: "assistant", content: "OpenAI answer\n\nClaude answer", response_variants: [
+        { provider: "openai", model: "gpt-6-astra", content: "OpenAI answer" },
+        { provider: "claude", model: "claude-opus-5-5", content: "Claude answer" },
+      ] },
+    ]);
+    expect(buildConversationHistory([turn])[1]).toEqual({ role: "assistant", content: "OpenAI answer\n\nClaude answer" });
+    const restored = buildTurnsFromHistoryEntries([
+      entry({ mode: "compare", request_group_id: "group", provider: "openai", model: "gpt-6-astra", response: "OpenAI answer" }),
+      entry({ id: 2, mode: "compare", request_group_id: "group", provider: "claude", model: "claude-opus-5-5", response: "Claude answer" }),
+    ]);
+    expect(buildConversationHistory(restored, true)[1].response_variants).toHaveLength(2);
+  });
+
   it("includes the latest completed active turn and skips streaming turns", () => {
     const completed: ChatTurn = {
       id: "completed",

@@ -1,0 +1,123 @@
+.workspace {
+  width: 100%;
+  min-width: 0;
+  margin: 0 auto;
+  padding: 0;
+  color: var(--cx-ink-900);
+}
+.workspace [hidden] {
+  display: none !important;
+}
+.tabs {
+  display: flex;
+  gap: 24px;
+  min-width: 0;
+  margin: 20px 0 24px;
+  border-bottom: 1px solid var(--cx-hairline);
+}
+.tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 8px 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--cx-ink-500);
+  font: inherit;
+  font-size: 14px;
+}
+.tabs button[aria-selected="true"] {
+  color: var(--cx-accent);
+  border-bottom-color: var(--cx-accent);
+  font-weight: 600;
+}
+.count {
+  border: 1px solid var(--cx-hairline);
+  border-radius: var(--cx-r-md);
+  padding: 0 5px;
+  font-size: 11px;
+}
+.panel {
+  min-width: 0;
+}
+.mobileLabel {
+  display: none;
+}
+.responsePanel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.context {
+  border: 1px solid var(--cx-hairline);
+  border-radius: var(--cx-r-xl);
+  background: var(--cx-surface);
+  padding: 16px;
+  margin: 0 0 20px;
+  scroll-margin-top: 12px;
+}
+.context mark {
+  color: inherit;
+  background: var(--cx-accent-soft);
+}
+.context blockquote {
+  margin: 12px 0;
+}
+.context button {
+  color: var(--cx-accent);
+  background: transparent;
+  border: 0;
+  min-height: 44px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.empty {
+  margin-bottom: 24px;
+  padding: 20px;
+  border: 1px solid var(--cx-hairline);
+  border-radius: var(--cx-r-lg);
+  background: var(--cx-surface-2);
+}
+.empty h4 {
+  margin: 0 0 8px;
+  font: 600 16px/24px var(--font-display);
+}
+.empty p {
+  margin: 0;
+  color: var(--cx-ink-500);
+  font-size: 13px;
+}
+.workspace button {
+  cursor: pointer;
+}
+.workspace button:focus-visible,
+.workspace a:focus-visible,
+.workspace select:focus-visible {
+  outline: 2px solid var(--cx-accent);
+  outline-offset: 3px;
+}
+@media (max-width: 767px) {
+  .desktopLabel {
+    display: none;
+  }
+  .mobileLabel {
+    display: inline;
+  }
+  .workspace {
+    padding: 0;
+  }
+  .tabs {
+    gap: 14px;
+    margin: 14px 0 22px;
+  }
+  .tabs button {
+    gap: 4px;
+    font-size: 12px;
+  }
+  .tabs button > svg {
+    display: none;
+  }
+}

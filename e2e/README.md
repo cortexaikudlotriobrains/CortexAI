@@ -50,6 +50,10 @@ The live `test` command requires the E2E database, API key, and provider configu
 
 Responsive UI suites do not require PostgreSQL, provider keys, or a running backend. They start Vite directly and mock the frontend API contracts:
 
+Each responsive Vite server uses `.runtime/e2e-vite-cache/<port>` for dependency
+optimization. This isolates mobile, desktop/iPad and the developer's Vite cache
+and avoids concurrent cache-renaming failures on Windows.
+
 ```bash
 npm run --prefix e2e test:mobile
 npm run --prefix e2e test:desktop-ipad

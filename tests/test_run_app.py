@@ -16,7 +16,7 @@ def test_runner_defaults_match_documented_local_urls(monkeypatch):
     assert args.api_host == "127.0.0.1"
     assert args.api_port == 8000
     assert args.frontend_host == "127.0.0.1"
-    assert args.frontend_port == 5173
+    assert args.frontend_port == 5174
     assert args.subscription_plan is None
 
 
