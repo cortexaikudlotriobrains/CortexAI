@@ -1,297 +1,89 @@
-.strip {
-  display: inline-flex;
-  min-width: 0;
-  flex-wrap: nowrap;
-  align-items: center;
-  gap: 7px;
-}
-
-.segmentedGroup {
-  display: inline-flex;
+.chips {
+  display: flex;
   min-width: 0;
   align-items: center;
-  gap: 2px;
-  border: 1px solid color-mix(in srgb, var(--cx-hairline) 78%, transparent);
-  border-radius: 11px;
-  background: var(--cx-surface-3);
-  padding: 3px;
+  gap: 6px;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: none;
 }
-
-.chipWrap {
-  position: relative;
-  display: inline-flex;
-  flex: 0 0 auto;
+.chips::-webkit-scrollbar {
+  display: none;
 }
-
 .chip {
   display: inline-flex;
-  height: 32px;
+  height: 26px;
   flex: 0 0 auto;
   align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border: 0;
-  border-radius: 9px;
-  color: var(--cx-ink-600);
-  cursor: pointer;
-  font: 700 12px/16px var(--font-sans);
-  padding: 0 11px;
-  transition:
-    background-color 160ms ease,
-    box-shadow 160ms ease,
-    color 160ms ease,
-    transform 160ms ease;
+  gap: 5px;
+  border-radius: 999px;
+  background: var(--cx-accent-soft);
+  color: var(--cx-accent);
+  padding-right: 6px;
   white-space: nowrap;
 }
-
-.chip svg {
-  width: 15px;
-  height: 15px;
-  flex: 0 0 15px;
-}
-
-.segmentChip {
+.body,
+.reset {
+  display: inline-flex;
+  align-items: center;
+  border: 0;
+  border-radius: 999px;
   background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
 }
-
-.chip:hover {
-  color: var(--cx-ink-900);
-  transform: translateY(-1px);
+.body {
+  height: 26px;
+  gap: 5px;
+  padding-left: 10px;
+  font: 600 12.5px/1.3 var(--font-sans);
 }
-
-.segmentChip:hover {
-  background: color-mix(in srgb, var(--cx-surface-2) 72%, var(--cx-surface));
+.body svg {
+  width: 13px;
+  height: 13px;
 }
-
-.active {
-  background: var(--cx-feature-active-bg);
-  color: var(--cx-feature-active-fg);
-  box-shadow:
-    inset 0 0 0 1px var(--cx-feature-active-ring),
-    0 0 0 2px color-mix(in srgb, var(--cx-feature-active-ring) 18%, transparent),
-    var(--cx-shadow-sm);
+.reset {
+  width: 18px;
+  height: 18px;
+  justify-content: center;
 }
-
-.active:hover {
-  background: var(--cx-feature-active-hover);
-  color: var(--cx-feature-active-fg);
+.reset svg {
+  width: 12px;
+  height: 12px;
 }
-
-.chip:focus-visible {
+.body:focus-visible,
+.reset:focus-visible {
   outline: 2px solid var(--cx-accent);
-  outline-offset: 2px;
+  outline-offset: -2px;
 }
-
-.tooltip {
-  position: absolute;
-  z-index: 20;
-  bottom: calc(100% + 8px);
-  width: max-content;
-  max-width: min(260px, calc(100vw - 24px));
-  padding: 8px 10px;
-  border: 1px solid color-mix(in srgb, var(--cx-hairline) 52%, transparent);
-  border-radius: var(--cx-r-md);
-  background: #111827;
-  box-shadow: var(--cx-shadow-pop);
-  color: #f8fafc;
-  font: 600 12px/17px var(--font-sans);
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(3px);
-  transition:
-    opacity 140ms ease,
-    transform 140ms ease,
-    visibility 140ms ease;
-  visibility: hidden;
-}
-
-.tooltip::after {
-  position: absolute;
-  top: 100%;
-  width: 8px;
-  height: 8px;
-  background: #111827;
-  content: "";
-  transform: translateY(-4px) rotate(45deg);
-}
-
-.tooltipStart {
-  left: 0;
-}
-
-.tooltipStart::after {
-  left: 14px;
-}
-
-.tooltipCenter {
-  left: 50%;
-  transform: translate(-50%, 3px);
-}
-
-.tooltipCenter::after {
-  left: calc(50% - 4px);
-}
-
-.tooltipEnd {
-  right: 0;
-}
-
-.tooltipEnd::after {
-  right: 14px;
-}
-
-@media (hover: hover) {
-  .chipWrap:hover .tooltip {
-    opacity: 1;
-    transform: translateY(0);
-    visibility: visible;
-  }
-
-  .chipWrap:hover .tooltipCenter {
-    transform: translate(-50%, 0);
-  }
-}
-
-.chip:focus-visible + .tooltip {
-  opacity: 1;
-  transform: translateY(0);
-  visibility: visible;
-}
-
-.chip:focus-visible + .tooltipCenter {
-  transform: translate(-50%, 0);
-}
-
-.tooltipVisible {
-  opacity: 1;
-  transform: translateY(0);
-  visibility: visible;
-}
-
-.tooltipVisible.tooltipCenter {
-  transform: translate(-50%, 0);
-}
-
-@media (max-width: 1023px) {
-  .chip {
-    height: 36px;
-    font-size: 14px;
-    padding: 0 13px;
-  }
-}
-
 @media (max-width: 760px) {
-  .strip {
-    gap: 6px;
+  .chips {
+    padding: 2px 0;
   }
-
-  .tooltip {
-    max-width: min(180px, calc(100vw - 24px));
-  }
-
-  .tooltipStart {
-    right: 0;
-    left: auto;
-  }
-
-  .tooltipStart::after {
-    right: 14px;
-    left: auto;
-  }
-
-  .tooltipCenter {
-    right: 0;
-    left: auto;
-    transform: translateY(3px);
-  }
-
-  .chip:focus-visible + .tooltipCenter,
-  .tooltipVisible.tooltipCenter {
-    transform: translateY(0);
-  }
-}
-
-@media (max-width: 760px) and (hover: hover) {
-  .chipWrap:hover .tooltipCenter {
-    transform: translateY(0);
-  }
-}
-
-@media (max-width: 430px) {
-  .tooltipStart {
-    right: auto;
-    left: 0;
-  }
-
-  .tooltipStart::after {
-    right: auto;
-    left: 14px;
-  }
-
-  .tooltipCenter {
-    right: auto;
-    left: 50%;
-    transform: translate(-50%, 3px);
-  }
-
-  .chip:focus-visible + .tooltipCenter,
-  .tooltipVisible.tooltipCenter {
-    transform: translate(-50%, 0);
-  }
-
   .chip {
-    height: 36px;
-    gap: 6px;
-    padding: 0 13px;
+    height: 40px;
+    position: relative;
+    background: transparent;
   }
-
-  .chip svg {
-    width: 14px;
-    height: 14px;
-    flex-basis: 14px;
+  .chip::before {
+    content: "";
+    position: absolute;
+    inset: 7px 0;
+    border-radius: 999px;
+    background: var(--cx-accent-soft);
+    pointer-events: none;
   }
-
-}
-
-@media (max-width: 430px) and (hover: hover) {
-  .chipWrap:hover .tooltipCenter {
-    transform: translate(-50%, 0);
+  .body,
+  .reset {
+    position: relative;
   }
-}
-
-@media (max-width: 359px) {
-  .strip {
-    gap: 4px;
+  .body {
+    height: 40px;
   }
-
-  .segmentedGroup {
-    gap: 1px;
-    padding: 2px;
-  }
-
-  .chip {
-    font-size: 11px;
-    padding: 0 6px;
-  }
-
-  .tooltipEnd {
-    right: auto;
-    left: 0;
-  }
-
-  .tooltipEnd::after {
-    right: auto;
-    left: 14px;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .chip,
-  .tooltip {
-    transition: none;
-  }
-
-  .chip:hover {
-    transform: none;
+  .reset {
+    width: 40px;
+    height: 40px;
+    margin-right: -6px;
   }
 }

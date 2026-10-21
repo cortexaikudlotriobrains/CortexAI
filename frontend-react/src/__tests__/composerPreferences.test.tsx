@@ -10,6 +10,7 @@ import {
   INITIAL_COMPOSER_PREFS,
   loadComposerPrefs,
   resolveSmartOffModel,
+  resolveNewChatStart,
   loadChatComposer,
   saveChatComposer,
   useComposerPrefsStore,
@@ -45,40 +46,47 @@ describe("composer preferences", () => {
     expect(loadComposerPrefs("alice")).toEqual(INITIAL_COMPOSER_PREFS);
   });
 
-  it("persists separately for each user and reloads across browser tabs", () => {
-    const store = useComposerPrefsStore.getState();
-    store.setUser("alice");
-    store.updatePrefs({ smartForNewChats: false, smartOffModelId: flash });
-    store.setUser("bob");
-    expect(useComposerPrefsStore.getState().prefs).toEqual(INITIAL_COMPOSER_PREFS);
-    store.updatePrefs({ smartOffModelId: sonnet });
-    store.setUser("alice");
-    expect(useComposerPrefsStore.getState().prefs).toEqual({
-      smartForNewChats: false,
-      smartOffModelId: flash,
-    });
+  it("migrates legacy preferences using the actual plan default", () => {
     localStorage.setItem(
       COMPOSER_PREFS_KEY,
-      JSON.stringify({ alice: { smartForNewChats: true, smartOffModelId: luna } }),
+      JSON.stringify({ alice: { smartForNewChats: false, smartOffModelId: 42 } }),
     );
-    store.reload();
-    expect(useComposerPrefsStore.getState().prefs.smartOffModelId).toBe(luna);
+    expect(loadComposerPrefs("alice", "plus").newChatStart).toBe("claude:claude-sonnet-4-6");
+    localStorage.setItem(
+      COMPOSER_PREFS_KEY,
+      JSON.stringify({ alice: { smartForNewChats: false, smartOffModelId: null } }),
+    );
+    expect(loadComposerPrefs("alice", "plus").newChatStart).toBe("claude:claude-sonnet-4-6");
+    expect(loadComposerPrefs("bob").newChatStart).toBe("smart");
+    useComposerPrefsStore.getState().setUser("alice");
+    useComposerPrefsStore.getState().migrate("pro", DEFAULT_MODELS);
+    expect(useComposerPrefsStore.getState().prefs.newChatStart).toBe("openai:gpt-5.6-terra");
   });
-
+  it("persists separately per user, de-duplicates and caps recents", () => {
+    const store = useComposerPrefsStore.getState();
+    store.setUser("alice");
+    store.updatePrefs({ newChatStart: flash });
+    [luna, sonnet, flash, luna].forEach(store.rememberModel);
+    expect(loadComposerPrefs("alice").recentModels).toEqual([luna, flash, sonnet]);
+    store.setUser("bob");
+    expect(useComposerPrefsStore.getState().prefs.newChatStart).toBe("smart");
+    store.setUser("alice");
+    expect(useComposerPrefsStore.getState().prefs.newChatStart).toBe(flash);
+  });
   it.each(["free", "plus", "pro"] as const)(
-    "falls back to the %s plan model for locked or unavailable saved models",
+    "falls back on %s without deleting a locked preference",
     (plan) => {
-      const prefs = { smartForNewChats: true, smartOffModelId: flash };
+      const prefs = { ...INITIAL_COMPOSER_PREFS, newChatStart: flash };
       const expected = {
         free: luna,
         plus: "claude:claude-sonnet-4-6",
         pro: "openai:gpt-5.6-terra",
       }[plan];
       expect(
-        resolveSmartOffModel(prefs, { code: plan, lockedModelKeys: [flash] }, DEFAULT_MODELS),
+        resolveNewChatStart(prefs, { code: plan, lockedModelKeys: [flash] }, DEFAULT_MODELS),
       ).toBe(expected);
       expect(
-        resolveSmartOffModel(
+        resolveNewChatStart(
           prefs,
           { code: plan, lockedModelKeys: [] },
           DEFAULT_MODELS.filter((model) => `${model.provider}:${model.model}` !== flash),
@@ -86,177 +94,86 @@ describe("composer preferences", () => {
       ).toBe(expected);
       expect(
         resolveSmartOffModel(
-          prefs,
-          { code: plan, lockedModelKeys: [] },
-          DEFAULT_MODELS.map((model) =>
-            `${model.provider}:${model.model}` === flash ? { ...model, enabled: false } : model,
-          ),
+          { smartOffModelId: flash },
+          { code: plan, lockedModelKeys: [flash] },
+          DEFAULT_MODELS,
         ),
       ).toBe(expected);
-      expect(prefs.smartOffModelId).toBe(flash);
+      expect(prefs.newChatStart).toBe(flash);
     },
   );
-
-  it("keeps the current Ask chat when preferences change independently of its menu", async () => {
+  it("saves a new-chat preference without changing either current selection", async () => {
+    const user = userEvent.setup();
     render(<PromptComposer models={DEFAULT_MODELS} />);
-    await waitFor(() => expect(useChatStore.getState().selectedModelKey).toBe(luna));
-    act(() =>
-      useComposerPrefsStore
-        .getState()
-        .updatePrefs({ smartForNewChats: false, smartOffModelId: flash }),
-    );
+    const compare = useChatStore.getState().compareModelKeys;
+    await user.click(screen.getByRole("button", { name: "Model: Smart" }));
+    await user.click(screen.getByRole("button", { name: /New chats start with/ }));
+    await user.click(screen.getByRole("option", { name: /deepseek-v4-flash/ }));
+    expect(loadComposerPrefs(null).newChatStart).toBe(flash);
     expect(useChatStore.getState().smartMode).toBe(true);
-    expect(useChatStore.getState().selectedModelKey).toBe(luna);
+    expect(useChatStore.getState().compareModelKeys).toEqual(compare);
+    await user.keyboard("{Escape}");
     act(() => useChatStore.getState().startNewChat());
     await waitFor(() => expect(useChatStore.getState().selectedModelKey).toBe(flash));
     expect(useChatStore.getState().smartMode).toBe(false);
-    expect(useChatStore.getState().askReasoningLevel).toBe("low");
+    expect(useChatStore.getState().compareModelKeys[0]).toBe(flash);
   });
-
-  it("applies the menu Smart switch immediately and saves it for subsequent chats", async () => {
+  it("chooses from the complete catalog, updates recents and focuses the textarea", async () => {
     const user = userEvent.setup();
-    useComposerPrefsStore.getState().updatePrefs({ smartOffModelId: flash });
     render(<PromptComposer models={DEFAULT_MODELS} />);
-    await user.click(screen.getByRole("button", { name: "More options" }));
-    const preferenceSwitch = screen.getByRole("switch", { name: /Smart in new chats/ });
-    await user.click(preferenceSwitch);
-    expect(useChatStore.getState().smartMode).toBe(false);
-    expect(useChatStore.getState().selectedModelKey).toBe(flash);
-    expect(useChatStore.getState().askReasoningLevel).toBe("low");
-    expect(screen.getByRole("switch", { name: "Smart routing" })).toHaveAttribute(
-      "aria-checked",
-      "false",
+    await user.click(screen.getByRole("button", { name: "Model: Smart" }));
+    await user.click(screen.getByRole("button", { name: "All models" }));
+    expect(screen.getAllByRole("option")).toHaveLength(
+      DEFAULT_MODELS.filter((model) => model.enabled && model.selectable !== false).length,
     );
-    expect(preferenceSwitch).toHaveTextContent("New chats start with Smart on");
-    expect(preferenceSwitch).not.toHaveTextContent("DeepSeek");
-    expect(loadComposerPrefs(null).smartForNewChats).toBe(false);
-    await user.click(preferenceSwitch);
-    expect(useChatStore.getState().smartMode).toBe(true);
-    expect(useChatStore.getState().askReasoningLevel).toBe("auto");
-    expect(loadComposerPrefs(null).smartForNewChats).toBe(true);
-    await user.click(preferenceSwitch);
-    act(() => useChatStore.getState().startNewChat());
+    await user.click(screen.getByRole("option", { name: /deepseek-v4-flash/ }));
+    expect(useChatStore.getState().selectedModelKey).toBe(flash);
     expect(useChatStore.getState().smartMode).toBe(false);
+    expect(loadComposerPrefs(null).recentModels[0]).toBe(flash);
+    expect(loadComposerPrefs(null).newChatStart).toBe("smart");
+    await waitFor(() => expect(screen.getByRole("textbox")).toHaveFocus());
   });
-
-  it("keeps both Smart controls synchronized and saves toggles made from the composer", async () => {
+  it("steps back from drill-ins before closing and resetting the view", async () => {
     const user = userEvent.setup();
     render(<PromptComposer models={DEFAULT_MODELS} />);
-    const smart = screen.getByRole("switch", { name: "Smart routing" });
-    await user.click(smart);
-    expect(loadComposerPrefs(null).smartForNewChats).toBe(false);
-    await user.click(screen.getByRole("button", { name: "More options" }));
-    const menuSmart = screen.getByRole("switch", { name: /Smart in new chats/ });
-    expect(menuSmart).toHaveAttribute("aria-checked", "false");
-    await user.click(menuSmart);
-    expect(smart).toHaveAttribute("aria-checked", "true");
-    expect(menuSmart).toHaveAttribute("aria-checked", "true");
-    expect(loadComposerPrefs(null).smartForNewChats).toBe(true);
+    const trigger = screen.getByRole("button", { name: "Model: Smart" });
+    await user.click(trigger);
+    await user.click(screen.getByRole("button", { name: "All models" }));
     await user.keyboard("{Escape}");
-    await user.click(smart);
-    await user.click(screen.getByRole("button", { name: "More options" }));
-    expect(screen.getByRole("switch", { name: /Smart in new chats/ })).toHaveAttribute(
-      "aria-checked",
-      "false",
-    );
-    expect(loadComposerPrefs(null).smartForNewChats).toBe(false);
-    act(() => useChatStore.getState().startNewChat());
-    expect(smart).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("button", { name: "All models" })).toBeVisible();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(trigger).toHaveFocus());
+    await user.click(trigger);
+    expect(screen.getByRole("button", { name: "All models" })).toBeVisible();
   });
-
-  it("shows the current chat's Smart status in the menu even when its saved new-chat preference differs", async () => {
-    const user = userEvent.setup();
+  it("does not follow cross-tab preference updates in the current chat", async () => {
     render(<PromptComposer models={DEFAULT_MODELS} />);
-    act(() => useComposerPrefsStore.getState().updatePrefs({ smartForNewChats: false }));
-    await user.click(screen.getByRole("button", { name: "More options" }));
-    const menuSmart = screen.getByRole("switch", { name: /Smart in new chats/ });
-    expect(menuSmart).toHaveAttribute("aria-checked", "true");
-    expect(loadComposerPrefs(null).smartForNewChats).toBe(false);
-    await user.click(menuSmart);
-    expect(screen.getByRole("switch", { name: "Smart routing" })).toHaveAttribute(
-      "aria-checked",
-      "false",
-    );
-    expect(menuSmart).toHaveAttribute("aria-checked", "false");
-  });
-
-  it("updates an existing session immediately while preserving its last manual choice and transcript", async () => {
-    const user = userEvent.setup();
-    const thread = buildHistoryThreads([
-      {
-        id: 1,
-        session_id: "existing-menu-toggle",
-        timestamp: "2026-10-14T00:00:00Z",
-        mode: "single",
-        prompt: "Question",
-        provider: "openai",
-        model: "gpt-5.6-luna",
-        routing_mode: "smart",
-        response: "Answer",
-        web_source_items: [],
-      },
-    ])[0];
-    useChatStore.getState().hydrateFromHistoryThread(thread);
-    useChatStore.getState().setSelectedModelKey(sonnet);
-    useComposerPrefsStore.getState().updatePrefs({ smartOffModelId: flash });
-    const originalTurns = useChatStore.getState().turns;
-    render(<PromptComposer models={DEFAULT_MODELS} />);
-    await user.click(screen.getByRole("button", { name: "More options" }));
-    await user.click(screen.getByRole("switch", { name: /Smart in new chats/ }));
-    expect(useChatStore.getState().smartMode).toBe(false);
-    expect(useChatStore.getState().selectedModelKey).toBe(sonnet);
-    expect(useChatStore.getState().turns).toBe(originalTurns);
-    expect(useChatStore.getState().sessionId).toBe("existing-menu-toggle");
-    expect(loadChatComposer("existing-menu-toggle")?.smartMode).toBe(false);
-    await user.click(screen.getByRole("switch", { name: /Smart in new chats/ }));
+    const compare = useChatStore.getState().compareModelKeys;
+    act(() => useComposerPrefsStore.getState().updatePrefs({ newChatStart: flash }));
     expect(useChatStore.getState().smartMode).toBe(true);
-    expect(useChatStore.getState().lastManualModel).toBe(sonnet);
-    expect(loadChatComposer("existing-menu-toggle")?.smartMode).toBe(true);
-  });
-
-  it("uses the preference when switching Smart off and preserves a chat-scoped manual choice", async () => {
-    const user = userEvent.setup();
-    render(<PromptComposer models={DEFAULT_MODELS} />);
-    act(() => useComposerPrefsStore.getState().updatePrefs({ smartOffModelId: flash }));
-    await user.click(screen.getByRole("switch", { name: "Smart routing" }));
-    expect(useChatStore.getState().selectedModelKey).toBe(flash);
-    act(() => useChatStore.getState().setSelectedModelKey(sonnet));
-    await user.click(screen.getByRole("switch", { name: "Smart routing" }));
-    act(() => useComposerPrefsStore.getState().updatePrefs({ smartOffModelId: luna }));
-    await user.click(screen.getByRole("switch", { name: "Smart routing" }));
-    expect(useChatStore.getState().selectedModelKey).toBe(sonnet);
-    expect(useComposerPrefsStore.getState().prefs.smartOffModelId).toBe(luna);
-  });
-
-  it("initializes Compare with distinct models and follows changes only before its first send", async () => {
-    expect(newCompareModelKeys(DEFAULT_MODELS, sonnet)).toEqual([sonnet, luna, ""]);
-    const view = render(<PromptComposer models={DEFAULT_MODELS} />);
-    act(() => {
-      useChatStore.getState().setMode("compare");
-      useComposerPrefsStore.getState().updatePrefs({ smartOffModelId: flash });
-    });
-    await waitFor(() => expect(useChatStore.getState().compareModelKeys[0]).toBe(flash));
-    act(() =>
-      useChatStore.getState().beginTurn({
-        mode: "compare",
-        prompt: "First send",
-        submittedPrompt: "First send",
-        attachments: [],
-        responses: [],
-      }),
-    );
-    act(() => useComposerPrefsStore.getState().updatePrefs({ smartOffModelId: sonnet }));
-    expect(useChatStore.getState().compareModelKeys[0]).toBe(flash);
-    view.rerender(
-      <PromptComposer
-        models={DEFAULT_MODELS.filter((model) => `${model.provider}:${model.model}` !== flash)}
-      />,
-    );
-    expect(useChatStore.getState().compareModelKeys[0]).toBe(flash);
+    expect(useChatStore.getState().compareModelKeys).toEqual(compare);
     act(() => useChatStore.getState().startNewChat());
-    await waitFor(() =>
-      expect(useChatStore.getState().compareModelKeys).toEqual([sonnet, luna, ""]),
-    );
+    await waitFor(() => expect(useChatStore.getState().selectedModelKey).toBe(flash));
+    expect(newCompareModelKeys(DEFAULT_MODELS, sonnet)).toEqual([sonnet, luna, ""]);
+  });
+
+  it("restores chat-scoped reasoning and Improve and resets them for a new chat", () => {
+    useChatStore.setState({ composerInitialized: true });
+    useChatStore.getState().setSessionId("message-options");
+    useChatStore.getState().setAskReasoningLevel("high");
+    useChatStore.getState().setCompareReasoningLevel("max");
+    useChatStore.getState().setOptimizeMode(true);
+    expect(loadChatComposer("message-options")).toMatchObject({
+      askReasoningLevel: "high",
+      compareReasoningLevel: "max",
+      optimizeMode: true,
+    });
+    useChatStore.getState().startNewChat();
+    expect(useChatStore.getState()).toMatchObject({
+      askReasoningLevel: "auto",
+      compareReasoningLevel: "auto",
+      optimizeMode: false,
+    });
   });
 
   it("restores an existing chat's Smart and last manual model after preference changes", () => {

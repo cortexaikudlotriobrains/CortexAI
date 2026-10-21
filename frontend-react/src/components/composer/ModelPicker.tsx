@@ -14,6 +14,7 @@ import { ProviderLogo } from "../shared/ProviderLogo";
 import { CortexIcon } from "../shared/CortexIcon";
 import { PlanBadge } from "../subscription/PlanBadge";
 import styles from "./ModelPicker.module.css";
+import { ComposerModelMenu, type ComposerModelMenuConfig } from "./ComposerModelMenu";
 
 export type ModelPickerPlacement = "up" | "down";
 export type ModelPickerAlignment = "left" | "center" | "right";
@@ -36,6 +37,7 @@ interface ProviderGroup {
 }
 
 interface ModelPickerProps {
+  composer?: ComposerModelMenuConfig;
   id: string;
   models: ModelCatalogItem[];
   value: string;
@@ -55,7 +57,15 @@ interface ModelPickerProps {
   menuClassName?: string;
 }
 
-export function ModelPicker({
+export function ModelPicker(props: ModelPickerProps) {
+  return props.composer ? (
+    <ComposerModelMenu {...props} composer={props.composer} />
+  ) : (
+    <CatalogModelPicker {...props} />
+  );
+}
+
+function CatalogModelPicker({
   id,
   models,
   value,

@@ -49,7 +49,9 @@ export function ChatPage() {
     useComposerPrefsStore.getState().setUser(whoAmI?.user_id ?? null);
     const chat = useChatStore.getState();
     if (!chat.composerInitialized && !chat.sessionId && !chat.turns.length) {
-      useChatStore.setState({ smartMode: useComposerPrefsStore.getState().prefs.smartForNewChats });
+      useChatStore.setState({
+        smartMode: useComposerPrefsStore.getState().prefs.newChatStart === "smart",
+      });
     }
   }, [authLoading, whoAmI?.user_id]);
   useEffect(() => {

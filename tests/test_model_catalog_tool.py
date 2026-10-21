@@ -67,6 +67,25 @@ def catalog(tmp_path):
 # --------------------------------------------------------------------------- repository
 
 
+def test_frontend_fallback_matches_every_selectable_registry_model(monkeypatch):
+    from orchestrator.model_registry import ModelRegistry
+    from tools.model_catalog.frontend import render_frontend_defaults
+
+    monkeypatch.setenv("MODEL_PRICING_MODE", "legacy")
+    registry = yaml.safe_load((ROOT / "config/model_registry.yaml").read_text("utf-8"))
+    generated = render_frontend_defaults(registry)
+    rows_json = generated.split("export const FALLBACK_MODELS: ModelCatalogItem[] = ")[1]
+    rows = json.loads(rows_json.removesuffix(";\n"))
+    runtime = ModelRegistry.from_yaml()
+    expected = {
+        (candidate.provider, candidate.model_name) for candidate in runtime.list_selectable_models()
+    }
+    assert {(row["provider"], row["model"]) for row in rows} == expected
+    assert len(rows) == len(expected)
+    assert {row["provider"] for row in rows} == set(registry["providers"])
+    assert all(row["enabled"] and row["selectable"] for row in rows)
+
+
 def test_repository_registry_passes_the_model_catalog_checks():
     result = run_checks(check_frontend=True)
     assert result.errors == []

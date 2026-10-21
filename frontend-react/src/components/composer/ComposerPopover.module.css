@@ -1,0 +1,78 @@
+.menu {
+  position: fixed;
+  z-index: 1001;
+  box-sizing: border-box;
+  overflow: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  border: 1px solid var(--cx-hairline);
+  background: var(--cx-surface);
+  color: var(--cx-ink-900);
+  box-shadow: var(--cx-shadow-pop);
+  padding: 6px;
+}
+.popover {
+  border-radius: 14px;
+  animation: popoverIn 140ms ease-out;
+}
+.menu button:focus-visible {
+  outline: 2px solid var(--cx-accent);
+  outline-offset: -2px;
+}
+.scrim {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  background: rgba(15, 17, 21, 0.32);
+  animation: fadeIn 160ms ease;
+}
+.sheet {
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  max-height: 78vh;
+  border-bottom: 0;
+  border-radius: 22px 22px 0 0;
+  padding: 6px 8px calc(14px + env(safe-area-inset-bottom));
+  animation: sheetIn 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.handle {
+  width: 36px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--cx-hairline);
+  margin: 4px auto 6px;
+}
+@keyframes popoverIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes sheetIn {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: none;
+  }
+}
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .menu,
+  .scrim {
+    animation: none;
+  }
+}

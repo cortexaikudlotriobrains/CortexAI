@@ -133,14 +133,14 @@ export const useChatStore = create<ChatStoreState>((set) => ({
   mode: "single",
   setMode: (mode) => set({ mode }),
 
-  smartMode: useComposerPrefsStore.getState().prefs.smartForNewChats,
+  smartMode: useComposerPrefsStore.getState().prefs.newChatStart === "smart",
   lastManualModel: null,
   composerInitialized: false,
   compareHasSent: false,
   comparePrefsModel: null,
   optimizeMode: false,
   askReasoningLevel: "auto",
-  compareReasoningLevel: "low",
+  compareReasoningLevel: "auto",
   setSmartMode: (v, smartOffModel) =>
     set((state) => ({
       smartMode: v,
@@ -393,6 +393,9 @@ export const useChatStore = create<ChatStoreState>((set) => ({
       selectedModelKey: lastManualModel ?? "",
       lastManualModel,
       compareModelKeys: restoredCompareKeys,
+      askReasoningLevel: "auto",
+      compareReasoningLevel: "auto",
+      optimizeMode: false,
       ...savedComposer,
       compareHasSent: Boolean(lastCompare) || savedComposer?.compareHasSent === true,
       composerInitialized: true,
@@ -414,11 +417,12 @@ export const useChatStore = create<ChatStoreState>((set) => ({
       subscriptionError: null,
       sessionId: null,
       pendingNewSession: true,
-      smartMode: useComposerPrefsStore.getState().prefs.smartForNewChats,
+      smartMode: useComposerPrefsStore.getState().prefs.newChatStart === "smart",
       selectedModelKey: "",
       lastManualModel: null,
+      optimizeMode: false,
       askReasoningLevel: "auto",
-      compareReasoningLevel: "low",
+      compareReasoningLevel: "auto",
       compareModelKeys: ["", "", ""],
       compareHasSent: false,
       comparePrefsModel: null,
@@ -465,11 +469,17 @@ useChatStore.subscribe((state, previous) => {
       state.smartMode === previous.smartMode &&
       state.selectedModelKey === previous.selectedModelKey &&
       state.lastManualModel === previous.lastManualModel &&
+      state.askReasoningLevel === previous.askReasoningLevel &&
+      state.compareReasoningLevel === previous.compareReasoningLevel &&
+      state.optimizeMode === previous.optimizeMode &&
       state.compareModelKeys === previous.compareModelKeys &&
       state.compareHasSent === previous.compareHasSent)
   )
     return;
   saveChatComposer(state.sessionId, {
+    askReasoningLevel: state.askReasoningLevel,
+    compareReasoningLevel: state.compareReasoningLevel,
+    optimizeMode: state.optimizeMode,
     smartMode: state.smartMode,
     selectedModelKey: state.selectedModelKey,
     lastManualModel: state.lastManualModel,

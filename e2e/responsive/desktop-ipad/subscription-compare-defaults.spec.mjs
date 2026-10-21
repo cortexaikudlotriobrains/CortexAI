@@ -7,15 +7,16 @@ test("Free Compare defaults use allowed models and keep upgraded models offered"
     const { page, state } = responsiveApp;
     await page.locator("#btnCompareMode").click();
 
-    await expect(page.locator("#compareModel1")).toHaveValue("openai:gpt-5.1");
-    await expect(page.locator("#compareModel2")).toHaveValue("deepseek:deepseek-chat");
-    await expect(page.locator("#compareModel1 option")).toHaveCount(state.models.length);
+    await page.getByRole("button", { name: "Models to compare" }).click();
+    await expect(page.locator('[data-model-key="openai:gpt-5.1"]')).toHaveAttribute("aria-selected", "true");
+    await expect(page.locator('[data-model-key="deepseek:deepseek-chat"]')).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("option")).toHaveCount(state.models.length);
     await expect(
-        page.locator('#compareModel1 option[value="claude:claude-sonnet-4-5"]'),
-    ).toBeDisabled();
+        page.locator('[data-model-key="claude:claude-sonnet-4-5"]'),
+    ).toHaveAttribute("data-locked", "true");
     await expect(
-        page.locator('#compareModel1 option[value="grok:grok-4"]'),
-    ).toBeDisabled();
+        page.locator('[data-model-key="grok:grok-4"]'),
+    ).toHaveAttribute("data-locked", "true");
 });
 
 test("Ask and Compare retain Gemini and Grok while the rich catalogue is disabled", async ({
@@ -26,12 +27,12 @@ test("Ask and Compare retain Gemini and Grok while the rich catalogue is disable
     await reload();
 
     await page.locator("#btnCompareMode").click();
-    await page.getByRole("button", { name: /Compare model 1:/ }).click();
+    await page.getByRole("button", { name: "Models to compare" }).click();
 
-    const listbox = page.getByRole("listbox", { name: "Compare model 1 options" });
+    const listbox = page.getByRole("listbox", { name: "Compare models" });
     await expect(listbox.getByRole("option", { name: /Gemini/ })).toBeVisible();
     await expect(listbox.getByRole("option", { name: /Grok/ })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Models" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Models", exact: true })).toHaveCount(0);
 });
 
 test("Plus Compare skips a premium fallback while retaining the full offering", async ({ responsiveApp }) => {
@@ -44,10 +45,11 @@ test("Plus Compare skips a premium fallback while retaining the full offering", 
     await reload();
     await page.locator("#btnCompareMode").click();
 
-    await expect(page.locator("#compareModel1")).toHaveValue("openai:gpt-5.1");
-    await expect(page.locator("#compareModel2")).toHaveValue("claude:claude-sonnet-4-5");
-    await expect(page.locator("#compareModel1 option")).toHaveCount(state.models.length);
+    await page.getByRole("button", { name: "Models to compare" }).click();
+    await expect(page.locator('[data-model-key="openai:gpt-5.1"]')).toHaveAttribute("aria-selected", "true");
+    await expect(page.locator('[data-model-key="claude:claude-sonnet-4-5"]')).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("option")).toHaveCount(state.models.length);
     await expect(
-        page.locator('#compareModel1 option[value="grok:grok-4"]'),
-    ).toBeDisabled();
+        page.locator('[data-model-key="grok:grok-4"]'),
+    ).toHaveAttribute("data-locked", "true");
 });

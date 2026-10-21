@@ -1,6 +1,6 @@
 import type { ModelCatalogItem } from "../../types";
+import type { ComposerModelMenuConfig } from "./ComposerModelMenu";
 import { ModelPicker } from "./ModelPicker";
-import styles from "./ModelSelector.module.css";
 
 interface ModelSelectorProps {
   models: ModelCatalogItem[];
@@ -11,40 +11,34 @@ interface ModelSelectorProps {
   lockedKeys?: string[];
   lockedLabels?: Record<string, string>;
   onLockedSelect?: (key: string) => void;
+  composer?: ComposerModelMenuConfig;
 }
 
 export function ModelSelector({
   models,
   value,
   onChange,
+  id = "modelSelector",
   label,
-  id,
   lockedKeys,
   lockedLabels,
   onLockedSelect,
+  composer,
 }: ModelSelectorProps) {
-  const pickerId = id ?? "modelSelector";
   return (
-    <div className={styles.wrap}>
-      {label && (
-        <span className={styles.label} id={`${pickerId}-label`}>
-          {label}
-        </span>
-      )}
-      <ModelPicker
-        id={pickerId}
-        models={models}
-        value={value}
-        onChange={onChange}
-        ariaLabel={label ?? "Model"}
-        listboxLabel={`${label ?? "Model"} options`}
-        lockedKeys={lockedKeys}
-        lockedLabels={lockedLabels}
-        onLockedSelect={onLockedSelect}
-        placement="up"
-        align="left"
-        className={styles.picker}
-      />
-    </div>
+    <ModelPicker
+      id={id}
+      models={models}
+      value={value}
+      onChange={onChange}
+      ariaLabel={label ?? "Model"}
+      listboxLabel={`${label ?? "Model"} options`}
+      lockedKeys={lockedKeys}
+      lockedLabels={lockedLabels}
+      onLockedSelect={onLockedSelect}
+      placement="up"
+      align="right"
+      composer={composer}
+    />
   );
 }

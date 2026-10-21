@@ -368,11 +368,8 @@ test("desktop Smart tooltip and options dialog stay accessible in Ask and Compar
     const { page } = responsiveApp;
     await page.setViewportSize({ width: 1440, height: 900 });
 
-    await expectChipTooltip(
-        page,
-        "Smart routing",
-        "Gets you the best answer automatically",
-    );
+    await expect(page.getByRole("button", { name: "Model: Smart" })).toBeVisible();
+    await expect(page.getByRole("switch", { name: "Smart routing" })).toHaveCount(0);
     await expect(page.getByRole("switch", { name: "Research mode" })).toHaveCount(0);
     const askOptions = page.getByRole("button", { name: "More options" });
     await expect(askOptions).toHaveAttribute("data-improve-enabled", "false");
@@ -390,45 +387,25 @@ test("desktop Smart tooltip and options dialog stay accessible in Ask and Compar
 
     await page.locator("#btnCompareMode").click();
     const compareOptions = page.getByRole("button", { name: "More options" });
-    await expect(compareOptions).toHaveAttribute("data-reasoning-level", /low|medium|high|max/);
-    await expect(compareOptions).toHaveAttribute("data-options-configured", "true");
-    await expect(page.getByRole("button", { name: "Reset reasoning to Auto" })).toBeVisible();
+    await expect(compareOptions).toHaveAttribute("data-reasoning-level", "auto");
+    await expect(compareOptions).toHaveAttribute("data-options-configured", "false");
+    await expect(page.getByRole("button", { name: "Reset reasoning" })).toHaveCount(0);
     await compareOptions.click();
     await expect(page.getByRole("switch", { name: /Improve prompt/ })).toBeVisible();
     await expect(page.getByRole("radiogroup", { name: "Reasoning" })).toBeVisible();
-    await expect(page.getByText("Shared across selected models", { exact: true })).toBeVisible();
+    await expect(page.getByText("Applied to every compared model", { exact: true })).toBeVisible();
     await expectNoHorizontalOverflow(page);
 });
 
-test("dark theme gives enabled Smart and Improve states distinct treatment", async ({ responsiveApp }) => {
-    const { page } = responsiveApp;
-    await page.setViewportSize({ width: 1440, height: 900 });
-
-    await page.getByRole("button", { name: "Account" }).click();
-    await page.getByRole("menuitem", { name: "Switch to dark theme" }).click();
-    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-
-    const smart = page.getByRole("switch", { name: "Smart routing" });
-    if ((await smart.getAttribute("aria-checked")) !== "true") {
-        await smart.click();
-    }
-    await page.getByRole("navigation", { name: "Workspace mode" }).hover();
-    await expect(smart).toHaveCSS("background-color", "rgb(52, 52, 103)");
-    await expect(smart).toHaveCSS("color", "rgb(255, 255, 255)");
-    await expect(smart).toHaveCSS("box-shadow", /rgb\(139, 139, 240\)/);
-
+test("dark theme gives Smart and active Improve the specified accent treatment", async ({ responsiveApp }) => {
+    const { page } = responsiveApp; await page.setViewportSize({ width: 1440, height: 900 });
+    await page.getByRole("button", { name: "Account" }).click(); await page.getByRole("menuitem", { name: "Switch to dark theme" }).click();
+    const smart = page.getByRole("button", { name: "Model: Smart" });
+    await expect(smart.locator('svg').first()).toHaveCSS("color", "rgb(139, 139, 240)");
     await page.getByRole("button", { name: "More options" }).click();
-    const improve = page.getByRole("switch", { name: /Improve prompt/ });
-    await improve.click();
-    await expect(improve).toHaveAttribute("aria-checked", "true");
-    const options = page.getByRole("button", { name: "More options" });
-    await expect(options).toHaveAttribute("data-improve-enabled", "true");
-    await expect(options).toHaveAttribute("data-options-configured", "true");
+    const improve = page.getByRole("switch", { name: /Improve prompt/ }); await improve.click(); await expect(improve).toHaveAttribute("aria-checked", "true");
+    await page.keyboard.press("Escape"); await expect(page.locator('[data-option-chip="improve"]')).toHaveCSS("background-color", "rgb(29, 29, 51)");
     await expect(page.getByRole("button", { name: "Turn off Improve prompt" })).toBeVisible();
-
-    await smart.click();
-    await expect(smart).not.toHaveCSS("background-color", "rgb(52, 52, 103)");
-    await expect(smart).not.toHaveCSS("color", "rgb(255, 255, 255)");
 });
 
 test("dark theme keeps the top Ask and Compare tabs legible", async ({ responsiveApp }) => {
@@ -639,8 +616,11 @@ test("Cortex-managed Auto budget preserves incomplete output for retry", async (
         });
     });
 
-    const smart = page.getByRole("switch", { name: "Smart routing" });
-    if ((await smart.getAttribute("aria-checked")) === "true") await smart.click();
+    await page.getByRole("button", { name: "Model: Smart" }).click();
+    await page.getByRole("button", { name: "All models", exact: true }).click();
+    await page.locator('[data-model-key="openai:gpt-5.1"]').click();
+    await page.getByRole("button", { name: "More options" }).click();
+    await page.getByRole("radio", { name: /^Low / }).click(); await page.keyboard.press("Escape");
     await expect(page.getByRole("combobox", { name: "Answer depth" })).toHaveCount(0);
 
     await page.locator("#promptInput").fill("Explain the provider budget contract");
@@ -662,64 +642,13 @@ test("Cortex-managed Auto budget preserves incomplete output for retry", async (
     await expect(page.getByText("Completed answer with more room.")).toBeVisible();
 });
 
-test("desktop Compare picker remains visible and selectable", async ({ responsiveApp }) => {
-    const { page } = responsiveApp;
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await page.locator("#btnCompareMode").click();
-
-    const connector = page.getByTestId("compare-connector");
-    await expect(connector).toHaveCount(1);
-    await expect(connector).toHaveCSS("width", "26px");
-    await expect(connector).toHaveCSS("border-top-width", "1px");
-    await expect(connector).toHaveCSS("border-radius", "999px");
-
-    const connectorGeometry = await connector.evaluate(element => {
-        const connectorRect = element.getBoundingClientRect();
-        const firstModelRect = document.querySelector("#compareModel1Wrap")?.getBoundingClientRect();
-        const secondModelRect = document.querySelector("#compareModel2Wrap")?.getBoundingClientRect();
-        return {
-            connectorCenter: connectorRect.left + connectorRect.width / 2,
-            firstRight: firstModelRect?.right ?? 0,
-            secondLeft: secondModelRect?.left ?? 0,
-        };
-    });
-    expect(connectorGeometry.connectorCenter).toBeGreaterThan(connectorGeometry.firstRight);
-    expect(connectorGeometry.connectorCenter).toBeLessThan(connectorGeometry.secondLeft);
-
-    const select = page.locator("#compareModel2");
-    const currentValue = await select.inputValue();
-    const target = await select.locator("option:not(:disabled)").evaluateAll(
-        (options, selectedValue) => {
-            const option = options.find(candidate => candidate.value !== selectedValue);
-            if (!option) return null;
-            const separator = option.value.indexOf(":");
-            return {
-                value: option.value,
-                provider: separator >= 0 ? option.value.slice(0, separator) : "",
-            };
-        },
-        currentValue,
-    );
-    expect(target).not.toBeNull();
-
-    await page.getByRole("button", { name: /Compare model 2:/ }).click();
-    const listbox = page.getByRole("listbox", { name: "Compare model 2 options" });
-    await expect(listbox).toBeVisible();
-    await expect(listbox).toHaveAttribute("data-picker-view", "providers");
-    await expect(listbox).toHaveAttribute("data-picker-interaction", "hover");
-    const providerOption = listbox.locator(`[data-provider-key="${target.provider}"]`);
-    await providerOption.hover();
-    await expect(listbox).toHaveAttribute("data-picker-view", "models");
-    await expect(listbox.getByRole("group", { name: "Providers" })).toBeVisible();
-    await expect(listbox.locator(`[data-model-key="${target.value}"]`)).toBeVisible();
-
-    await page.mouse.move(2, 2);
-    await expect(listbox).toHaveAttribute("data-picker-view", "providers");
-
-    await providerOption.hover();
-    await expect(listbox).toHaveAttribute("data-picker-view", "models");
-    await listbox.locator(`[data-model-key="${target.value}"]`).click();
-    await expect(select).toHaveValue(target.value);
+test("desktop Compare uses a visible checkbox popover with the full catalog", async ({ responsiveApp }) => {
+    const { page, state, reload } = responsiveApp; state.subscriptionPlan = "pro"; await reload(); await page.setViewportSize({ width: 1440, height: 900 }); await page.locator("#btnCompareMode").click();
+    const trigger = page.getByRole("button", { name: "Models to compare" }); await trigger.click();
+    const menu = page.getByRole("dialog", { name: "Models to compare" }); await expect(menu).toHaveAttribute("data-layout", "popover");
+    await expect(page.getByRole("option")).toHaveCount(state.models.length);
+    await page.locator('[data-model-key="gemini:gemini-2.5-flash"]').click(); await expect(trigger).toHaveText("3 models");
+    await expect(menu).toBeVisible(); await page.keyboard.press("Escape"); await expect(trigger).toBeFocused();
 });
 
 test("iPad landscape keeps the desktop workspace usable", async ({ responsiveApp }) => {
@@ -769,7 +698,7 @@ async function expectComposerToolbarOrder(page, switchNames) {
     const send = page.getByRole("button", { name: "Send message" });
     const controls = [
         attach,
-        ...switchNames.map(name => page.getByRole("switch", { name })),
+        page.getByRole("button", { name: /^(?:Model:|Models to compare)/ }),
         options,
         send,
     ];

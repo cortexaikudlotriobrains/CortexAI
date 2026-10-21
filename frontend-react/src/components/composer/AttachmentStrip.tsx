@@ -12,26 +12,20 @@ import {
 } from "../../uploads/attachmentUploadQueue";
 import { CortexIcon } from "../shared/CortexIcon";
 import styles from "./AttachmentStrip.module.css";
-import type {
-  BillingPlansResponse,
-  EntitlementsResponse,
-  FileUploadResponse,
-} from "../../types";
+import type { BillingPlansResponse, EntitlementsResponse, FileUploadResponse } from "../../types";
 import { fileSelectionAccessError } from "../../subscription/subscriptionAccess";
-import {
-  isSubscriptionDenial,
-  toSubscriptionError,
-} from "../../subscription/subscriptionErrors";
+import { isSubscriptionDenial, toSubscriptionError } from "../../subscription/subscriptionErrors";
 
-const ACCEPTED =
-  ".jpg,.jpeg,.png,.webp,.gif,.pdf,.txt,.csv,.json,.docx,.pptx,.xlsx";
+const ACCEPTED = ".jpg,.jpeg,.png,.webp,.gif,.pdf,.txt,.csv,.json,.docx,.pptx,.xlsx";
 
 export function AttachmentStrip({
   entitlements = null,
   plans = null,
+  compact = false,
 }: {
   entitlements?: EntitlementsResponse | null;
   plans?: BillingPlansResponse | null;
+  compact?: boolean;
 }) {
   const attachments = useChatStore((state) => state.attachments);
   const addAttachment = useChatStore((state) => state.addAttachment);
@@ -62,12 +56,7 @@ export function AttachmentStrip({
   const handleFiles = async (files: FileList | null) => {
     if (!files) return;
     const selectedFiles = Array.from(files);
-    const accessError = fileSelectionAccessError(
-      selectedFiles,
-      selectedCount,
-      entitlements,
-      plans,
-    );
+    const accessError = fileSelectionAccessError(selectedFiles, selectedCount, entitlements, plans);
     if (accessError) {
       setSubscriptionError(accessError);
       resetFileInput();
@@ -121,7 +110,7 @@ export function AttachmentStrip({
   };
 
   return (
-    <div id="attachmentStrip" className={styles.strip}>
+    <div id="attachmentStrip" className={`${styles.strip} ${compact ? styles.compact : ""}`}>
       {selectedCount > 0 && (
         <ul className={styles.list} aria-live="polite" aria-label="Selected attachments">
           {tasks.map((task) => (
@@ -235,10 +224,7 @@ function ServerAttachmentChip({
 }) {
   const label = attachment.status === "ready" ? "Ready" : attachment.status;
   return (
-    <li
-      className={styles.item}
-      aria-label={`${attachment.original_filename}, ${label}`}
-    >
+    <li className={styles.item} aria-label={`${attachment.original_filename}, ${label}`}>
       <span className={`attachment-chip is-${attachment.status}`} aria-hidden="true" />
       <span className={styles.fileName} title={attachment.original_filename}>
         {attachment.original_filename}

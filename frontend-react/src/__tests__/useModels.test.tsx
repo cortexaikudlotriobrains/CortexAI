@@ -52,6 +52,21 @@ describe("useModels", () => {
     expect(mocks.fetchModels).not.toHaveBeenCalled();
   });
 
+  it("retains the offline catalog when the options request fails", async () => {
+    mocks.fetchModelOptions.mockRejectedValue(new Error("offline"));
+    const { result } = renderHook(() => useModels(true));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.models).toEqual(DEFAULT_MODELS);
+    expect(result.current.error).not.toBeNull();
+  });
+
+  it("retains the offline catalog when the options response is empty", async () => {
+    mocks.fetchModelOptions.mockResolvedValue({ models: [], total: 0 });
+    const { result } = renderHook(() => useModels(true));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.models).toEqual(DEFAULT_MODELS);
+  });
+
   it("uses the gated catalogue endpoint only for the Models screen", async () => {
     mocks.fetchModels.mockResolvedValue({
       enabled_only: true,

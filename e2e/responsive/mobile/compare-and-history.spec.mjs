@@ -6,128 +6,42 @@ import {
     test,
 } from "../fixtures/responsive-e2e.mjs";
 
-test("mobile Compare opens the visible model picker and updates its selection", async ({ responsiveApp }) => {
-    const { page } = responsiveApp;
-    await openMobilePanel(page, "Compare");
-
-    const connector = page.getByTestId("compare-connector");
-    await expect(connector).toHaveCount(1);
-    await expect(connector).toBeVisible();
-    await expect(connector).toHaveCSS("border-top-width", "0px");
-    await expect(connector).toHaveCSS("pointer-events", "none");
-
-    const nativeSelect = page.locator("#compareModel1");
-    const currentValue = await nativeSelect.inputValue();
-    const target = await nativeSelect.locator("option:not(:disabled)").evaluateAll(
-        (options, selectedValue) => {
-            const option = options.find(candidate => candidate.value !== selectedValue);
-            if (!option) return null;
-            const separator = option.value.indexOf(":");
-            return {
-                value: option.value,
-                provider: separator >= 0 ? option.value.slice(0, separator) : "",
-                modelId: separator >= 0 ? option.value.slice(separator + 1) : option.value,
-            };
-        },
-        currentValue,
-    );
-    expect(target).not.toBeNull();
-
-    const trigger = page.getByRole("button", { name: /Compare model 1:/ });
-    await trigger.click();
-    const listbox = page.getByRole("listbox", { name: "Compare model 1 options" });
-    await expect(listbox).toBeVisible();
-    expect(await listbox.evaluate(element => element.parentElement === document.body)).toBe(true);
-    await expect(listbox).toHaveAttribute("data-picker-view", "providers");
-    await expect(listbox).toHaveAttribute("data-picker-interaction", "drilldown");
-    await listbox.locator(`[data-provider-key="${target.provider}"]`).click();
-    await expect(listbox).toHaveAttribute("data-picker-view", "models");
-
-    const geometry = await listbox.evaluate(element => {
-        const rect = element.getBoundingClientRect();
-        const hit = document.elementFromPoint(rect.left + 24, rect.top + 24);
-        return {
-            top: rect.top,
-            right: rect.right,
-            bottom: rect.bottom,
-            left: rect.left,
-            viewportWidth: window.innerWidth,
-            viewportHeight: window.innerHeight,
-            hitInside: Boolean(hit && element.contains(hit)),
-        };
-    });
-    expect(geometry.left).toBeGreaterThanOrEqual(0);
-    expect(geometry.top).toBeGreaterThanOrEqual(0);
-    expect(geometry.right).toBeLessThanOrEqual(geometry.viewportWidth);
-    expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewportHeight);
-    expect(geometry.hitInside).toBe(true);
-
-    const targetOption = listbox
-        .locator('[role="option"]')
-        .filter({ hasText: target.modelId })
-        .first();
-    await targetOption.click();
-    await expect(nativeSelect).toHaveValue(target.value);
-    await expect(listbox).toBeHidden();
+test("mobile Compare opens a modal checkbox menu and updates its selection", async ({ responsiveApp }) => {
+    const { page, state, reload } = responsiveApp;
+    state.subscriptionPlan = "pro"; await reload(); await openMobilePanel(page, "Compare");
+    const trigger = page.getByRole("button", { name: "Models to compare" }); await trigger.click();
+    const dialog = page.getByRole("dialog", { name: "Models to compare" });
+    await expect(dialog).toHaveAttribute("data-layout", "sheet"); await expect(dialog).toHaveAttribute("aria-modal", "true");
+    const list = page.getByRole("listbox", { name: "Compare models" });
+    await expect(list.getByRole("option")).toHaveCount(state.models.length);
+    const target = page.locator('[data-model-key="deepseek:deepseek-chat"]');
+    await target.click(); await expect(target).toHaveAttribute("aria-selected", "true");
+    await expect(list).toBeVisible(); await expect(trigger).toHaveText("3 models");
+    const bounds = await dialog.boundingBox(); expect(bounds.x).toBe(0); expect(bounds.x + bounds.width).toBe(page.viewportSize().width);
+    await page.keyboard.press("Escape"); await expect(trigger).toBeFocused();
 });
 
 test("mobile Compare adds and removes a third model without page overflow", async ({ responsiveApp }) => {
-    const { page, state, reload } = responsiveApp;
-    state.subscriptionPlan = "pro";
-    await reload();
-    await openMobilePanel(page, "Compare");
-
-    await page.getByRole("button", { name: "Add model to comparison" }).click();
-    await expect(page.locator("#compareModel3Wrap")).toBeVisible();
-    await expect(page.getByTestId("compare-connector")).toHaveCount(2);
-
-    const scrollMetrics = await page.locator("#compareModel1Wrap").evaluate(element => {
-        const chips = element.parentElement?.parentElement;
-        return {
-            clientWidth: chips?.clientWidth ?? 0,
-            scrollWidth: chips?.scrollWidth ?? 0,
-            overflowX: chips ? getComputedStyle(chips).overflowX : "",
-        };
-    });
-    expect(scrollMetrics.scrollWidth).toBeGreaterThan(scrollMetrics.clientWidth);
-    expect(scrollMetrics.overflowX).toBe("auto");
+    const { page, state, reload } = responsiveApp; state.subscriptionPlan = "pro"; await reload(); await openMobilePanel(page, "Compare");
+    await page.getByRole("button", { name: "Models to compare" }).click();
+    const row = page.locator('[data-model-key="deepseek:deepseek-chat"]');
+    await row.click(); await expect(page.getByText("3/3", { exact: true })).toBeVisible();
     await expectNoHorizontalOverflow(page);
-
-    await page.getByRole("button", { name: /Remove DeepSeek Chat/i }).click();
-    await expect(page.locator("#compareModel3Wrap")).toHaveCount(0);
-    await expect(page.getByTestId("compare-connector")).toHaveCount(1);
-    await expect(page.getByRole("button", { name: "Add model to comparison" })).toBeVisible();
+    await row.click(); await expect(page.getByText("2/3", { exact: true })).toBeVisible();
+    await expect(page.getByRole("option", { selected: true })).toHaveCount(2);
 });
 
-test("small mobile keeps the Compare connector inside the model scroller", async ({ responsiveApp }) => {
-    const { page } = responsiveApp;
-    await page.setViewportSize({ width: 320, height: 568 });
-    await openMobilePanel(page, "Compare");
-
-    const metrics = await page.evaluate(() => {
-        const first = document.querySelector("#compareModel1Wrap")?.getBoundingClientRect();
-        const second = document.querySelector("#compareModel2Wrap")?.getBoundingClientRect();
-        const connector = document.querySelector("[data-testid='compare-connector']");
-        const connectorRect = connector?.getBoundingClientRect();
-        const chips = connector?.parentElement?.parentElement;
-        return {
-            ordered:
-                Boolean(first && connectorRect && second)
-                && first.right <= connectorRect.left
-                && connectorRect.right <= second.left,
-            connectorWidth: connectorRect?.width ?? 0,
-            overflowX: chips ? getComputedStyle(chips).overflowX : "",
-            scrollWidth: chips?.scrollWidth ?? 0,
-            clientWidth: chips?.clientWidth ?? 0,
-        };
+test("small mobile truncates long Compare names inside a single model chip", async ({ responsiveApp }) => {
+    const { page, state, reload } = responsiveApp; state.subscriptionPlan = "pro";
+    state.models[0].display_name = "An exceptionally long model display name for a narrow mobile screen";
+    await reload(); await page.setViewportSize({ width: 320, height: 568 }); await openMobilePanel(page, "Compare");
+    const trigger = page.getByRole("button", { name: "Models to compare" }); await expect(trigger).toBeVisible();
+    const metrics = await trigger.evaluate(element => {
+      const name = element.querySelector('span[class*="chipName"]');
+      return { width: element.getBoundingClientRect().width, scroll: name.scrollWidth, client: name.clientWidth, ellipsis: getComputedStyle(name).textOverflow };
     });
-
-    expect(metrics.ordered).toBe(true);
-    expect(metrics.connectorWidth).toBe(18);
-    expect(metrics.overflowX).toBe("auto");
-    expect(metrics.scrollWidth).toBeGreaterThan(metrics.clientWidth);
-    await expect(page.getByRole("button", { name: "Send message" })).toBeVisible();
-    await expectNoHorizontalOverflow(page);
+    expect(metrics.width).toBeLessThanOrEqual(180); expect(metrics.scroll).toBeGreaterThan(metrics.client); expect(metrics.ellipsis).toBe("ellipsis");
+    await expect(page.getByRole("button", { name: "Send message" })).toBeVisible(); await expectNoHorizontalOverflow(page);
 });
 
 test("mobile History search restores a grouped Compare session", async ({ responsiveApp }) => {

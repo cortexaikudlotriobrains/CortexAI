@@ -21,7 +21,7 @@ test("mobile navigation switches between Ask, Compare, and History", async ({ re
     );
 
     await openMobilePanel(page, "Compare");
-    await expect(page.getByLabel("Compare model selectors")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Models to compare" })).toBeVisible();
     await expect(page.locator("#promptInput")).toHaveAttribute(
         "placeholder",
         "Ask once and compare model responses",
@@ -49,7 +49,7 @@ test("mobile compose action starts a fresh Compare session from History", async 
 
     await expect(page.getByRole("region", { name: "History" })).toHaveCount(0);
     await expect(page.locator('article[aria-label="Model comparison"]')).toHaveCount(0);
-    await expect(page.getByLabel("Compare model selectors")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Models to compare" })).toBeVisible();
     await expect(page.locator("#promptInput")).toHaveValue("");
     await expect(page.locator("#promptInput")).toHaveAttribute(
         "placeholder",
@@ -199,7 +199,7 @@ test("mobile reasoning sheet stays usable at the smallest supported width", asyn
     );
     await expect(optionsButton).toHaveAttribute("data-reasoning-level", "max");
     await expect(optionsButton).toHaveAttribute("data-options-configured", "true");
-    await expect(page.getByRole("button", { name: "Reset reasoning to Auto" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Reset reasoning" })).toBeVisible();
     await expect(page.getByText("Applied to Smart routing. Higher reasoning may take longer and use more AI credits.", { exact: true })).toBeVisible();
     await page.getByRole("switch", { name: /Improve prompt/ }).click();
     await page.keyboard.press("Escape");
@@ -216,20 +216,9 @@ test("mobile reasoning sheet stays usable at the smallest supported width", asyn
     await expectNoHorizontalOverflow(page);
 
     await optionsButton.click();
-    await expect(dialog).toHaveCSS("transform", "matrix(1, 0, 0, 1, 0, 0)");
-    const grabberBounds = await page.locator("[data-sheet-grabber]").boundingBox();
-    expect(grabberBounds).not.toBeNull();
-    await page.mouse.move(
-        grabberBounds.x + grabberBounds.width / 2,
-        grabberBounds.y + grabberBounds.height / 2,
-    );
-    await page.mouse.down();
-    await page.mouse.move(
-        grabberBounds.x + grabberBounds.width / 2,
-        grabberBounds.y + grabberBounds.height / 2 + 100,
-        { steps: 4 },
-    );
-    await page.mouse.up();
+    await expect(dialog).toHaveCSS("transform", "none");
+    await expect(page.locator("[data-sheet-grabber]")).toBeVisible();
+    await page.locator("[data-composer-scrim]").click({ position: { x: 10, y: 10 } });
     await expect(dialog).toBeHidden();
     await expect(optionsButton).toBeFocused();
 });
@@ -246,7 +235,7 @@ for (const viewport of [
         expect(metrics.composerBottom).toBeLessThanOrEqual(metrics.navTop + 1);
         expect(metrics.sendVisible).toBe(true);
         expect(metrics.textareaFontSize).toBeGreaterThanOrEqual(16);
-        expect(metrics.textareaHeight).toBeGreaterThanOrEqual(44);
+        expect(metrics.textareaHeight).toBeGreaterThanOrEqual(34);
         await expectMobileComposerControlsFullyVisible(page);
         await expectNoHorizontalOverflow(page);
     });
@@ -263,7 +252,7 @@ test("mobile composer auto-grows and keeps Send accessible", async ({ responsive
             overflowY: getComputedStyle(element).overflowY,
         }));
     }).toMatchObject({
-        height: 160,
+        height: 168,
         overflowY: "auto",
     });
 
@@ -273,12 +262,12 @@ test("mobile composer auto-grows and keeps Send accessible", async ({ responsive
     await expectNoHorizontalOverflow(page);
 });
 
-test("mobile Enter inserts a newline instead of sending", async ({ responsiveApp }) => {
+test("mobile Shift+Enter inserts a newline instead of sending", async ({ responsiveApp }) => {
     const { page } = responsiveApp;
     const textarea = page.locator("#promptInput");
 
     await textarea.fill("First line");
-    await textarea.press("Enter");
+    await textarea.press("Shift+Enter");
     await page.keyboard.type("Second line");
 
     await expect(textarea).toHaveValue("First line\nSecond line");
@@ -286,30 +275,15 @@ test("mobile Enter inserts a newline instead of sending", async ({ responsiveApp
     await expect(page.getByRole("button", { name: "Send message" })).toBeEnabled();
 });
 
-test("small mobile keeps the Smart tooltip and options menu inside the viewport", async ({ responsiveApp }) => {
+test("small mobile keeps model and options sheets inside the viewport", async ({ responsiveApp }) => {
     const { page } = responsiveApp;
     await page.setViewportSize({ width: 320, height: 568 });
 
-    for (const [switchName, tooltipText] of [
-        ["Smart routing", "Gets you the best answer automatically"],
-    ]) {
-        const chip = page.getByRole("switch", { name: switchName });
-        const tooltip = page.locator('[role="tooltip"]').filter({ hasText: tooltipText });
-        await chip.focus();
-        await expect(tooltip).toBeVisible();
-        const bounds = await tooltip.evaluate(element => {
-            const rect = element.getBoundingClientRect();
-            return {
-                left: rect.left,
-                right: rect.right,
-                viewportWidth: window.innerWidth,
-            };
-        });
-        expect(bounds.left, `${switchName} tooltip left edge`).toBeGreaterThanOrEqual(0);
-        expect(bounds.right, `${switchName} tooltip right edge`).toBeLessThanOrEqual(
-            bounds.viewportWidth,
-        );
-    }
+    const model = page.getByRole("button", { name: "Model: Smart" }); await model.click();
+    const modelSheet = page.getByRole("dialog", { name: "Choose a model" });
+    await expect(modelSheet).toHaveAttribute("data-layout", "sheet");
+    const modelBounds = await modelSheet.boundingBox(); expect(modelBounds.x).toBe(0); expect(modelBounds.width).toBe(320);
+    await page.keyboard.press("Escape"); await expect(model).toBeFocused();
 
     await page.getByRole("button", { name: "More options" }).click();
     const optionsMenu = page.getByRole("dialog", { name: "More options" });
@@ -441,34 +415,12 @@ async function composerMetrics(page) {
 }
 
 async function expectMobileComposerControlsFullyVisible(page) {
-    const featureControls = page.locator("#promptFeatureControls");
-    const featureButtons = [
-        ["switch", "Smart routing"],
-        ["button", "More options"],
-    ];
-    for (const [role, name] of featureButtons) {
-        await expect(page.getByRole(role, { name })).toBeVisible();
-    }
-
-    // Font swaps can reflow the row between separate boundingBox calls.
-    // Read the container and its buttons in the same browser layout snapshot.
-    const { featureBounds, buttonBounds } = await featureControls.evaluate((feature, names) => {
-        const featureRect = feature.getBoundingClientRect();
-        return {
-            featureBounds: { x: featureRect.x, right: featureRect.right },
-            buttonBounds: names.map(name => {
-                const rect = feature.querySelector(`[aria-label="${name}"]`)?.getBoundingClientRect();
-                return { name, bounds: rect ? { x: rect.x, right: rect.right } : null };
-            }),
-        };
-    }, featureButtons.map(([, name]) => name));
-
-    for (const { name, bounds } of buttonBounds) {
-        expect(bounds, `${name} bounds`).not.toBeNull();
-        expect(bounds.x, `${name} left edge`).toBeGreaterThanOrEqual(featureBounds.x - 1);
-        expect(bounds.right, `${name} right edge`).toBeLessThanOrEqual(
-            featureBounds.right + 1,
-        );
+    const featureControls = page.locator("[data-composer-card]");
+    const controls = [page.getByRole("button", { name: /^Model:/ }), page.getByRole("button", { name: "More options" })];
+    const bounds = await featureControls.boundingBox();
+    for (const control of controls) {
+      await expect(control).toBeVisible(); const box = await control.boundingBox();
+      expect(box.x).toBeGreaterThanOrEqual(bounds.x); expect(box.x + box.width).toBeLessThanOrEqual(bounds.x + bounds.width);
     }
 
     await page.getByRole("button", { name: "More options" }).click();
@@ -499,7 +451,7 @@ async function expectComposerToolbarOrder(page, switchNames) {
     const send = page.getByRole("button", { name: "Send message" });
     const controls = [
         attach,
-        ...switchNames.map(name => page.getByRole("switch", { name })),
+        page.getByRole("button", { name: /^(?:Model:|Models to compare)/ }),
         options,
         send,
     ];

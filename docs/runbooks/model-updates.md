@@ -184,9 +184,15 @@ python scripts/models.py report --catalog litellm.json --markdown report.md --pr
 python scripts/models.py apply --proposals proposals.yaml --select openai:gpt-7-luna
 python scripts/models.py apply --issue-body issue.md  # ticked models of a saved issue body
 python scripts/models.py check                        # CI gate
-python scripts/models.py sync-frontend                # after editing ui_defaults by hand
+python scripts/models.py sync-frontend                # after editing selectable models or ui_defaults
 python scripts/models.py lock                         # after adding an ID by hand
 ```
+
+The generated React fallback contains the complete selectable registry, across all
+providers. Ask/Compare defaults control initial selections, not catalog membership.
+The model-tool tests compare its IDs with `ModelRegistry.list_selectable_models()`;
+regenerate it after changing selectable models as well as defaults. Successful
+`/v1/model-options` responses remain authoritative in the browser.
 
 `check` verifies: the registry and pricing identities load; no duplicate or
 removed IDs; non-`ACTIVE` models are not selectable and carry dates or

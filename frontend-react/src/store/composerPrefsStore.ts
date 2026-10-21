@@ -1,14 +1,19 @@
 import { create } from "zustand";
-import type { ModelCatalogItem, SubscriptionPlanCode } from "../types";
+import type { ModelCatalogItem, ReasoningLevel, SubscriptionPlanCode } from "../types";
 import { DEFAULT_ASK_MODEL_KEYS_BY_PLAN, resolveAskModelKey } from "../config/askDefaults";
+import { DEFAULT_COMPARE_MODEL_KEYS } from "../config/compareDefaults";
 
 export interface ComposerPrefs {
+  newChatStart: string;
+  recentModels: string[];
   smartForNewChats: boolean;
   smartOffModelId: string | null;
 }
 
 export const COMPOSER_PREFS_KEY = "cortex.composerPrefs.v1";
 export const INITIAL_COMPOSER_PREFS: ComposerPrefs = {
+  newChatStart: "smart",
+  recentModels: [],
   smartForNewChats: true,
   smartOffModelId: null,
 };
@@ -24,21 +29,40 @@ function readStorage(key: string): Record<string, unknown> {
   }
 }
 
-function normalizePrefs(value: unknown): ComposerPrefs {
+function normalizePrefs(value: unknown, plan: SubscriptionPlanCode = "free"): ComposerPrefs {
   const prefs = value && typeof value === "object" ? (value as Partial<ComposerPrefs>) : {};
+  const legacyModel =
+    typeof prefs.smartOffModelId === "string" && prefs.smartOffModelId
+      ? prefs.smartOffModelId
+      : null;
   return {
+    newChatStart:
+      typeof prefs.newChatStart === "string" && prefs.newChatStart
+        ? prefs.newChatStart
+        : prefs.smartForNewChats === false
+          ? (legacyModel ?? DEFAULT_ASK_MODEL_KEYS_BY_PLAN[plan])
+          : "smart",
+    recentModels: Array.isArray(prefs.recentModels)
+      ? [
+          ...new Set(
+            prefs.recentModels.filter(
+              (key): key is string => typeof key === "string" && key.includes(":"),
+            ),
+          ),
+        ].slice(0, 3)
+      : [],
     smartForNewChats: typeof prefs.smartForNewChats === "boolean" ? prefs.smartForNewChats : true,
-    smartOffModelId:
-      typeof prefs.smartOffModelId === "string" && prefs.smartOffModelId
-        ? prefs.smartOffModelId
-        : null,
+    smartOffModelId: legacyModel,
   };
 }
 
-export function loadComposerPrefs(userId: string | null): ComposerPrefs {
+export function loadComposerPrefs(
+  userId: string | null,
+  plan: SubscriptionPlanCode = "free",
+): ComposerPrefs {
   const data = readStorage(COMPOSER_PREFS_KEY);
   // The unscoped prototype format belongs only to the anonymous browser user.
-  return normalizePrefs(data[userId ?? "anonymous"] ?? (userId ? null : data));
+  return normalizePrefs(data[userId ?? "anonymous"] ?? (userId ? null : data), plan);
 }
 
 function writeStorage(key: string, data: Record<string, unknown>) {
@@ -55,6 +79,8 @@ interface ComposerPrefsState {
   setUser: (userId: string | null) => void;
   updatePrefs: (patch: Partial<ComposerPrefs>) => void;
   reload: () => void;
+  migrate: (plan: SubscriptionPlanCode, catalog: ModelCatalogItem[]) => void;
+  rememberModel: (key: string) => void;
 }
 
 export const useComposerPrefsStore = create<ComposerPrefsState>((set, get) => ({
@@ -73,11 +99,53 @@ export const useComposerPrefsStore = create<ComposerPrefsState>((set, get) => ({
     set({ prefs: next });
   },
   reload: () => set({ prefs: loadComposerPrefs(get().userId) }),
+  migrate: (plan, catalog) => {
+    const { userId, prefs } = get();
+    const data = readStorage(COMPOSER_PREFS_KEY);
+    const raw = data[userId ?? "anonymous"] ?? (userId ? {} : data);
+    const stored = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+    const migrated =
+      typeof stored.newChatStart !== "string" &&
+      (typeof stored.smartForNewChats === "boolean" || typeof stored.smartOffModelId === "string")
+        ? normalizePrefs(raw, plan)
+        : prefs;
+    const available = new Set(
+      catalog
+        .filter((model) => model.enabled && model.selectable !== false)
+        .map((model) => `${model.provider}:${model.model}`),
+    );
+    const seeds = [
+      DEFAULT_ASK_MODEL_KEYS_BY_PLAN[plan],
+      ...DEFAULT_COMPARE_MODEL_KEYS,
+      ...available,
+    ];
+    const recentModels = [...new Set([...migrated.recentModels, ...seeds])]
+      .filter((key) => available.has(key))
+      .slice(0, 3);
+    if (
+      typeof stored.newChatStart !== "string" ||
+      recentModels.join() !== prefs.recentModels.join()
+    )
+      get().updatePrefs({ ...migrated, recentModels });
+  },
+  rememberModel: (key) =>
+    get().updatePrefs({
+      recentModels: [key, ...get().prefs.recentModels.filter((item) => item !== key)].slice(0, 3),
+    }),
 }));
+
+export function resolveNewChatStart(
+  prefs: ComposerPrefs,
+  plan: { code: SubscriptionPlanCode; lockedModelKeys: readonly string[] },
+  catalog: ModelCatalogItem[],
+): string {
+  if (prefs.newChatStart === "smart") return "smart";
+  return resolveSmartOffModel({ smartOffModelId: prefs.newChatStart }, plan, catalog);
+}
 
 /** Resolve against the active catalogue and server-owned plan access, retaining the saved ID. */
 export function resolveSmartOffModel(
-  prefs: ComposerPrefs,
+  prefs: Pick<ComposerPrefs, "smartOffModelId">,
   plan: { code: SubscriptionPlanCode; lockedModelKeys: readonly string[] },
   catalog: ModelCatalogItem[],
 ): string {
@@ -96,6 +164,9 @@ export function resolveSmartOffModel(
 }
 
 export interface ChatComposerState {
+  askReasoningLevel?: ReasoningLevel;
+  compareReasoningLevel?: ReasoningLevel;
+  optimizeMode?: boolean;
   smartMode: boolean;
   selectedModelKey: string;
   lastManualModel: string | null;
@@ -120,6 +191,13 @@ export function loadChatComposer(sessionId: string): Partial<ChatComposerState> 
   )
     return null;
   return {
+    ...(["auto", "low", "medium", "high", "max"].includes(state.askReasoningLevel ?? "")
+      ? { askReasoningLevel: state.askReasoningLevel }
+      : {}),
+    ...(["auto", "low", "medium", "high", "max"].includes(state.compareReasoningLevel ?? "")
+      ? { compareReasoningLevel: state.compareReasoningLevel }
+      : {}),
+    ...(typeof state.optimizeMode === "boolean" ? { optimizeMode: state.optimizeMode } : {}),
     smartMode: state.smartMode,
     selectedModelKey: state.selectedModelKey,
     lastManualModel: state.lastManualModel,

@@ -1,145 +1,112 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { useState } from "react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { CompareSelector } from "../components/composer/CompareSelector";
-import type { ModelCatalogItem } from "../types";
+import { DEFAULT_MODELS } from "../config/defaultModels";
 
-const models = [
-  model("openai", "gpt-5.1"),
-  model("claude", "claude-sonnet-4-5"),
-  model("deepseek", "deepseek-chat"),
-  model("gemini", "gemini-2.5-flash"),
-];
-
-describe("CompareSelector", () => {
-  it("drills from provider choices into readable model details", async () => {
-    const user = userEvent.setup();
+const keys: [string, string, string] = ["openai:gpt-5.6-luna", "claude:claude-sonnet-5", ""];
+afterEach(cleanup);
+function Selector({
+  maxTargets = 3,
+  onLimit = vi.fn(),
+}: {
+  maxTargets?: number;
+  onLimit?: () => void;
+}) {
+  const [selected, setSelected] = useState(keys);
+  return (
+    <CompareSelector
+      models={DEFAULT_MODELS}
+      keys={selected}
+      maxTargets={maxTargets}
+      onTargetLimit={onLimit}
+      onChange={(index, key) =>
+        setSelected((current) => {
+          const next = [...current] as [string, string, string];
+          next[index] = key;
+          const compact = next.filter(Boolean);
+          return [compact[0] || "", compact[1] || "", compact[2] || ""];
+        })
+      }
+    />
+  );
+}
+describe("Compare model menu", () => {
+  it("keeps restored targets visible and lets a locked third target be removed", async () => {
+    const locked = vi.fn();
+    const change = vi.fn();
     render(
       <CompareSelector
-        models={models}
-        keys={["openai:gpt-5.1", "claude:claude-sonnet-4-5", ""]}
-        onChange={vi.fn()}
+        models={DEFAULT_MODELS}
+        keys={[keys[0], keys[1], "grok:retired-model"]}
+        onChange={change}
+        lockedKeys={["grok:retired-model"]}
+        onLockedModel={locked}
       />,
     );
-
-    await user.click(screen.getByRole("button", { name: /Compare model 1:/ }));
-    const listbox = screen.getByRole("listbox", {
-      name: "Compare model 1 options",
-    });
-
-    expect(listbox.parentElement).toBe(document.body);
-    expect(listbox).toHaveAttribute("data-picker-view", "providers");
-    expect(within(listbox).getByRole("option", { name: /ChatGPT/ })).toBeVisible();
-    expect(within(listbox).getByRole("option", { name: /Claude/ })).toBeVisible();
-    expect(listbox.querySelectorAll("img").length).toBeGreaterThan(0);
-
-    await user.click(within(listbox).getByRole("option", { name: /ChatGPT/ }));
-    expect(listbox).toHaveAttribute("data-picker-view", "models");
-    expect(within(listbox).getByText("GPT-5.1")).toBeInTheDocument();
-    expect(within(listbox).getByText("gpt-5.1")).toBeInTheDocument();
-
-    await user.click(within(listbox).getByRole("option", { name: "Back to providers" }));
-    await user.click(within(listbox).getByRole("option", { name: /Claude/ }));
-    expect(within(listbox).getByText("Claude Sonnet")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Models to compare" }));
+    await userEvent.click(screen.getByRole("option", { name: /retired-model/ }));
+    expect(change).toHaveBeenCalledWith(2, "");
+    expect(locked).not.toHaveBeenCalled();
   });
-
-  it("renders one decorative connector between each active model", () => {
-    const { rerender } = render(
-      <CompareSelector
-        models={models}
-        keys={["openai:gpt-5.1", "claude:claude-sonnet-4-5", ""]}
-        onChange={vi.fn()}
-      />,
+  it("shows every selectable model and no Smart or preference row", async () => {
+    render(<Selector />);
+    await userEvent.click(screen.getByRole("button", { name: "Models to compare" }));
+    const list = screen.getByRole("listbox", { name: "Compare models" });
+    expect(within(list).getAllByRole("option")).toHaveLength(
+      DEFAULT_MODELS.filter((model) => model.enabled && model.selectable !== false).length,
     );
-
-    expect(screen.getAllByTestId("compare-connector")).toHaveLength(1);
-    expect(screen.getByTestId("compare-connector")).toHaveAttribute("aria-hidden", "true");
-
-    rerender(
-      <CompareSelector
-        models={models}
-        keys={["openai:gpt-5.1", "claude:claude-sonnet-4-5", "deepseek:deepseek-chat"]}
-        onChange={vi.fn()}
-      />,
-    );
-
-    expect(screen.getAllByTestId("compare-connector")).toHaveLength(2);
-  });
-
-  it("selects within a provider and disables models used in another slot", async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    render(
-      <CompareSelector
-        models={models}
-        keys={["openai:gpt-5.1", "claude:claude-sonnet-4-5", ""]}
-        onChange={onChange}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: /Compare model 1:/ }));
-    const listbox = screen.getByRole("listbox", {
-      name: "Compare model 1 options",
-    });
-    await user.click(within(listbox).getByRole("option", { name: /Claude/ }));
-    expect(within(listbox).getByRole("option", { name: /Claude Sonnet/ })).toBeDisabled();
-
-    await user.click(within(listbox).getByRole("option", { name: "Back to providers" }));
-    await user.click(within(listbox).getByRole("option", { name: /Gemini/ }));
-    await user.click(within(listbox).getByRole("option", { name: /Gemini Flash/ }));
-    expect(onChange).toHaveBeenCalledWith(0, "gemini:gemini-2.5-flash");
-    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
-  });
-
-  it("keeps the synchronized native select usable for mobile model selection", () => {
-    const onChange = vi.fn();
-    render(
-      <CompareSelector
-        models={models}
-        keys={["openai:gpt-5.1", "claude:claude-sonnet-4-5", ""]}
-        onChange={onChange}
-      />,
-    );
-
-    fireEvent.change(document.querySelector("#compareModel1")!, {
-      target: { value: "gemini:gemini-2.5-flash" },
-    });
-
-    expect(onChange).toHaveBeenCalledWith(0, "gemini:gemini-2.5-flash");
-  });
-
-  it("keeps optional feature controls inside the compare toolbar", () => {
-    render(
-      <CompareSelector
-        models={models}
-        keys={["openai:gpt-5.1", "claude:claude-sonnet-4-5", ""]}
-        onChange={vi.fn()}
-        trailingControls={<button type="button">Improve</button>}
-      />,
-    );
-
-    const toolbar = screen.getByLabelText("Compare model selectors");
-    expect(within(toolbar).getByRole("button", { name: "Improve" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /^Smart/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("New chats start with")).not.toBeInTheDocument();
+    expect(screen.getByText("2/3")).toBeVisible();
     expect(
-      within(toolbar).getByRole("button", {
-        name: "Add model to comparison",
-      }),
-    ).toBeInTheDocument();
+      screen.getByText(
+        "Smart isn't available in Compare. Each model answers the same prompt side by side.",
+      ),
+    ).toBeVisible();
+  });
+  it("enforces two to three models while keeping the menu open", async () => {
+    const user = userEvent.setup();
+    render(<Selector />);
+    await user.click(screen.getByRole("button", { name: "Models to compare" }));
+    const selected = screen.getAllByRole("option", { selected: true });
+    selected.forEach((row) => expect(row).toBeDisabled());
+    const third = screen.getByRole("option", { name: /deepseek-v4-flash/ });
+    await user.click(third);
+    expect(screen.getByText("3/3")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Models to compare" })).toHaveTextContent("3 models");
+    expect(
+      screen
+        .getAllByRole("option", { selected: false })
+        .every((row) => row.hasAttribute("disabled")),
+    ).toBe(true);
+    await user.click(third);
+    expect(screen.getByText("2/3")).toBeVisible();
+  });
+  it("keeps the third-slot upgrade flow available at the plan limit", async () => {
+    const onLimit = vi.fn();
+    render(<Selector maxTargets={2} onLimit={onLimit} />);
+    await userEvent.click(screen.getByRole("button", { name: "Models to compare" }));
+    await userEvent.click(screen.getByRole("option", { name: /deepseek-v4-flash/ }));
+    expect(onLimit).toHaveBeenCalledOnce();
+    expect(screen.getByText("2/3")).toBeVisible();
+  });
+  it("opens upgrade for a locked model without selecting it", async () => {
+    const locked = vi.fn();
+    const change = vi.fn();
+    render(
+      <CompareSelector
+        models={DEFAULT_MODELS}
+        keys={keys}
+        onChange={change}
+        lockedKeys={["deepseek:deepseek-v4-flash"]}
+        onLockedModel={locked}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Models to compare" }));
+    await userEvent.click(screen.getByRole("option", { name: /deepseek-v4-flash/ }));
+    expect(locked).toHaveBeenCalledWith("deepseek:deepseek-v4-flash");
+    expect(change).not.toHaveBeenCalled();
   });
 });
-
-function model(provider: string, name: string): ModelCatalogItem {
-  return {
-    provider,
-    model: name,
-    tier: "frontier",
-    billing_class: "advanced",
-    input_cost_per_1m: 0,
-    output_cost_per_1m: 0,
-    context_limit: 128000,
-    tags: [],
-    enabled: true,
-    supports_image_input: false,
-    supported_attachment_mime_types: [],
-  };
-}

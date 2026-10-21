@@ -20,6 +20,11 @@ const PLAN_CLASSES: Record<SubscriptionPlanCode, ModelBillingClass[]> = {
 const keyOf = (model: { provider: string; model: string }) => `${model.provider}:${model.model}`;
 
 describe("registry-generated model defaults", () => {
+  it("retains every current provider in the real offline catalog", () => {
+    expect(new Set(FALLBACK_MODELS.map((model) => model.provider))).toEqual(
+      new Set(["openai", "gemini", "claude", "grok", "deepseek"]),
+    );
+  });
   it("ships an offline row for every default model", () => {
     const rows = new Set(FALLBACK_MODELS.map(keyOf));
     const defaults = [

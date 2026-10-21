@@ -1,24 +1,26 @@
-import { useRef, useEffect, useCallback, useState } from "react";
+import { useRef, useEffect, useLayoutEffect, useCallback, useMemo, useState } from "react";
 import { ModelSelector } from "./ModelSelector";
 import { CompareSelector } from "./CompareSelector";
 import { FeatureChips } from "./FeatureChips";
-import { ComposerOptionChips, ComposerOptionsMenu } from "./ComposerOptionsMenu";
+import { ComposerOptionsMenu } from "./ComposerOptionsMenu";
 import { AttachmentStrip } from "./AttachmentStrip";
 import { useChatStore } from "../../store/chatStore";
 import { useAttachmentUploadStore } from "../../store/attachmentUploadStore";
 import { attachmentUploadsBlockSubmission } from "../../uploads/attachmentUploadQueue";
 import { userFacingMessage } from "../../errors/userFacingError";
 import { useChat } from "../../hooks/useChat";
-import { isModelDropdownVisible } from "../../hooks/useSmartRouting";
 import type { ModelCatalogItem } from "../../types";
 import type { UseSubscriptionResult } from "../../hooks/useSubscription";
 import { DEFAULT_MODELS } from "../../config/defaultModels";
 import { resolveAskModelKey } from "../../config/askDefaults";
-import { newCompareModelKeys, resolveCompareModelKeys } from "../../config/compareDefaults";
-import { resolveSmartOffModel, useComposerPrefsStore } from "../../store/composerPrefsStore";
+import {
+  DEFAULT_COMPARE_MODEL_KEYS,
+  newCompareModelKeys,
+  resolveCompareModelKeys,
+} from "../../config/compareDefaults";
+import { resolveNewChatStart, useComposerPrefsStore } from "../../store/composerPrefsStore";
 import {
   compareReasoningLevels,
-  defaultModelReasoningLevel,
   modelForKey,
   modelReasoningLevels,
   smartReasoningLevels,
@@ -42,8 +44,6 @@ interface PromptComposerProps {
     Partial<Pick<UseSubscriptionResult, "loading">>;
 }
 
-const MOBILE_COMPOSER_MEDIA_QUERY = "(max-width: 900px)";
-
 export function PromptComposer({
   models,
   modelsLoading = false,
@@ -53,6 +53,7 @@ export function PromptComposer({
   const entitlements = subscription?.entitlements ?? null;
   const plans = subscription?.plans ?? null;
   const subscriptionLoading = subscription?.loading ?? false;
+  const subscriptionPending = Boolean(subscription && !entitlements);
   const mode = useChatStore((s) => s.mode);
   const smartMode = useChatStore((s) => s.smartMode);
   const setSmartMode = useChatStore((s) => s.setSmartMode);
@@ -69,7 +70,6 @@ export function PromptComposer({
   const updatePrefs = useComposerPrefsStore((s) => s.updatePrefs);
   const composerInitialized = useChatStore((s) => s.composerInitialized);
   const compareHasSent = useChatStore((s) => s.compareHasSent);
-  const comparePrefsModel = useChatStore((s) => s.comparePrefsModel);
   const sessionId = useChatStore((s) => s.sessionId);
   const hasTurns = useChatStore((s) => s.turns.length > 0);
   const compareModelKeys = useChatStore((s) => s.compareModelKeys);
@@ -86,7 +86,16 @@ export function PromptComposer({
   const { submit, cancel } = useChat();
   const cardRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [optionsOpen, setOptionsOpen] = useState(false);
+  const [openPopover, setOpenPopover] = useState<null | "model" | "options">(null);
+  const setOptionsOpen = useCallback(
+    (open: boolean) => setOpenPopover(open ? "options" : null),
+    [],
+  );
+  const setModelOpen = useCallback((open: boolean) => setOpenPopover(open ? "model" : null), []);
+  const [isTall, setIsTall] = useState(false);
+  const mirrorRef = useRef<HTMLSpanElement>(null);
+  const modelRef = useRef<HTMLDivElement>(null);
+  const chipsRef = useRef<HTMLDivElement>(null);
   const [optionsAnnouncement, setOptionsAnnouncement] = useState("");
   const uploadsPending =
     attachmentUploadsBlockSubmission(uploadTasks) ||
@@ -98,20 +107,24 @@ export function PromptComposer({
     { code: "attachments_pending", context: "chat" },
   );
 
-  const lockedModelKeys = availableModels
-    .filter((model) => modelAccessError(model, entitlements, plans) !== null)
-    .map((model) => `${model.provider}:${model.model}`);
+  const lockedModelKeys = useMemo(
+    () =>
+      availableModels
+        .filter((model) => modelAccessError(model, entitlements, plans) !== null)
+        .map((model) => `${model.provider}:${model.model}`),
+    [availableModels, entitlements, plans],
+  );
   const lockedModelLabels = Object.fromEntries(
     availableModels.map((model) => {
       const required = requiredPlanForModel(model.billing_class, entitlements, plans);
       return [`${model.provider}:${model.model}`, required ? capitalize(required) : "Unavailable"];
     }),
   );
-  const smartOffModel = resolveSmartOffModel(
-    prefs,
-    { code: entitlements?.plan.code ?? "free", lockedModelKeys },
-    availableModels,
+  const plan = useMemo(
+    () => ({ code: entitlements?.plan.code ?? "free", lockedModelKeys }),
+    [entitlements?.plan.code, lockedModelKeys],
   );
+  const newChatStart = resolveNewChatStart(prefs, plan, availableModels);
   const improveFeatureError = featureAccessError("prompt_improvement", entitlements, plans);
   const improveAllowanceError = allowanceAccessError("ai_credits", 1, entitlements, plans);
   const thirdTargetError = compareTargetAccessError(3, entitlements, plans);
@@ -149,94 +162,119 @@ export function PromptComposer({
     if (accessError) setSubscriptionError(accessError);
   };
 
-  const resize = useCallback(() => {
+  // Always measure against the compact grid, including while the text spans both rows.
+  const measure = useCallback(() => {
     const el = textareaRef.current;
-    if (!el) return;
+    const body = el?.parentElement;
+    if (!el || !body) return;
+    const mobile = window.matchMedia?.("(max-width: 760px)").matches ?? false;
+    const chipWidths = Array.from(
+      chipsRef.current?.querySelectorAll<HTMLElement>("[data-option-chip]") ?? [],
+    ).reduce((total, chip, index) => total + chip.offsetWidth + (index ? 6 : 0), 0);
+    const width =
+      body.clientWidth -
+      18 -
+      34 -
+      34 -
+      38 -
+      30 -
+      (modelRef.current?.offsetWidth ?? 100) -
+      chipWidths;
+    const tall =
+      !mobile &&
+      (prompt.includes("\n") ||
+        (mirrorRef.current?.getBoundingClientRect().width ?? 0) > Math.max(0, width - 12));
+    setIsTall(tall);
     el.style.height = "0px";
-    const nextHeight = Math.min(Math.max(el.scrollHeight, 44), 160);
-    el.style.height = `${nextHeight}px`;
-    el.style.overflowY = el.scrollHeight > 160 ? "auto" : "hidden";
-  }, []);
+    const height = mobile || tall ? Math.min(Math.max(el.scrollHeight, 34), 168) : 34;
+    el.style.height = `${height}px`;
+    el.style.overflowY = el.scrollHeight > 168 ? "auto" : "hidden";
+  }, [prompt]);
+  useLayoutEffect(() => {
+    measure();
+  }, [
+    measure,
+    isTall,
+    selectedModelKey,
+    smartMode,
+    optimizeMode,
+    askReasoningLevel,
+    compareReasoningLevel,
+    mode,
+  ]);
+  useEffect(() => {
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    if (cardRef.current) observer?.observe(cardRef.current);
+    if (modelRef.current) observer?.observe(modelRef.current);
+    if (chipsRef.current) observer?.observe(chipsRef.current);
+    window.addEventListener("resize", measure);
+    let active = true;
+    void document.fonts?.ready.then(() => {
+      if (active) measure();
+    });
+    return () => {
+      active = false;
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [measure]);
 
   useEffect(() => {
-    resize();
-  }, [prompt, resize]);
-
-  useEffect(() => {
-    if (subscriptionLoading || modelsLoading || availableModels.length === 0) return;
-    // An active session must hydrate before initial choices can write its local snapshot.
+    if (subscriptionLoading || subscriptionPending || modelsLoading || availableModels.length === 0)
+      return;
     if (sessionId && !composerInitialized && !hasTurns) return;
-
-    if (!compareHasSent && availableModels.length >= 2) {
-      const defaultModels = entitlements
-        ? availableModels.filter((model) =>
-            entitlements.model_access.allowed_billing_classes.includes(model.billing_class),
-          )
-        : availableModels;
-      const followPreference = !compareHasSent && comparePrefsModel !== smartOffModel;
-      const initialCompare = !compareModelKeys[0] && !compareModelKeys[1];
-      const currentKeys: [string, string, string] =
-        followPreference && comparePrefsModel !== null
-          ? [
-              smartOffModel,
-              compareModelKeys[1] === smartOffModel ? "" : compareModelKeys[1],
-              compareModelKeys[2] === smartOffModel ? "" : compareModelKeys[2],
-            ]
-          : compareModelKeys;
-      const resolvedCompareKeys =
-        initialCompare || (followPreference && comparePrefsModel !== null)
-          ? resolveCompareModelKeys(
-              availableModels,
-              [
-                smartOffModel,
-                currentKeys[1] ||
-                  newCompareModelKeys(availableModels, smartOffModel, defaultModels)[1],
-                currentKeys[2],
-              ],
-              defaultModels,
-            )
-          : resolveCompareModelKeys(availableModels, currentKeys, defaultModels);
-      for (const index of [0, 1, 2] as const) {
-        if (resolvedCompareKeys[index] !== compareModelKeys[index]) {
-          setCompareModelKey(index, resolvedCompareKeys[index]);
-        }
-      }
-    }
-    if (!composerInitialized || (!compareHasSent && comparePrefsModel !== smartOffModel)) {
-      useChatStore.setState({ composerInitialized: true, comparePrefsModel: smartOffModel });
-    }
-
-    const resolvedAskModelKey = resolveAskModelKey(
-      availableModels,
-      selectedModelKey || smartOffModel,
-      entitlements?.plan.code ?? null,
-      entitlements?.model_access.allowed_billing_classes ?? null,
+    const eligible = availableModels.filter(
+      (model) =>
+        model.enabled &&
+        model.selectable !== false &&
+        !lockedModelKeys.includes(`${model.provider}:${model.model}`),
     );
-    if (resolvedAskModelKey !== selectedModelKey) {
-      setResolvedModelKey(resolvedAskModelKey);
-    }
-    if (!composerInitialized && !smartMode && !selectedModelKey) {
-      setAskReasoningLevel(
-        defaultModelReasoningLevel(modelForKey(resolvedAskModelKey, availableModels)),
+    if (!composerInitialized) {
+      useComposerPrefsStore.getState().migrate(plan.code, availableModels);
+      const start = resolveNewChatStart(
+        useComposerPrefsStore.getState().prefs,
+        plan,
+        availableModels,
       );
+      const askKey = start === "smart" ? resolveAskModelKey(eligible, "", plan.code, null) : start;
+      const compareStart = start === "smart" ? DEFAULT_COMPARE_MODEL_KEYS[0] : start;
+      const compare = newCompareModelKeys(eligible, compareStart, eligible);
+      useChatStore.setState({
+        composerInitialized: true,
+        smartMode: start === "smart",
+        selectedModelKey: selectedModelKey || askKey,
+        compareModelKeys: compareModelKeys.some(Boolean) ? compareModelKeys : compare,
+        comparePrefsModel: start,
+      });
+    } else {
+      const resolvedAsk = resolveAskModelKey(
+        availableModels,
+        selectedModelKey,
+        plan.code,
+        entitlements?.model_access.allowed_billing_classes ?? null,
+      );
+      if (resolvedAsk !== selectedModelKey) setResolvedModelKey(resolvedAsk);
+      if (!compareHasSent) {
+        const resolved = resolveCompareModelKeys(availableModels, compareModelKeys, eligible);
+        if (resolved.some((key, index) => key !== compareModelKeys[index]))
+          useChatStore.setState({ compareModelKeys: resolved });
+      }
     }
   }, [
     availableModels,
     composerInitialized,
     compareHasSent,
-    comparePrefsModel,
     sessionId,
     hasTurns,
     compareModelKeys,
     entitlements,
     modelsLoading,
     selectedModelKey,
-    setCompareModelKey,
     setResolvedModelKey,
-    setAskReasoningLevel,
-    smartMode,
-    smartOffModel,
     subscriptionLoading,
+    subscriptionPending,
+    lockedModelKeys,
+    plan,
   ]);
 
   const selectedModel = modelForKey(selectedModelKey, availableModels);
@@ -267,7 +305,7 @@ export function PromptComposer({
       return;
     }
     if (askReasoningLevel !== "auto" && !supportedReasoningLevels.includes(askReasoningLevel)) {
-      setAskReasoningLevel(defaultModelReasoningLevel(selectedModel));
+      setAskReasoningLevel("auto");
     }
   }, [
     askReasoningLevel,
@@ -281,12 +319,7 @@ export function PromptComposer({
   ]);
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Enter" && !event.shiftKey) {
-      const usesMobileComposer =
-        typeof window !== "undefined" &&
-        Boolean(window.matchMedia?.(MOBILE_COMPOSER_MEDIA_QUERY).matches);
-      if (usesMobileComposer) return;
-
+    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
       if (!streaming && uploadsPending) {
         setError(uploadWaitError);
@@ -294,24 +327,6 @@ export function PromptComposer({
         handleSubmit();
       }
     }
-  };
-
-  const showModelDropdown = isModelDropdownVisible(mode, smartMode);
-  const showModelRow = mode === "compare" || showModelDropdown;
-  const handleSmartToggle = (enabled: boolean) => {
-    updatePrefs({ smartForNewChats: enabled });
-    setSmartMode(enabled, smartOffModel);
-    setAskReasoningLevel(
-      enabled
-        ? "auto"
-        : defaultModelReasoningLevel(
-            modelForKey(useChatStore.getState().selectedModelKey, availableModels),
-          ),
-    );
-  };
-  const featureChipProps = {
-    smartMode,
-    onSmartToggle: handleSmartToggle,
   };
 
   const reasoningContextLabel =
@@ -334,50 +349,27 @@ export function PromptComposer({
   };
 
   useEffect(() => {
-    setOptionsOpen(false);
-  }, [mode]);
+    setOpenPopover(null);
+  }, [mode, sessionId, composerInitialized]);
+
+  const chooseModel = (key: string) => {
+    if (key === "smart") {
+      setSmartMode(true);
+    } else {
+      setSelectedModelKey(key);
+      setSmartMode(false, key);
+      useComposerPrefsStore.getState().rememberModel(key);
+    }
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+  const filesPresent = attachments.length > 0 || uploadTasks.length > 0;
 
   return (
-    <div ref={cardRef} className={styles.card}>
-      {showModelRow && (
-        <div className={styles.modelRow}>
-          {mode === "compare" ? (
-            <CompareSelector
-              models={availableModels}
-              keys={compareModelKeys}
-              onChange={setCompareModelKey}
-              lockedKeys={lockedModelKeys}
-              lockedLabels={lockedModelLabels}
-              onLockedModel={handleLockedModel}
-              maxTargets={entitlements?.features.max_compare_models ?? 3}
-              thirdTargetPlanLabel={
-                thirdTargetError
-                  ? capitalize(detailString(thirdTargetError, "recommended_plan") ?? "Upgrade")
-                  : "Upgrade"
-              }
-              onTargetLimit={() => {
-                if (thirdTargetError) setSubscriptionError(thirdTargetError);
-              }}
-            />
-          ) : (
-            <ModelSelector
-              id="singleModel"
-              label="Using"
-              models={availableModels}
-              value={selectedModelKey}
-              onChange={(key) => {
-                setSelectedModelKey(key);
-                setAskReasoningLevel(defaultModelReasoningLevel(modelForKey(key, availableModels)));
-              }}
-              lockedKeys={lockedModelKeys}
-              lockedLabels={lockedModelLabels}
-              onLockedSelect={handleLockedModel}
-            />
-          )}
-        </div>
-      )}
-
-      <div className={`${styles.composerBody} ${optionsOpen ? styles.optionsOpen : ""}`}>
+    <div ref={cardRef} className={styles.card} data-composer-card data-tall={isTall}>
+      <div
+        className={`${styles.composerBody} ${isTall ? styles.tall : ""} ${hasOptionChips ? styles.withChips : ""} ${filesPresent ? styles.withAttachments : ""}`}
+      >
+        <AttachmentStrip entitlements={entitlements} plans={plans} compact />
         <textarea
           ref={textareaRef}
           id="promptInput"
@@ -392,89 +384,116 @@ export function PromptComposer({
             mode === "compare" ? "Ask once and compare model responses" : "Ask anything…"
           }
         />
-
-        <div className={styles.composerControls} data-composer-mode={mode}>
-          <AttachmentStrip entitlements={entitlements} plans={plans} />
-
-          <div id="promptFeatureControls" className={styles.featureControls}>
-            <div className={styles.featureControlRow}>
-              {mode === "single" ? <FeatureChips {...featureChipProps} /> : null}
-              <ComposerOptionsMenu
-                optimizeMode={optimizeMode}
-                onOptimizeToggle={handleOptimizeChange}
-                optimizeBlocked={Boolean(improveFeatureError || improveAllowanceError)}
-                onOptimizeBlocked={() =>
-                  setSubscriptionError(improveFeatureError ?? improveAllowanceError)
-                }
-                reasoningValue={reasoningLevel}
-                supportedReasoningLevels={supportedReasoningLevels}
-                reasoningUnavailable={reasoningUnavailable}
-                reasoningContextLabel={reasoningContextLabel}
-                onReasoningChange={handleReasoningChange}
-                modeLabel={mode === "compare" ? "Compare" : ""}
-                models={availableModels.filter(
-                  (model) => model.enabled && model.selectable !== false,
-                )}
-                smartOffModel={smartOffModel}
-                onSmartOffModelChange={(id) => updatePrefs({ smartOffModelId: id })}
-                currentModel={mode === "single" && !smartMode ? selectedModelKey : undefined}
-                lockedKeys={lockedModelKeys}
-                lockedLabels={lockedModelLabels}
-                onLockedSelect={handleLockedModel}
-                {...(mode === "single"
-                  ? {
-                      smartForNewChats: smartMode,
-                      onSmartForNewChatsChange: handleSmartToggle,
-                    }
-                  : {})}
-                open={optionsOpen}
-                interactionBlocked={Boolean(subscriptionError)}
-                onOpenChange={setOptionsOpen}
-              />
-            </div>
-          </div>
-
-          {hasOptionChips ? (
-            <div className={styles.optionsChips}>
-              <ComposerOptionChips
-                optimizeMode={optimizeMode}
-                reasoningValue={reasoningLevel}
-                reasoningUnavailable={reasoningUnavailable}
-                onOpen={() => setOptionsOpen(true)}
-                onOptimizeReset={() => handleOptimizeChange(false)}
-                onReasoningReset={() => handleReasoningChange("auto")}
-              />
-            </div>
-          ) : null}
-
-          <div className={styles.actions}>
-            {uploadsPending ? (
-              <span id="attachmentSubmitStatus" className={styles.screenReaderOnly}>
-                {uploadWaitMessage}
-              </span>
-            ) : null}
-            <button
-              className={`${styles.submitButton} ${streaming ? styles.stopButton : ""}`}
-              type="button"
-              aria-label={streaming ? "Stop" : "Send message"}
-              aria-describedby={uploadsPending ? "attachmentSubmitStatus" : undefined}
-              title={!streaming && uploadsPending ? uploadWaitMessage : undefined}
-              id="submitBtn"
-              onClick={() => (streaming ? cancel() : handleSubmit())}
-              disabled={
-                !streaming && (uploadsPending || (!prompt.trim() && attachments.length === 0))
-              }
-            >
-              <CortexIcon
-                name={streaming ? "stop" : "composer-send"}
-                strokeWidth={streaming ? undefined : 2.2}
-              />
-            </button>
-          </div>
-          <span className={styles.screenReaderOnly} aria-live="polite" aria-atomic="true">
-            {optionsAnnouncement}
-          </span>
+        <span ref={mirrorRef} className={styles.measurement} aria-hidden="true">
+          {prompt}
+        </span>
+        <div ref={chipsRef} className={styles.optionsChips} id="promptFeatureControls">
+          <FeatureChips
+            optimizeMode={optimizeMode}
+            reasoningValue={reasoningLevel}
+            reasoningUnavailable={reasoningUnavailable}
+            onOpen={() => setOptionsOpen(true)}
+            onOptimizeReset={() => {
+              handleOptimizeChange(false);
+              requestAnimationFrame(() => textareaRef.current?.focus());
+            }}
+            onReasoningReset={() => {
+              handleReasoningChange("auto");
+              requestAnimationFrame(() => textareaRef.current?.focus());
+            }}
+          />
         </div>
+        <div ref={modelRef} className={styles.modelControl}>
+          {mode === "compare" ? (
+            <CompareSelector
+              models={availableModels}
+              keys={compareModelKeys}
+              onChange={(index, key) => {
+                setCompareModelKey(index, key);
+                if (key) useComposerPrefsStore.getState().rememberModel(key);
+              }}
+              lockedKeys={lockedModelKeys}
+              lockedLabels={lockedModelLabels}
+              onLockedModel={handleLockedModel}
+              maxTargets={entitlements?.features.max_compare_models ?? 3}
+              thirdTargetPlanLabel={
+                thirdTargetError
+                  ? capitalize(detailString(thirdTargetError, "recommended_plan") ?? "Upgrade")
+                  : "Upgrade"
+              }
+              onTargetLimit={() => {
+                if (thirdTargetError) setSubscriptionError(thirdTargetError);
+              }}
+              open={openPopover === "model"}
+              onOpenChange={setModelOpen}
+              interactionBlocked={Boolean(subscriptionError)}
+            />
+          ) : (
+            <ModelSelector
+              id="singleModel"
+              models={availableModels}
+              value={selectedModelKey}
+              onChange={chooseModel}
+              lockedKeys={lockedModelKeys}
+              lockedLabels={lockedModelLabels}
+              onLockedSelect={handleLockedModel}
+              composer={{
+                smart: smartMode,
+                recentModels: prefs.recentModels,
+                newChatStart: prefs.newChatStart === "smart" ? "smart" : newChatStart,
+                onNewChatStart: (key) => updatePrefs({ newChatStart: key }),
+                open: openPopover === "model",
+                onOpenChange: setModelOpen,
+                interactionBlocked: Boolean(subscriptionError),
+              }}
+            />
+          )}
+        </div>
+        <div className={styles.optionsControl}>
+          <ComposerOptionsMenu
+            optimizeMode={optimizeMode}
+            onOptimizeToggle={handleOptimizeChange}
+            optimizeBlocked={Boolean(improveFeatureError || improveAllowanceError)}
+            onOptimizeBlocked={() =>
+              setSubscriptionError(improveFeatureError ?? improveAllowanceError)
+            }
+            reasoningValue={reasoningLevel}
+            supportedReasoningLevels={supportedReasoningLevels}
+            reasoningUnavailable={reasoningUnavailable}
+            reasoningContextLabel={reasoningContextLabel}
+            onReasoningChange={handleReasoningChange}
+            open={openPopover === "options"}
+            onOpenChange={setOptionsOpen}
+            interactionBlocked={Boolean(subscriptionError)}
+          />
+        </div>
+        <div className={styles.actions}>
+          {uploadsPending && (
+            <span id="attachmentSubmitStatus" className={styles.screenReaderOnly}>
+              {uploadWaitMessage}
+            </span>
+          )}
+          <button
+            className={`${styles.submitButton} ${streaming ? styles.stopButton : ""}`}
+            type="button"
+            aria-label={streaming ? "Stop" : "Send message"}
+            aria-describedby={uploadsPending ? "attachmentSubmitStatus" : undefined}
+            title={!streaming && uploadsPending ? uploadWaitMessage : undefined}
+            id="submitBtn"
+            onClick={() => (streaming ? cancel() : handleSubmit())}
+            disabled={
+              !streaming && (uploadsPending || (!prompt.trim() && attachments.length === 0))
+            }
+          >
+            <CortexIcon
+              name={streaming ? "stop" : "composer-send"}
+              strokeWidth={streaming ? undefined : 2.2}
+            />
+          </button>
+        </div>
+        <span className={styles.screenReaderOnly} aria-live="polite" aria-atomic="true">
+          {optionsAnnouncement}
+        </span>
       </div>
     </div>
   );

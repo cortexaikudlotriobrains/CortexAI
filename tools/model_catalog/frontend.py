@@ -47,11 +47,17 @@ def _fallback_rows(registry: dict[str, Any], keys: list[str]) -> list[dict[str, 
         for model in block.get("models") or []
     }
     rows = []
-    for key in keys:
+    selectable = {
+        f"{candidate.provider}:{candidate.model_name}": candidate
+        for candidate in runtime.list_selectable_models()
+    }
+    # Defaults determine the initial choices, never the complete menu inventory.
+    # Keep their ordering, then include every current selectable registry model.
+    for key in dict.fromkeys([*keys, *sorted(selectable)]):
         provider, _, name = key.partition(":")
-        candidate = runtime.find_model(provider, name)
+        candidate = selectable.get(key)
         if candidate is None:
-            raise ValueError(f"Default model {key} is not in the registry")
+            raise ValueError(f"Default model {key} is not selectable in the registry")
         row = _model_to_dto(candidate).model_dump(exclude_none=True)
         for field in _TIME_DEPENDENT:
             row.pop(field, None)
@@ -81,7 +87,7 @@ def render_frontend_defaults(registry: dict[str, Any]) -> str:
         f"{json.dumps(ask, indent=2)};\n\n"
         f"export const DEFAULT_COMPARE_MODEL_KEYS = {json.dumps(compare)} as const;\n\n"
         f"export const DEFAULT_ADDED_COMPARE_MODEL_KEY = {json.dumps(added)};\n\n"
-        "/** Offline rows for the default models, used when /v1/model-options is unavailable. */\n"
+        "/** Complete selectable registry, used while /v1/model-options loads or is unavailable. */\n"
         f"export const FALLBACK_MODELS: ModelCatalogItem[] = {json.dumps(rows, indent=2)};\n"
     )
 

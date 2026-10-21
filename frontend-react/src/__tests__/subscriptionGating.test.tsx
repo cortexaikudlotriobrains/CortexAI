@@ -61,15 +61,18 @@ describe("subscription feature gating", () => {
       </>,
     );
 
-    expect(screen.getAllByText("Free")[0]!.closest("[data-plan-badge]"))
-      .toHaveAttribute("data-plan-badge", "current");
+    expect(screen.getAllByText("Free")[0]!.closest("[data-plan-badge]")).toHaveAttribute(
+      "data-plan-badge",
+      "current",
+    );
     expect(screen.getByRole("alert", { name: "Subscription status" })).toHaveTextContent(
       "Update your payment method",
     );
     expect(screen.getByRole("heading", { name: "Plan allowances" })).toBeInTheDocument();
-    expect(
-      screen.getByRole("progressbar", { name: "AI credits: 90 left of 100" }),
-    ).toHaveAttribute("aria-valuenow", "10");
+    expect(screen.getByRole("progressbar", { name: "AI credits: 90 left of 100" })).toHaveAttribute(
+      "aria-valuenow",
+      "10",
+    );
 
     await user.click(screen.getByRole("button", { name: "Manage billing" }));
     expect(manage).toHaveBeenCalledTimes(1);
@@ -127,9 +130,7 @@ describe("subscription feature gating", () => {
       />,
     );
 
-    await user.click(
-      screen.getByRole("button", { name: /Model: ChatGPT \(standard-model\)/ }),
-    );
+    await user.click(screen.getByRole("button", { name: /Model: ChatGPT \(standard-model\)/ }));
     await user.click(
       within(screen.getByRole("listbox")).getByRole("option", {
         name: /ChatGPT, 2 models/,
@@ -167,8 +168,8 @@ describe("subscription feature gating", () => {
       />,
     );
 
-    const cta = screen.getByRole("button", { name: "Unlock third comparison model" });
-    expect(cta).toHaveTextContent("Add third model");
+    await user.click(screen.getByRole("button", { name: "Models to compare" }));
+    const cta = screen.getByRole("option", { name: /deepseek-v4-flash/ });
     expect(cta).toHaveTextContent("Pro");
     await user.click(cta);
     expect(onTargetLimit).toHaveBeenCalledTimes(1);
@@ -177,18 +178,8 @@ describe("subscription feature gating", () => {
 
   it.each([
     ["free", "Free", ["economical", "standard"], "openai:gpt-5.6-luna"],
-    [
-      "plus",
-      "Plus",
-      ["economical", "standard", "advanced"],
-      "claude:claude-sonnet-4-6",
-    ],
-    [
-      "pro",
-      "Pro",
-      ["economical", "standard", "advanced", "premium"],
-      "openai:gpt-5.6-terra",
-    ],
+    ["plus", "Plus", ["economical", "standard", "advanced"], "claude:claude-sonnet-4-6"],
+    ["pro", "Pro", ["economical", "standard", "advanced", "premium"], "openai:gpt-5.6-terra"],
   ] as Array<[SubscriptionPlanCode, string, ModelBillingClass[], string]>)(
     "shows the %s plan default when Smart routing is turned off",
     async (planCode, displayName, allowedBillingClasses, expectedKey) => {
@@ -216,18 +207,14 @@ describe("subscription feature gating", () => {
       await waitFor(() => {
         expect(useChatStore.getState().selectedModelKey).toBe(expectedKey);
       });
-      await user.click(screen.getByRole("switch", { name: "Smart routing" }));
-
-      expect(screen.getByRole("switch", { name: "Smart routing" })).toHaveAttribute(
-        "aria-checked",
-        "false",
-      );
-      expect(document.querySelector<HTMLSelectElement>("#singleModel")).toHaveValue(
-        expectedKey,
-      );
-      expect(document.querySelectorAll("#singleModel option")).toHaveLength(
-        DEFAULT_MODELS.length,
-      );
+      await user.click(screen.getByRole("button", { name: "Model: Smart" }));
+      await user.click(screen.getByRole("button", { name: "All models" }));
+      const model = DEFAULT_MODELS.find(
+        (item) => `${item.provider}:${item.model}` === expectedKey,
+      )!;
+      await user.click(screen.getByRole("option", { name: new RegExp(model.model) }));
+      expect(useChatStore.getState().smartMode).toBe(false);
+      expect(useChatStore.getState().selectedModelKey).toBe(expectedKey);
     },
   );
 
@@ -260,14 +247,12 @@ describe("subscription feature gating", () => {
         "",
       ]);
     });
-    expect(document.querySelectorAll("#compareModel1 option")).toHaveLength(
-      DEFAULT_MODELS.length,
+    await userEvent.click(screen.getByRole("button", { name: "Models to compare" }));
+    expect(screen.getAllByRole("option")).toHaveLength(DEFAULT_MODELS.length);
+    expect(screen.getByRole("option", { name: /claude-sonnet-5 / })).toHaveAttribute(
+      "data-locked",
+      "true",
     );
-    expect(
-      document.querySelector<HTMLOptionElement>(
-        '#compareModel1 option[value="claude:claude-sonnet-5"]',
-      ),
-    ).toBeDisabled();
   });
 
   it("skips a premium fallback for Plus without removing it from the offering", async () => {
@@ -277,11 +262,7 @@ describe("subscription feature gating", () => {
     )!;
     const models = [DEFAULT_MODELS[0]!, premium, economicalFallback];
     const entitlements = entitlementFixture({ code: "plus", display_name: "Plus" });
-    entitlements.model_access.allowed_billing_classes = [
-      "economical",
-      "standard",
-      "advanced",
-    ];
+    entitlements.model_access.allowed_billing_classes = ["economical", "standard", "advanced"];
     useChatStore.setState({
       mode: "compare",
       compareModelKeys: ["", "", ""],
@@ -301,12 +282,12 @@ describe("subscription feature gating", () => {
         "",
       ]);
     });
-    expect(document.querySelectorAll("#compareModel1 option")).toHaveLength(models.length);
-    expect(
-      document.querySelector<HTMLOptionElement>(
-        '#compareModel1 option[value="openai:premium-fallback"]',
-      ),
-    ).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Models to compare" }));
+    expect(screen.getAllByRole("option")).toHaveLength(models.length);
+    expect(screen.getByRole("option", { name: /premium-fallback/ })).toHaveAttribute(
+      "data-locked",
+      "true",
+    );
   });
 
   it("blocks an automatic Ask request when credits are exhausted without clearing the draft", async () => {
@@ -330,9 +311,7 @@ describe("subscription feature gating", () => {
     expect(screen.queryByRole("switch", { name: "Research mode" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
-    expect(useChatStore.getState().subscriptionError?.code).toBe(
-      "insufficient_credits",
-    );
+    expect(useChatStore.getState().subscriptionError?.code).toBe("insufficient_credits");
     expect(useChatStore.getState().prompt).toBe("Keep this draft");
   });
 
@@ -349,18 +328,11 @@ describe("subscription feature gating", () => {
     ];
     useChatStore.setState({
       mode: "compare",
-      compareModelKeys: [
-        "openai:gpt-5.1",
-        "claude:claude-sonnet-4-5",
-        "openai:premium-model",
-      ],
+      compareModelKeys: ["openai:gpt-5.1", "claude:claude-sonnet-4-5", "openai:premium-model"],
     });
 
     render(
-      <PromptComposer
-        models={models}
-        subscription={{ plans: plansFixture(), entitlements }}
-      />,
+      <PromptComposer models={models} subscription={{ plans: plansFixture(), entitlements }} />,
     );
 
     expect(screen.queryByLabelText("Estimated credit usage warning")).not.toBeInTheDocument();
@@ -381,9 +353,7 @@ describe("subscription feature gating", () => {
     });
 
     await waitFor(() => {
-      expect(useChatStore.getState().subscriptionError?.details.feature).toBe(
-        "attachment_size",
-      );
+      expect(useChatStore.getState().subscriptionError?.details.feature).toBe("attachment_size");
     });
     expect(uploadFiles).not.toHaveBeenCalled();
     expect(useChatStore.getState().attachments).toEqual([]);
@@ -403,9 +373,7 @@ describe("subscription feature gating", () => {
     });
 
     await waitFor(() => {
-      expect(useChatStore.getState().subscriptionError?.details.feature).toBe(
-        "attachment_count",
-      );
+      expect(useChatStore.getState().subscriptionError?.details.feature).toBe("attachment_count");
     });
     expect(uploadFiles).not.toHaveBeenCalled();
     expect(screen.queryByText("one.txt")).not.toBeInTheDocument();
@@ -424,9 +392,7 @@ describe("subscription feature gating", () => {
     });
 
     await waitFor(() => {
-      expect(useChatStore.getState().subscriptionError?.details.feature).toBe(
-        "file_analysis",
-      );
+      expect(useChatStore.getState().subscriptionError?.details.feature).toBe("file_analysis");
     });
     expect(uploadFiles).not.toHaveBeenCalled();
     expect(screen.queryByText("notes.txt")).not.toBeInTheDocument();
@@ -518,8 +484,9 @@ describe("subscription feature gating", () => {
       );
 
       expect(screen.getAllByRole("progressbar")).toHaveLength(1);
-      expect(screen.getByRole("dialog", { name: "Three-model Compare requires Pro" }))
-        .toBeVisible();
+      expect(
+        screen.getByRole("dialog", { name: "Three-model Compare requires Pro" }),
+      ).toBeVisible();
       expect(screen.getByRole("button", { name: "View Pro" })).toBeVisible();
     } finally {
       Object.defineProperty(window, "innerWidth", {

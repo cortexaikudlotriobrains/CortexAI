@@ -18,16 +18,13 @@ for (const expectation of [
         state.subscriptionPlan = expectation.planCode;
         await reload();
 
-        const smartSwitch = page.getByRole("switch", { name: "Smart routing" });
-        await expect(smartSwitch).toHaveAttribute("aria-checked", "true");
-        await smartSwitch.click();
-
-        await expect(smartSwitch).toHaveAttribute("aria-checked", "false");
-        await expect(page.locator("#singleModel")).toHaveValue(expectation.expectedKey);
-        await expect(page.locator("#singleModel option")).toHaveCount(state.models.length);
-        await expect(
-            page.locator(`#singleModel option[value="${expectation.expectedKey}"]`),
-        ).toBeEnabled();
+        const smart = page.getByRole("button", { name: "Model: Smart" });
+        await smart.click(); await page.getByRole("button", { name: "All models", exact: true }).click();
+        await expect(page.getByRole("option")).toHaveCount(state.models.length);
+        const selected = page.locator(`[data-model-key="${expectation.expectedKey}"]`);
+        await expect(selected).not.toHaveAttribute("data-locked", "true"); await selected.click();
+        await expect(page.locator("#promptInput")).toBeFocused();
+        await expect(page.getByRole("button", { name: /^Model:/ })).not.toHaveAccessibleName("Model: Smart");
     });
 }
 
