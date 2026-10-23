@@ -125,7 +125,10 @@ the PKCE verifier with the code exchange, requires the ID token `nonce` to match
 `email_verified=true`, then sets the session cookie and redirects to the validated `next` path
 with `fresh_login=1`. Every failure redirects to `/login?error=<reason>` with one of
 `google_cancelled`, `google_failed`, `session_expired`, `email_not_verified`,
-`account_exists`, `account_disabled`.
+`account_exists`, `account_disabled`. Only Cognito's `error=access_denied` (the user backed
+out) maps to `google_cancelled`; any other provider error (for example `invalid_scope`,
+`unauthorized_client`, `invalid_request`) is a configuration problem, shown as `google_failed`
+and logged as `auth.oauth.provider_error` with Cognito's `error` and `error_description`.
 
 ### `POST /v1/auth/logout` → `200 {"ok": true, "cognito_logout_url": string | null}`
 
@@ -210,6 +213,32 @@ Signs out every other device and keeps the current session.
    (other devices are signed out).
 
 Rollback: deploy the previous build; the extra table is harmless. Users sign in again.
+
+## Troubleshooting
+
+- **`502 auth_unavailable` on password login**: search the log for `auth.cognito.error`
+  (`aws_error_code`), `auth.cognito.unavailable` (`error_type`) or `auth.cognito.misconfigured`.
+  `InvalidParameterException` usually means `ALLOW_USER_PASSWORD_AUTH` is off on the app client;
+  `auth.cognito.misconfigured` with `reason=client_secret` means the app client has a secret and
+  `COGNITO_CLIENT_SECRET` is missing or wrong; `ResourceNotFoundException` means a wrong client id,
+  pool or region.
+- **Password accepted by Cognito but sign-in still fails**: `auth.login.failed` with
+  `code=token_invalid` (and `auth.cognito.token_invalid` with the reason) means the ID token failed
+  verification (pool/client/region mismatch, clock skew, JWKS unreachable); `email_unverified`
+  means the Cognito user's `email_verified` attribute is false (verify it in the Cognito console);
+  `email_mismatch` means the account's email differs from what was typed.
+- **Google token exchange**: `auth.oauth.token_exchange_failed` shows Cognito's status and error
+  (`invalid_grant`, `invalid_client`, ...).
+- **Sign-up fails**: `auth.cognito.misconfigured` with `reason=self_signup_disabled` means the
+  pool only allows admin-created users; enable self-registration (Cognito → Sign-up → Self-service
+  sign-up). The page shows "Creating an account isn't available right now."
+- **"Incorrect email or password" for a known account**: the email may belong to a Google-only
+  user (federated users have no Cognito password; use Continue with Google), or the account was
+  created under a different username in the pool. Cognito lockouts show as `rate_limited` and
+  disabled users as `account_disabled`.
+- **"We couldn't sign you in with Google"**: read `auth.oauth.provider_error` (`error`,
+  `error_description`); typical causes are a missing `profile` scope (`invalid_scope`) or the
+  authorization code grant / Google provider not enabled on the app client (`unauthorized_client`).
 
 ## Known limitations / follow-ups
 

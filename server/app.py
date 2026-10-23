@@ -640,8 +640,11 @@ def create_app() -> FastAPI:
         code: str | None = None,
         state: str | None = None,
         error: str | None = None,
+        error_description: str | None = None,
     ):
-        return await auth_routes.handle_oauth_callback(request, response, code, state, error)
+        return await auth_routes.handle_oauth_callback(
+            request, response, code, state, error, error_description
+        )
 
     app.include_router(auth_routes.router)
     app.include_router(chat.router)

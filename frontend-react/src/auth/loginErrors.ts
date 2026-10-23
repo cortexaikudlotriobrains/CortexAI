@@ -3,6 +3,7 @@ import { ApiClientError } from "../api/client";
 export type LoginErrorCode =
   | "invalid_credentials"
   | "email_not_verified"
+  | "email_unverified"
   | "password_reset_required"
   | "challenge_unsupported"
   | "weak_password"
@@ -14,12 +15,15 @@ export type LoginErrorCode =
   | "account_exists_other_method"
   | "account_disabled"
   | "auth_method_disabled"
+  | "signup_unavailable"
   | "origin_not_allowed"
   | "auth_unavailable";
 
 const COPY: Record<LoginErrorCode, string> = {
   invalid_credentials: "Incorrect email or password.",
   email_not_verified: "Verify your email address to continue.",
+  email_unverified:
+    "This account's email address isn't verified yet. Contact support, or continue with Google if you use it.",
   password_reset_required: "For your security, reset your password to continue.",
   challenge_unsupported: "This account needs extra steps. Reset your password to continue.",
   weak_password: "Choose a stronger password that meets the requirements below.",
@@ -33,6 +37,8 @@ const COPY: Record<LoginErrorCode, string> = {
     "An account with this email already exists. Sign in the way you did before, for example with Google.",
   account_disabled: "This account isn't available. Contact support if you think this is a mistake.",
   auth_method_disabled: "This sign-in method isn't available right now.",
+  signup_unavailable:
+    "Creating an account isn't available right now. Try Continue with Google, or contact support.",
   origin_not_allowed: "This request couldn't be completed. Reload the page and try again.",
   auth_unavailable: "Sign-in is temporarily unavailable. Please try again shortly.",
 };
